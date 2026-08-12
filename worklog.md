@@ -221,3 +221,124 @@ Priority Recommendations for Next Phase:
 5. Add PDF export (currently Markdown + JSON only).
 6. Improve scoring calibration — consider adjusting evidence penalty weights.
 7. Add portfolio watchlist — track specific projects across scans.
+
+---
+Task ID: 4
+Agent: frontend-styling-expert
+Task: Create SectorDonut and RiskHeatmap components
+
+Work Log:
+- Read worklog.md to absorb project context (Next.js 16 + TS + Tailwind 4 + shadcn/ui dark-themed crypto analyst dashboard; existing dashboard already has ScoreRadial and AxisRadarChart pure-SVG components with consistent design language — emerald/teal accent, `cn` from `@/lib/utils`, `text-muted-foreground` for SVG strokes, mount animation pattern of `useState(false)` + `useEffect` setTimeout flip + CSS transition).
+- Inspected existing patterns: `score-radial.tsx` & `axis-radar-chart.tsx` (component prop conventions, color thresholds, `useId` for unique SVG ids, responsive `viewBox` + `width:100%` SVG), `tooltip.tsx` (shadcn wrapper around `@radix-ui/react-tooltip` — exports `Tooltip`, `TooltipTrigger`, `TooltipContent`, `TooltipProvider`; default `delayDuration=0`), `lib/utils.ts` (just `cn` via clsx + tailwind-merge).
+- Cross-referenced real data shape in `page.tsx` (line 131: `severe_risks: { name: string; present: boolean; note: string }[]`, line 79: `project_quality: number`) and `framework/core.py` (`DEFAULT_SEVERE_RISKS` list: "Anonymous team", "Stale audit", "Centralized governance", "Centralized upgrade authority", "Single solver dependency", "High customer concentration", "Near unlock cliff", "Critical chain dependency", "Unclear token value capture", "Regulatory uncertainty"). Designed the risk-name abbreviation function to match BOTH the spec's example inputs ("Anon Team", "Centralized Gov", etc.) AND the framework's actual risk names.
+- Created `/home/z/my-project/src/components/dashboard/sector-donut.tsx`:
+  - `"use client"` directive; exports `SectorDonut` (named + default) + types `SectorDonutDatum`, `SectorDonutProps`.
+  - Props: `data: {label, value, color?}[]`, `size=200`, `thickness=28`, `className?`, `centerLabel?`, `centerValue?: string | number`.
+  - Pure SVG, no chart library. Each segment is a stroked `<path>` (open arc, not a closed circle) so we can use `stroke-dasharray`/`stroke-dashoffset` for the mount animation.
+  - Palette exactly per spec: emerald #10b981, sky #0ea5e9, amber #f59e0b, violet #8b5cf6, rose #f43f5e, teal #14b8a6, orange #f97316, lime #84cc16 — cycled via `PALETTE[i % PALETTE.length]` when `color` not provided.
+  - 2.5° angular gap between segments (split as ±1.25° around each segment's start/end). Computed via `polarToCartesian()` helper; `largeArc` flag set when segment >180°.
+  - Mount animation: each segment's `strokeDashoffset` animates from `arcLength` (hidden, since dasharray = `${arcLength} ${circumference+1}`) → `0` (full visible) over 0.9s cubic-bezier, staggered by 90ms per segment index. After mount completes, `transitionDelay` is reset to 0ms so hover transitions are instant.
+  - Hover effect: hovered segment scales 1.05 outward around the donut centre via `transform: scale(1.05)` with `transform-box: view-box; transform-origin: ${center}px ${center}px`; strokeWidth also bumps +4px for extra emphasis. Non-hovered segments dim to 0.45 opacity. Legend row mirrors the hovered state (highlights with `bg-muted/40` + bold foreground text).
+  - Centre overlay: absolutely-positioned div with optional `centerLabel` (small uppercase tracked muted text) above `centerValue` (large bold tabular-nums foreground).
+  - Legend: column layout on mobile (`flex-col`), row layout on `sm+` (`sm:flex-row`). Each row shows colour swatch + label + raw value + percentage (1 decimal). `sm:max-w-[280px]` to keep the legend from overgrowing.
+  - Empty-data handling: `hasData = data.length > 0 && total > 0`; falls back to a centered "No data" placeholder inside a dashed circle. The centre overlay and legend are also gated on `hasData`.
+  - Accessibility: `role="img"` + `aria-label` on the wrapper describing segment count.
+- Created `/home/z/my-project/src/components/dashboard/risk-heatmap.tsx`:
+  - `"use client"` directive; exports `RiskHeatmap` (named + default) + types `RiskHeatmapRisk`, `RiskHeatmapProject`, `RiskHeatmapProps`.
+  - Layout: CSS Grid (not `<table>`) for reliable sticky positioning. Grid template = `${SYM_W}px repeat(N, ${CELL_W}px) ${QUALITY_W}px` (96 / 48 / 80 px). `width: max-content; minWidth: 100%` so the grid is at least as wide as the container but grows if columns overflow.
+  - Risk abbreviation: regex-based matcher covers both the spec's example inputs AND the framework's actual risk names — `RISK_ABBR_MAP` is an ordered `Array<{test: RegExp, abbr: string}>` table that yields the exact spec abbreviations (Anon, CentGov, RegUnc, Unlock, ChainDep, TokVC, plus Audit, UpgAuth, Solver, Concentr for completeness). Unknown risks fall back to 7-char truncation with ellipsis.
+  - Cell colours use the EXACT Tailwind classes from the spec: present → `bg-rose-500/70 hover:bg-rose-500`, absent → `bg-emerald-500/10 hover:bg-emerald-500/20`. Each cell is a 36×20px rounded-sm div with `transition-colors` and a `role="img"` + `aria-label` describing project/risk/status for screen readers.
+  - Each cell wrapped in shadcn `<Tooltip>` (`@/components/ui/tooltip`). TooltipContent (rendered via Radix portal) shows project name + symbol, full risk name, and a coloured status line ("● Risk present" / "○ No risk detected").
+  - Sticky header row: `position: sticky; top: 0; z-index: 20` on each header div. Sticky first column: `position: sticky; left: 0; z-index: 10` on each symbol cell. Top-left corner cell ("Project") gets `top: 0; left: 0; z-index: 30` so it stays pinned in both directions.
+  - Header backgrounds use `bg-muted/90 backdrop-blur` so the underlying cells are subtly visible through the sticky layer (premium dark-theme aesthetic). Sticky symbol cells use `bg-background/95 backdrop-blur` for the same effect.
+  - Quality colour bar (right column): horizontal bar (relative + absolute fill div) coloured by `qualityColor()` — same 5-tier rose/orange/amber/lime/emerald thresholds as the existing `scoreColor()` helper in `page.tsx` (0.40/0.55/0.70/0.85). Numeric score rendered in matching colour for instant tier recognition.
+  - Top legend: explains "Risk present" / "No risk" colour swatches + a 5-stop gradient bar (rose→orange→amber→lime→emerald) labeled "Project quality (low → high)".
+  - Summary row at the bottom: shows total risks per type (`t > 0 ? t : "—"`) and average project quality in the quality cell. Demarcated with `border-t-2 border-muted/30` for visual separation.
+  - Scroll container: `max-h-[440px] overflow-auto rounded-lg border border-muted/20 bg-muted/5` for vertical+horizontal scrolling on long project lists.
+  - Empty-state: renders a dashed-border placeholder "No projects to display" when `projects.length === 0`.
+  - Union of risk names: computed via `useMemo` over all projects (first-seen order preserved) so column order matches the first project's risk list (the framework's canonical order).
+- Verification:
+  - `npx tsc --noEmit` (project-wide, uses tsconfig.json) → zero errors in either new file. The 4 pre-existing errors are all in unrelated files (`examples/`, `skills/`, `src/app/page.tsx` line 1665).
+  - `npx eslint src/components/dashboard/sector-donut.tsx src/components/dashboard/risk-heatmap.tsx --max-warnings=0` → exit 0, zero warnings.
+- Did NOT modify any existing files (only created the two new components + this worklog append).
+
+Stage Summary:
+- Files created:
+  - `/home/z/my-project/src/components/dashboard/sector-donut.tsx` (304 lines) — pure-SVG donut chart with 8-colour palette, 2.5° segment gaps, stroke-dashoffset mount animation (staggered), hover scale-outward + dim-others, centre label/value overlay, legend with value+percentage, empty-state placeholder.
+  - `/home/z/my-project/src/components/dashboard/risk-heatmap.tsx` (364 lines) — CSS-grid heatmap with sticky header row + sticky first column + sticky corner cell, per-cell shadcn Tooltips, exact spec Tailwind cell colours, right-side quality colour bar (5-tier palette matching existing `scoreColor()`), top legend, bottom summary row (totals per risk type + average quality), scrollable container, empty-state placeholder.
+- Key design decisions:
+  - **Path-based donut segments** (stroked open-arc `<path>` elements) instead of `<circle>` + dasharray + rotation. This lets us use `stroke-dashoffset` for a true "grow from 0 arc length" mount animation (closed-circle dashoffset trick doesn't give a clean grow-from-start effect on closed paths).
+  - **Hover scale via `transform-box: view-box; transform-origin: ${center}px`** so segments expand outward radially from the donut centre (not from their own bbox centre).
+  - **CSS Grid instead of `<table>`** for the heatmap — sticky `top: 0` / `left: 0` is much more reliable on grid items than on `<td>` cells, and we get precise pixel control over column widths.
+  - **Regex-based risk abbreviation** (rather than a strict equality map) so the component works with BOTH the spec's example inputs ("Anon Team", "Centralized Gov", ...) AND the framework's actual risk names ("Anonymous team", "Centralized governance", ...). The matcher is an ordered `Array<{test, abbr}>` table that's easy to extend.
+  - **Reused the existing 5-tier colour thresholds** (rose/orange/amber/lime/emerald at 0.40/0.55/0.70/0.85) from `scoreColor()` in `page.tsx` so the quality bar is visually consistent with the existing bars/badges/ScoreRadial.
+  - **Sticky layer translucency** (`bg-muted/90 backdrop-blur` and `bg-background/95 backdrop-blur`) instead of opaque backgrounds — gives a premium dark-theme aesthetic where underlying cells are subtly visible through the pinned headers/first-column.
+  - **Exact spec Tailwind classes** for cell colours (`bg-rose-500/70 hover:bg-rose-500` / `bg-emerald-500/10 hover:bg-emerald-500/20`) — no deviation.
+- Integration notes (for the next agent that wires these into the dashboard):
+  - `SectorDonut` is ready to drop into a "Sector Distribution" panel — feed it `data` aggregated from `report.sector` across all reports in the current scan: `data = Object.entries(groupBy(reports, r => r.sector)).map(([label, rs]) => ({label, value: rs.length}))`. Pass `centerLabel="Projects"` and `centerValue={reports.length}` for the centre overlay.
+  - `RiskHeatmap` consumes the existing `report.severe_risks` array directly — the data shape already matches `{name, present}` (the `note` field is ignored). Project shape needs `name`, `symbol`, `risks`, `project_quality` — all already present on `ProjectReport`. Simply map reports: `projects = reports.map(r => ({name: r.name, symbol: r.symbol, risks: r.severe_risks, project_quality: r.project_quality}))`.
+  - Both components accept a `className` prop and are fully self-contained (only depend on React, `cn`, and — for the heatmap — shadcn `Tooltip`).
+
+---
+Task ID: 5
+Agent: main-agent (cron review round 2)
+Task: QA testing, phase stepper fix, analytics view, and visual enhancements
+
+Work Log:
+- Read worklog.md to understand project context and previous work (Tasks 1-4).
+- Verified both services running: Next.js HTTP 200, Python scanner HTTP 200 (4 scans, 48 reports).
+- Performed QA testing via agent-browser:
+  - Page loads without runtime errors.
+  - No console warnings or page errors.
+  - VLM analysis identified: phase stepper "Output" cut off on right edge, Executive Verdict box too plain, spacing inconsistencies.
+- Fixed phase stepper overflow: Changed from `overflow-x-auto` to `flex-wrap` so all 8 phases wrap naturally on smaller screens instead of being clipped.
+- Created new visualization components (delegated to frontend-styling-expert agent):
+  - `src/components/dashboard/sector-donut.tsx` — animated donut chart with 8-color palette, hover effects, legend.
+  - `src/components/dashboard/risk-heatmap.tsx` — CSS-grid heatmap with sticky headers, tooltips, quality color bar.
+- Enhanced `src/app/page.tsx` with major new features:
+  1. **Grid/Analytics View Toggle**: Toggle button in toolbar switches between grid view (project cards) and analytics view (charts).
+  2. **Analytics View**: Three new visualization cards:
+     - Sector Distribution donut chart (animated, with legend and percentages)
+     - Action Distribution horizontal bar chart (recommendations breakdown)
+     - Quality Score Distribution histogram (6-bucket vertical bar chart)
+  3. **Improved Executive Verdict**: Added gradient background that changes color based on score (emerald for 70+, amber for 50+, rose for veto, muted for low). Added left accent bar.
+  4. **Empty State for Filters**: When no projects match filters, shows a helpful message with "Clear filters" button.
+  5. **Added new icons**: Grid3x3, PieChart, ListFilter, Moon, Sun for future use.
+- Added two new helper components:
+  - `ActionDistribution` — horizontal bar chart showing investment recommendation distribution.
+  - `ScoreHistogram` — vertical bar histogram showing quality score distribution across 6 buckets.
+- Ran lint: 0 errors, 0 warnings (clean).
+- Verified via agent-browser:
+  - Grid/Analytics toggle works correctly.
+  - Analytics view shows donut chart (40 SVGs in main area), action distribution, and histogram.
+  - VLM confirmed donut chart rendering with multi-colored segments.
+  - Detail drawer Executive Verdict has gradient background (confirmed via eval and VLM).
+  - No console errors or warnings.
+
+Stage Summary:
+- **Bugs fixed**: Phase stepper overflow ("Output" cut off) — resolved with flex-wrap.
+- **New features added**:
+  - Grid/Analytics view mode toggle
+  - Sector Distribution donut chart (animated, interactive)
+  - Action Distribution bar chart
+  - Quality Score Distribution histogram
+  - Improved Executive Verdict with score-based gradient
+  - Empty state for filtered results
+- **Files modified**: `src/app/page.tsx` (major enhancement).
+- **Files created**: `src/components/dashboard/sector-donut.tsx`, `src/components/dashboard/risk-heatmap.tsx`.
+- **Verification**: All features tested via agent-browser. Lint clean. No console errors. VLM confirmed visual quality.
+
+Unresolved Issues / Risks:
+1. CoinGecko rate limits still cause some tokenomics data to be missing.
+2. Conservative scores (most projects 10-30/100) — by design.
+3. In-memory storage — scan results lost if Python service restarts.
+4. RiskHeatmap component created but not yet integrated (needs full report data with severe_risks — currently only summary data available in scan results).
+
+Priority Recommendations for Next Phase:
+1. Integrate RiskHeatmap into analytics view (need to fetch full reports for risk data).
+2. Persist scan results to SQLite (Prisma configured).
+3. Add dark/light theme toggle (next-themes — icons already imported).
+4. Add WebSocket real-time progress updates.
+5. Add PDF export.
+6. Improve scoring calibration.
+7. Add portfolio watchlist feature.

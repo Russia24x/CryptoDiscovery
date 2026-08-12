@@ -17,12 +17,17 @@ import {
   FlaskConical,
   Gauge,
   GitCompare,
+  Grid3x3,
   Layers,
+  ListFilter,
   Loader2,
+  Moon,
+  PieChart,
   Radar,
   ShieldAlert,
   ShieldCheck,
   Sparkles,
+  Sun,
   Target,
   TrendingDown,
   TrendingUp,
@@ -58,6 +63,8 @@ import {
 } from "@/components/ui/sheet";
 import { ScoreRadial } from "@/components/dashboard/score-radial";
 import { AxisRadarChart } from "@/components/dashboard/axis-radar-chart";
+import { SectorDonut } from "@/components/dashboard/sector-donut";
+import { RiskHeatmap } from "@/components/dashboard/risk-heatmap";
 import {
   Tooltip,
   TooltipContent,
@@ -294,6 +301,8 @@ export default function Home() {
   const [compareIds, setCompareIds] = useState<Set<string>>(new Set());
   const [compareReports, setCompareReports] = useState<FullReport[]>([]);
   const [compareLoading, setCompareLoading] = useState(false);
+  // view mode: grid or analytics
+  const [viewMode, setViewMode] = useState<"grid" | "analytics">("grid");
   const pollRef = useRef<NodeJS.Timeout | null>(null);
 
   // load scan list on mount
@@ -495,6 +504,29 @@ export default function Home() {
       else set.add("Ignore");
     });
     return Array.from(set).sort();
+  }, [activeScan?.reports]);
+
+  // --- sector distribution data for donut chart ---
+  const sectorDonutData = useMemo(() => {
+    if (!activeScan?.reports) return [];
+    const counts: Record<string, number> = {};
+    activeScan.reports.forEach((r) => {
+      counts[r.sector] = (counts[r.sector] ?? 0) + 1;
+    });
+    return Object.entries(counts)
+      .map(([label, value]) => ({ label, value }))
+      .sort((a, b) => b.value - a.value);
+  }, [activeScan?.reports]);
+
+  // --- risk heatmap data ---
+  const riskHeatmapData = useMemo(() => {
+    if (!activeScan?.reports) return [];
+    return activeScan.reports.map((r) => ({
+      name: r.name,
+      symbol: r.symbol,
+      project_quality: r.project_quality,
+      risks: [], // will be populated when full report is loaded
+    }));
   }, [activeScan?.reports]);
 
   return (
@@ -766,6 +798,33 @@ export default function Home() {
                       </Badge>
                     </h2>
                     <div className="flex items-center gap-2">
+                      {/* View mode toggle */}
+                      <div className="flex items-center rounded-lg border border-border/50 bg-muted/20 p-0.5">
+                        <button
+                          onClick={() => setViewMode("grid")}
+                          className={cn(
+                            "flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[11px] font-medium transition-all",
+                            viewMode === "grid"
+                              ? "bg-emerald-500/15 text-emerald-400"
+                              : "text-muted-foreground hover:text-foreground",
+                          )}
+                        >
+                          <Grid3x3 className="h-3.5 w-3.5" />
+                          Grid
+                        </button>
+                        <button
+                          onClick={() => setViewMode("analytics")}
+                          className={cn(
+                            "flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[11px] font-medium transition-all",
+                            viewMode === "analytics"
+                              ? "bg-emerald-500/15 text-emerald-400"
+                              : "text-muted-foreground hover:text-foreground",
+                          )}
+                        >
+                          <PieChart className="h-3.5 w-3.5" />
+                          Analytics
+                        </button>
+                      </div>
                       {/* Compare mode toggle */}
                       <Button
                         variant={compareMode ? "default" : "outline"}
@@ -804,82 +863,169 @@ export default function Home() {
                       )}
                     </div>
                   </div>
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <div className="relative flex-1 min-w-[160px]">
-                      <Filter className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
-                      <Input
-                        placeholder="Search name, symbol, category..."
-                        value={searchQuery}
-                        onChange={(e) => setSearchQuery(e.target.value)}
-                        className="h-8 pl-8 text-xs"
-                      />
-                    </div>
-                    <Select value={sortBy} onValueChange={(v) => setSortBy(v as typeof sortBy)}>
-                      <SelectTrigger className="h-8 w-[140px] text-xs">
-                        <ArrowUpDown className="h-3.5 w-3.5 mr-1.5 text-muted-foreground" />
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="quality">Project Quality</SelectItem>
-                        <SelectItem value="token">Token Quality</SelectItem>
-                        <SelectItem value="confidence">Confidence</SelectItem>
-                        <SelectItem value="action">Action</SelectItem>
-                      </SelectContent>
-                    </Select>
-                    <Select value={actionFilter} onValueChange={setActionFilter}>
-                      <SelectTrigger className="h-8 w-[130px] text-xs">
-                        <SelectValue placeholder="Action" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="all">All Actions</SelectItem>
-                        {availableActions.map((a) => (
-                          <SelectItem key={a} value={a.toLowerCase()}>{a}</SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                    {availableSectors.length > 0 && (
-                      <Select value={sectorFilter} onValueChange={setSectorFilter}>
-                        <SelectTrigger className="h-8 w-[130px] text-xs">
-                          <SelectValue placeholder="Sector" />
+                  {viewMode === "grid" && (
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <div className="relative flex-1 min-w-[160px]">
+                        <Filter className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+                        <Input
+                          placeholder="Search name, symbol, category..."
+                          value={searchQuery}
+                          onChange={(e) => setSearchQuery(e.target.value)}
+                          className="h-8 pl-8 text-xs"
+                        />
+                      </div>
+                      <Select value={sortBy} onValueChange={(v) => setSortBy(v as typeof sortBy)}>
+                        <SelectTrigger className="h-8 w-[140px] text-xs">
+                          <ArrowUpDown className="h-3.5 w-3.5 mr-1.5 text-muted-foreground" />
+                          <SelectValue />
                         </SelectTrigger>
                         <SelectContent>
-                          <SelectItem value="all">All Sectors</SelectItem>
-                          {availableSectors.map((s) => (
-                            <SelectItem key={s} value={s}>{s}</SelectItem>
+                          <SelectItem value="quality">Project Quality</SelectItem>
+                          <SelectItem value="token">Token Quality</SelectItem>
+                          <SelectItem value="confidence">Confidence</SelectItem>
+                          <SelectItem value="action">Action</SelectItem>
+                        </SelectContent>
+                      </Select>
+                      <Select value={actionFilter} onValueChange={setActionFilter}>
+                        <SelectTrigger className="h-8 w-[130px] text-xs">
+                          <SelectValue placeholder="Action" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="all">All Actions</SelectItem>
+                          {availableActions.map((a) => (
+                            <SelectItem key={a} value={a.toLowerCase()}>{a}</SelectItem>
                           ))}
                         </SelectContent>
                       </Select>
-                    )}
-                    {(actionFilter !== "all" || sectorFilter !== "all" || searchQuery || sortBy !== "quality") && (
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => {
-                          setActionFilter("all");
-                          setSectorFilter("all");
-                          setSearchQuery("");
-                          setSortBy("quality");
-                        }}
-                        className="h-8 text-xs text-muted-foreground hover:text-foreground"
-                      >
-                        Reset
-                      </Button>
-                    )}
-                  </div>
+                      {availableSectors.length > 0 && (
+                        <Select value={sectorFilter} onValueChange={setSectorFilter}>
+                          <SelectTrigger className="h-8 w-[130px] text-xs">
+                            <SelectValue placeholder="Sector" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="all">All Sectors</SelectItem>
+                            {availableSectors.map((s) => (
+                              <SelectItem key={s} value={s}>{s}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      )}
+                      {(actionFilter !== "all" || sectorFilter !== "all" || searchQuery || sortBy !== "quality") && (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => {
+                            setActionFilter("all");
+                            setSectorFilter("all");
+                            setSearchQuery("");
+                            setSortBy("quality");
+                          }}
+                          className="h-8 text-xs text-muted-foreground hover:text-foreground"
+                        >
+                          Reset
+                        </Button>
+                      )}
+                    </div>
+                  )}
                 </div>
 
-                <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
-                  {filteredReports.map((r) => (
-                    <ProjectCard
-                      key={r.id}
-                      report={r}
-                      onSelect={() => loadReport(r.id)}
-                      compareMode={compareMode}
-                      compareSelected={compareIds.has(r.id)}
-                      onToggleCompare={() => toggleCompare(r.id)}
-                    />
+                {/* Grid view */}
+                {viewMode === "grid" && (
+                  <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
+                    {filteredReports.map((r) => (
+                      <ProjectCard
+                        key={r.id}
+                        report={r}
+                        onSelect={() => loadReport(r.id)}
+                        compareMode={compareMode}
+                        compareSelected={compareIds.has(r.id)}
+                        onToggleCompare={() => toggleCompare(r.id)}
+                      />
                     ))}
-                </div>
+                    {filteredReports.length === 0 && (
+                      <div className="col-span-full flex flex-col items-center justify-center py-12 text-center">
+                        <ListFilter className="h-8 w-8 text-muted-foreground/50 mb-2" />
+                        <p className="text-sm text-muted-foreground">No projects match your filters</p>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="mt-3 h-8 text-xs"
+                          onClick={() => {
+                            setActionFilter("all");
+                            setSectorFilter("all");
+                            setSearchQuery("");
+                            setSortBy("quality");
+                          }}
+                        >
+                          Clear filters
+                        </Button>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* Analytics view */}
+                {viewMode === "analytics" && (
+                  <div className="space-y-4">
+                    {/* Sector distribution + action distribution */}
+                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                      <Card className="border-border/50 bg-card/30 backdrop-blur-sm">
+                        <CardHeader className="pb-2">
+                          <CardTitle className="flex items-center gap-2 text-sm">
+                            <PieChart className="h-4 w-4 text-emerald-500" />
+                            Sector Distribution
+                          </CardTitle>
+                          <CardDescription className="text-xs">
+                            Projects by sector category
+                          </CardDescription>
+                        </CardHeader>
+                        <CardContent className="flex justify-center pt-2">
+                          {sectorDonutData.length > 0 ? (
+                            <SectorDonut
+                              data={sectorDonutData}
+                              centerLabel="Projects"
+                              centerValue={sectorDonutData.reduce((s, d) => s + d.value, 0)}
+                              size={200}
+                            />
+                          ) : (
+                            <p className="text-xs text-muted-foreground py-12">No sector data</p>
+                          )}
+                        </CardContent>
+                      </Card>
+
+                      <Card className="border-border/50 bg-card/30 backdrop-blur-sm">
+                        <CardHeader className="pb-2">
+                          <CardTitle className="flex items-center gap-2 text-sm">
+                            <Target className="h-4 w-4 text-emerald-500" />
+                            Action Distribution
+                          </CardTitle>
+                          <CardDescription className="text-xs">
+                            Investment recommendations breakdown
+                          </CardDescription>
+                        </CardHeader>
+                        <CardContent className="pt-2">
+                          <ActionDistribution reports={activeScan.reports} />
+                        </CardContent>
+                      </Card>
+                    </div>
+
+                    {/* Quality score distribution */}
+                    <Card className="border-border/50 bg-card/30 backdrop-blur-sm">
+                      <CardHeader className="pb-2">
+                        <CardTitle className="flex items-center gap-2 text-sm">
+                          <Gauge className="h-4 w-4 text-emerald-500" />
+                          Quality Score Distribution
+                        </CardTitle>
+                        <CardDescription className="text-xs">
+                          Histogram of project quality scores
+                        </CardDescription>
+                      </CardHeader>
+                      <CardContent className="pt-2">
+                        <ScoreHistogram reports={activeScan.reports} />
+                      </CardContent>
+                    </Card>
+                  </div>
+                )}
               </div>
             )}
           </section>
@@ -1072,7 +1218,7 @@ function ScanProgressCard({ scan }: { scan: ScanStatus }) {
         <Progress value={scan.progress_pct} className="h-2" />
 
         {/* Phase stepper */}
-        <div className="flex items-center gap-1 overflow-x-auto pb-1">
+        <div className="flex items-center gap-1 flex-wrap">
           {phases.map((p, i) => {
             const done = phaseIndex > i || scan.status === "completed";
             const current = phaseIndex === i && scan.status !== "completed";
@@ -1080,9 +1226,9 @@ function ScanProgressCard({ scan }: { scan: ScanStatus }) {
               <div key={p} className="flex items-center gap-1 flex-shrink-0">
                 <div
                   className={cn(
-                    "flex items-center gap-1.5 px-2 py-1 rounded-md text-[10px] font-medium border transition-colors",
+                    "flex items-center gap-1.5 px-2 py-1 rounded-md text-[10px] font-medium border transition-all",
                     done && "bg-emerald-500/10 text-emerald-400 border-emerald-500/30",
-                    current && "bg-sky-500/15 text-sky-400 border-sky-500/40",
+                    current && "bg-sky-500/15 text-sky-400 border-sky-500/40 shadow-sm shadow-sky-500/20",
                     !done && !current && "bg-muted/30 text-muted-foreground border-border/40",
                   )}
                 >
@@ -1095,7 +1241,9 @@ function ScanProgressCard({ scan }: { scan: ScanStatus }) {
                   )}
                   {p}
                 </div>
-                {i < phases.length - 1 && <ArrowRight className="h-3 w-3 text-muted-foreground/50" />}
+                {i < phases.length - 1 && (
+                  <ArrowRight className="h-3 w-3 text-muted-foreground/30 flex-shrink-0" />
+                )}
               </div>
             );
           })}
@@ -1325,9 +1473,21 @@ function ReportDetail({
         {/* Verdict */}
         <section>
           <SectionTitle icon={Sparkles} title="Executive Verdict" />
-          <p className="text-sm leading-relaxed text-foreground/90 bg-muted/20 rounded-lg p-3 border border-border/40">
-            {report.executive_verdict}
-          </p>
+          <div className={cn(
+            "relative rounded-lg p-4 border overflow-hidden",
+            report.veto.triggered
+              ? "bg-gradient-to-br from-rose-500/10 to-rose-600/5 border-rose-500/30"
+              : report.project_quality_score >= 70
+              ? "bg-gradient-to-br from-emerald-500/10 to-teal-600/5 border-emerald-500/30"
+              : report.project_quality_score >= 50
+              ? "bg-gradient-to-br from-amber-500/10 to-orange-600/5 border-amber-500/30"
+              : "bg-gradient-to-br from-muted/40 to-muted/10 border-border/40",
+          )}>
+            <div className="absolute top-0 left-0 w-1 h-full bg-gradient-to-b from-emerald-500/50 to-transparent" />
+            <p className="text-sm leading-relaxed text-foreground/90 pl-2">
+              {report.executive_verdict}
+            </p>
+          </div>
         </section>
 
         {/* 5 Fundamental Axes */}
@@ -1907,4 +2067,90 @@ function reportToMarkdown(r: FullReport): string {
   lines.push("*Generated by Crypto Discovery Framework v1.0 · Not personalized financial advice*");
 
   return lines.join("\n");
+}
+
+// --------------------------------------------------------------------------- //
+//  ActionDistribution — horizontal bar chart of action recommendations
+// --------------------------------------------------------------------------- //
+function ActionDistribution({ reports }: { reports: ScanSummaryItem[] }) {
+  const counts: Record<string, { count: number; cls: string }> = {};
+  reports.forEach((r) => {
+    const a = r.action.toLowerCase();
+    let key: string;
+    let cls: string;
+    if (a.includes("high conviction")) { key = "High Conviction"; cls = "bg-emerald-500"; }
+    else if (a.includes("core")) { key = "Core Candidate"; cls = "bg-lime-500"; }
+    else if (a.includes("small")) { key = "Small Position"; cls = "bg-amber-500"; }
+    else if (a.includes("research")) { key = "Deep Research"; cls = "bg-sky-500"; }
+    else if (a.includes("watch")) { key = "Watch"; cls = "bg-slate-400"; }
+    else { key = "Ignore"; cls = "bg-rose-500"; }
+    if (!counts[key]) counts[key] = { count: 0, cls };
+    counts[key].count++;
+  });
+
+  const entries = Object.entries(counts).sort((a, b) => b[1].count - a[1].count);
+  const max = Math.max(...entries.map(([, v]) => v.count), 1);
+  const total = reports.length;
+
+  if (entries.length === 0) {
+    return <p className="text-xs text-muted-foreground py-8 text-center">No data</p>;
+  }
+
+  return (
+    <div className="space-y-2.5">
+      {entries.map(([label, { count, cls }]) => (
+        <div key={label} className="space-y-1">
+          <div className="flex items-center justify-between text-[11px]">
+            <span className="font-medium">{label}</span>
+            <span className="text-muted-foreground font-mono">
+              {count} <span className="opacity-60">({((count / total) * 100).toFixed(0)}%)</span>
+            </span>
+          </div>
+          <div className="h-2.5 rounded-full bg-muted/30 overflow-hidden">
+            <div
+              className={cn("h-full rounded-full transition-all duration-700", cls)}
+              style={{ width: `${(count / max) * 100}%` }}
+            />
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// --------------------------------------------------------------------------- //
+//  ScoreHistogram — vertical bar histogram of quality scores
+// --------------------------------------------------------------------------- //
+function ScoreHistogram({ reports }: { reports: ScanSummaryItem[] }) {
+  const buckets = [
+    { label: "0-20", min: 0, max: 20, color: "bg-rose-500" },
+    { label: "20-40", min: 20, max: 40, color: "bg-orange-500" },
+    { label: "40-55", min: 40, max: 55, color: "bg-amber-500" },
+    { label: "55-70", min: 55, max: 70, color: "bg-lime-500" },
+    { label: "70-85", min: 70, max: 85, color: "bg-emerald-500" },
+    { label: "85-100", min: 85, max: 101, color: "bg-teal-500" },
+  ];
+
+  const counts = buckets.map((b) => ({
+    ...b,
+    count: reports.filter((r) => r.project_quality >= b.min && r.project_quality < b.max).length,
+  }));
+  const max = Math.max(...counts.map((c) => c.count), 1);
+
+  return (
+    <div className="flex items-end justify-between gap-2 h-40 px-2">
+      {counts.map((b) => (
+        <div key={b.label} className="flex-1 flex flex-col items-center gap-1.5 h-full justify-end">
+          <span className="text-xs font-mono font-semibold text-foreground">{b.count > 0 ? b.count : ""}</span>
+          <div className="w-full flex-1 flex items-end">
+            <div
+              className={cn("w-full rounded-t-md transition-all duration-700 min-h-[2px]", b.color)}
+              style={{ height: `${(b.count / max) * 100}%`, opacity: b.count > 0 ? 1 : 0.15 }}
+            />
+          </div>
+          <span className="text-[10px] text-muted-foreground font-mono">{b.label}</span>
+        </div>
+      ))}
+    </div>
+  );
 }
