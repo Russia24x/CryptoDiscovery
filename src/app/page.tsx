@@ -65,6 +65,7 @@ import { ScoreRadial } from "@/components/dashboard/score-radial";
 import { AxisRadarChart } from "@/components/dashboard/axis-radar-chart";
 import { SectorDonut } from "@/components/dashboard/sector-donut";
 import { RiskHeatmap } from "@/components/dashboard/risk-heatmap";
+import { ThemeToggle } from "@/components/theme-toggle";
 import {
   Tooltip,
   TooltipContent,
@@ -303,6 +304,9 @@ export default function Home() {
   const [compareLoading, setCompareLoading] = useState(false);
   // view mode: grid or analytics
   const [viewMode, setViewMode] = useState<"grid" | "analytics">("grid");
+  // risk heatmap data (full reports fetched on demand)
+  const [riskReports, setRiskReports] = useState<FullReport[]>([]);
+  const [riskLoading, setRiskLoading] = useState(false);
   const pollRef = useRef<NodeJS.Timeout | null>(null);
 
   // load scan list on mount
@@ -408,6 +412,31 @@ export default function Home() {
       setCompareLoading(false);
     }
   };
+
+  // fetch full reports for risk heatmap when entering analytics view
+  const fetchRiskReports = useCallback(async () => {
+    if (!activeScan?.reports || riskReports.length > 0) return;
+    setRiskLoading(true);
+    try {
+      const reports = await Promise.all(
+        activeScan.reports.map(async (r) => {
+          const resp = await fetch(`/api/scanner/project/${r.id}`);
+          return resp.ok ? ((await resp.json()) as FullReport) : null;
+        }),
+      );
+      setRiskReports(reports.filter(Boolean) as FullReport[]);
+    } catch {
+    } finally {
+      setRiskLoading(false);
+    }
+  }, [activeScan?.reports, riskReports.length]);
+
+  // auto-fetch when switching to analytics view
+  useEffect(() => {
+    if (viewMode === "analytics" && activeScan?.reports?.length) {
+      fetchRiskReports();
+    }
+  }, [viewMode, activeScan?.reports, fetchRiskReports]);
 
   const exportReport = (report: FullReport, format: "json" | "markdown") => {
     let content: string;
@@ -557,6 +586,7 @@ export default function Home() {
                 <Activity className="h-3 w-3 text-emerald-500" />
                 {scans.length} scans
               </Badge>
+              <ThemeToggle />
             </div>
           </div>
         </div>
@@ -692,7 +722,7 @@ export default function Home() {
                 </CardTitle>
               </CardHeader>
               <CardContent className="p-0">
-                <ScrollArea className="h-[260px] px-6 pb-4">
+                <ScrollArea className="h-[300px] px-6 pb-4">
                   {scans.length === 0 ? (
                     <p className="text-xs text-muted-foreground py-4">No scans yet. Run one to see results.</p>
                   ) : (
@@ -931,17 +961,56 @@ export default function Home() {
 
                 {/* Grid view */}
                 {viewMode === "grid" && (
-                  <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
-                    {filteredReports.map((r) => (
-                      <ProjectCard
-                        key={r.id}
-                        report={r}
-                        onSelect={() => loadReport(r.id)}
-                        compareMode={compareMode}
-                        compareSelected={compareIds.has(r.id)}
-                        onToggleCompare={() => toggleCompare(r.id)}
-                      />
-                    ))}
+                  <>
+                    {/* Top Performers banner (only when no filters active) */}
+                    {filteredReports.length > 0 && !searchQuery && actionFilter === "all" && sectorFilter === "all" && (
+                      <div className="mb-2">
+                        <div className="flex items-center gap-2 mb-2">
+                          <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-md bg-gradient-to-r from-amber-500/15 to-yellow-500/10 border border-amber-500/30">
+                            <Sparkles className="h-3 w-3 text-amber-400" />
+                            <span className="text-[11px] font-semibold text-amber-400">Top Performers</span>
+                          </div>
+                          <span className="text-[11px] text-muted-foreground">Highest quality scores from this scan</span>
+                        </div>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3">
+                          {filteredReports
+                            .filter((r) => r.project_quality >= 15)
+                            .slice(0, 3)
+                            .map((r) => (
+                              <ProjectCard
+                                key={r.id}
+                                report={r}
+                                onSelect={() => loadReport(r.id)}
+                                compareMode={compareMode}
+                                compareSelected={compareIds.has(r.id)}
+                                onToggleCompare={() => toggleCompare(r.id)}
+                              />
+                            ))}
+                        </div>
+                      </div>
+                    )}
+                    {/* All candidates */}
+                    <div>
+                      {filteredReports.length > 0 && !searchQuery && actionFilter === "all" && sectorFilter === "all" && (
+                        <div className="flex items-center gap-2 mb-3 mt-4">
+                          <div className="flex-1 h-px bg-border/40" />
+                          <span className="text-[11px] text-muted-foreground font-medium">All Candidates</span>
+                          <div className="flex-1 h-px bg-border/40" />
+                        </div>
+                      )}
+                      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
+                        {filteredReports.map((r) => (
+                          <ProjectCard
+                            key={r.id}
+                            report={r}
+                            onSelect={() => loadReport(r.id)}
+                            compareMode={compareMode}
+                            compareSelected={compareIds.has(r.id)}
+                            onToggleCompare={() => toggleCompare(r.id)}
+                          />
+                        ))}
+                      </div>
+                    </div>
                     {filteredReports.length === 0 && (
                       <div className="col-span-full flex flex-col items-center justify-center py-12 text-center">
                         <ListFilter className="h-8 w-8 text-muted-foreground/50 mb-2" />
@@ -961,7 +1030,7 @@ export default function Home() {
                         </Button>
                       </div>
                     )}
-                  </div>
+                  </>
                 )}
 
                 {/* Analytics view */}
@@ -1024,6 +1093,39 @@ export default function Home() {
                         <ScoreHistogram reports={activeScan.reports} />
                       </CardContent>
                     </Card>
+
+                    {/* Risk Heatmap */}
+                    <Card className="border-border/50 bg-card/30 backdrop-blur-sm">
+                      <CardHeader className="pb-2">
+                        <CardTitle className="flex items-center gap-2 text-sm">
+                          <ShieldAlert className="h-4 w-4 text-rose-500" />
+                          Risk Heatmap
+                        </CardTitle>
+                        <CardDescription className="text-xs">
+                          Severe risk distribution across all scanned projects
+                        </CardDescription>
+                      </CardHeader>
+                      <CardContent className="pt-2">
+                        {riskLoading ? (
+                          <div className="flex items-center justify-center py-12">
+                            <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+                          </div>
+                        ) : riskReports.length > 0 ? (
+                          <RiskHeatmap
+                            projects={riskReports.map((r) => ({
+                              name: r.candidate.name,
+                              symbol: r.candidate.symbol,
+                              project_quality: r.project_quality_score,
+                              risks: r.severe_risks,
+                            }))}
+                          />
+                        ) : (
+                          <p className="text-xs text-muted-foreground py-8 text-center">
+                            Loading risk data...
+                          </p>
+                        )}
+                      </CardContent>
+                    </Card>
                   </div>
                 )}
               </div>
@@ -1057,9 +1159,7 @@ export default function Home() {
           {selectedReport ? (
             <ReportDetail report={selectedReport} onExport={exportReport} />
           ) : reportLoading ? (
-            <div className="flex items-center justify-center h-full">
-              <Loader2 className="h-8 w-8 animate-spin text-emerald-500" />
-            </div>
+            <ReportSkeleton />
           ) : null}
         </SheetContent>
       </Sheet>
@@ -2151,6 +2251,50 @@ function ScoreHistogram({ reports }: { reports: ScanSummaryItem[] }) {
           <span className="text-[10px] text-muted-foreground font-mono">{b.label}</span>
         </div>
       ))}
+    </div>
+  );
+}
+
+// --------------------------------------------------------------------------- //
+//  ReportSkeleton — loading skeleton for the detail drawer
+// --------------------------------------------------------------------------- //
+function ReportSkeleton() {
+  return (
+    <div className="px-6 py-5 space-y-6 animate-pulse">
+      {/* Header skeleton */}
+      <div className="flex items-center gap-3 pb-4 border-b border-border/60">
+        <div className="h-12 w-12 rounded-full bg-muted/40" />
+        <div className="flex-1 space-y-2">
+          <div className="h-4 w-32 rounded bg-muted/40" />
+          <div className="h-3 w-48 rounded bg-muted/30" />
+        </div>
+        <div className="h-16 w-16 rounded-full bg-muted/40" />
+      </div>
+      {/* Verdict skeleton */}
+      <div className="space-y-2">
+        <div className="h-3 w-24 rounded bg-muted/30" />
+        <div className="h-16 w-full rounded-lg bg-muted/20" />
+      </div>
+      {/* Radar chart skeleton */}
+      <div className="space-y-2">
+        <div className="h-3 w-32 rounded bg-muted/30" />
+        <div className="h-[260px] w-full rounded-lg bg-muted/20 flex items-center justify-center">
+          <Loader2 className="h-8 w-8 animate-spin text-emerald-500/50" />
+        </div>
+      </div>
+      {/* Axis cards skeleton */}
+      {[1, 2, 3].map((i) => (
+        <div key={i} className="space-y-2">
+          <div className="h-3 w-28 rounded bg-muted/30" />
+          <div className="h-20 w-full rounded-lg bg-muted/20" />
+        </div>
+      ))}
+      {/* Metrics grid skeleton */}
+      <div className="grid grid-cols-3 gap-2">
+        {[1, 2, 3, 4, 5, 6].map((i) => (
+          <div key={i} className="h-16 rounded-lg bg-muted/20" />
+        ))}
+      </div>
     </div>
   );
 }

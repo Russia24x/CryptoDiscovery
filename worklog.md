@@ -342,3 +342,75 @@ Priority Recommendations for Next Phase:
 5. Add PDF export.
 6. Improve scoring calibration.
 7. Add portfolio watchlist feature.
+
+---
+Task ID: 6
+Agent: main-agent (cron review round 3)
+Task: Theme toggle, RiskHeatmap integration, loading skeletons, Top Performers section
+
+Work Log:
+- Read worklog.md to understand project context and previous work (Tasks 1-5).
+- Verified both services running: Next.js HTTP 200, Python scanner HTTP 200 (4 scans, 48 reports).
+- Performed QA testing via agent-browser:
+  - Page loads without runtime errors.
+  - VLM analysis identified: Recent Scans list truncation, no loading skeletons, spacing issues.
+  - Analytics view verified: donut chart, action distribution, histogram all rendering.
+  - Detail drawer verified: 25 SVGs, radar chart, export buttons all present.
+- Added dark/light theme toggle:
+  - Created `src/components/theme-provider.tsx` — wraps next-themes ThemeProvider.
+  - Created `src/components/theme-toggle.tsx` — toggle button with Sun/Moon icons, tooltip.
+  - Updated `src/app/layout.tsx` — wrapped app in ThemeProvider (defaultTheme="dark", enableSystem).
+  - Added ThemeToggle to header next to scan count badge.
+  - Updated page metadata (title, description, keywords) for crypto framework.
+  - Verified: toggle switches between dark/light mode (confirmed via eval checking document.documentElement.className).
+- Integrated RiskHeatmap into analytics view:
+  - Added `riskReports` state and `fetchRiskReports` callback to fetch full reports when entering analytics view.
+  - Added useEffect to auto-fetch risk data when viewMode === "analytics".
+  - Added RiskHeatmap card to analytics view with loading state and risk data mapping.
+  - Risk data comes from `report.severe_risks` which has `{name, present}` shape matching the component.
+  - Verified: heatmap renders with actual risk abbreviations (Anon, CentGov, RegUnc) visible.
+- Added loading skeleton for detail drawer:
+  - Created `ReportSkeleton` component with animated pulse effect.
+  - Shows skeleton layout matching the detail drawer structure (header, verdict, radar chart placeholder, axis cards, metrics grid).
+  - Replaces the simple spinner that was shown while loading.
+- Added "Top Performers" highlighted section:
+  - Shows top 3 projects with quality score >= 15 when no filters are active.
+  - Includes amber gradient badge with Sparkles icon.
+  - Separated from "All Candidates" grid with a divider line.
+  - Only appears when no search/filter is active to avoid confusion.
+- Fixed Recent Scans list truncation:
+  - Increased ScrollArea height from 260px to 300px to prevent last entry from being cut off.
+- Ran lint: 0 errors, 0 warnings (clean).
+- Verified via agent-browser:
+  - Theme toggle works (dark → light → dark).
+  - Top Performers section shows above All Candidates.
+  - Analytics view shows all 4 visualizations: donut, action distribution, histogram, risk heatmap.
+  - No console errors or warnings after fresh reload.
+  - VLM confirmed risk heatmap visible when scrolled.
+
+Stage Summary:
+- **New features added**:
+  - Dark/light theme toggle with next-themes (ThemeProvider + ThemeToggle)
+  - RiskHeatmap integrated into analytics view (fetches full reports on demand)
+  - Loading skeleton for detail drawer (animated pulse layout)
+  - Top Performers highlighted section (top 3 projects with amber badge)
+  - Updated page metadata (title, description, keywords)
+- **Bugs fixed**: Recent Scans list truncation (increased scroll area height).
+- **Files modified**: `src/app/page.tsx` (major enhancement), `src/app/layout.tsx` (ThemeProvider + metadata).
+- **Files created**: `src/components/theme-provider.tsx`, `src/components/theme-toggle.tsx`.
+- **Verification**: All features tested via agent-browser. Lint clean. No console errors. VLM confirmed visual quality.
+
+Unresolved Issues / Risks:
+1. CoinGecko rate limits still cause some tokenomics data to be missing.
+2. Conservative scores (most projects 10-30/100) — by design.
+3. In-memory storage — scan results lost if Python service restarts.
+4. Risk data fetching adds ~2-3s delay when first entering analytics view (loads all full reports).
+
+Priority Recommendations for Next Phase:
+1. Persist scan results to SQLite (Prisma configured).
+2. Add WebSocket real-time progress updates.
+3. Add PDF export.
+4. Improve scoring calibration.
+5. Add portfolio watchlist feature.
+6. Add keyboard shortcuts (e.g., 's' to scan, '/' to focus search).
+7. Cache risk reports to avoid re-fetching on every analytics view switch.
