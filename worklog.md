@@ -695,3 +695,76 @@ Priority Recommendations for Next Phase:
 5. Add scan diff view (compare two specific scans side-by-side).
 6. Add debounce to global search to avoid excessive API calls.
 7. Add keyboard shortcut for global search (e.g., 'Ctrl+K' or 'Shift+/').
+
+---
+Task ID: 11
+Agent: main-agent (cron review round 8)
+Task: Debounced global search, Ctrl+K shortcut, scan diff view
+
+Work Log:
+- Read worklog.md to understand project context and previous work (Tasks 1-10).
+- Verified both services running: Next.js HTTP 200, Python scanner HTTP 200 (7 scans, 84 reports).
+- Performed QA testing via agent-browser:
+  - Page loads without runtime errors.
+  - VLM analysis identified: need for debounce in global search, keyboard shortcut for search, scan diff view.
+  - Detail drawer verified: 26 SVGs, radar chart, export buttons, verdict all present.
+  - Analytics view verified: all 5 visualizations present (donut, histogram, risk heatmap, action distribution, sentiment).
+- Added debounce to global search:
+  - Created `searchDebounceRef` using useRef.
+  - Modified `onQueryChange` handler to clear previous timeout and set new 350ms debounce.
+  - Prevents excessive API calls when typing rapidly.
+  - Search only executes after user stops typing for 350ms.
+- Added Ctrl+K / Cmd+K keyboard shortcut for global search:
+  - Modified keyboard shortcuts handler to detect Ctrl+K or Cmd+K.
+  - Allows triggering even when typing in input fields (exception added).
+  - Toggles `showGlobalSearch` state.
+  - Updated footer keyboard legend to include ⌘K (search).
+  - Added Escape handling for global search dialog (closes and clears query/results).
+  - Verified: pressing Ctrl+K opens the global search dialog.
+- Added scan diff view:
+  - Created `ScanDiffView` component for side-by-side comparison of two scans.
+  - Added `showScanDiff`, `diffScanA`, `diffScanB` state.
+  - Added "Diff Scans" button to HistoryView header (visible when ≥2 scans available).
+  - Clicking "Diff Scans" sets scanA and scanB to the two most recent scans and opens the diff dialog.
+  - ScanDiffView features:
+    - Two scan header cards (sky for A, violet for B) showing scan ID, timestamp, and 4 metrics.
+    - Metrics Comparison table with columns: Metric, Scan A, Scan B, Δ Change.
+    - Delta changes shown with TrendingUp/TrendingDown icons and color coding (emerald for positive, rose for negative).
+    - Vetoed count has inverted logic (decrease is positive).
+    - Project Overlap section showing: Only in A, Common, Only in B counts.
+    - Project symbol badges for unique projects in each scan.
+  - Empty state shows GitCompare icon with helpful message.
+  - VLM confirmed: "Two scan headers side-by-side", "Metrics Comparison table with delta changes", "Project Overlap section".
+- Added Escape handling for history dialog.
+- Updated keyboard shortcuts useEffect dependencies to include showGlobalSearch and showHistory.
+- Ran lint: 0 errors, 0 warnings (clean).
+- Verified via agent-browser:
+  - Ctrl+K opens global search dialog.
+  - History view shows "Diff Scans" button.
+  - Scan diff dialog opens with all 3 sections (scan headers, metrics comparison, project overlap).
+  - No console errors or warnings after fresh reload.
+
+Stage Summary:
+- **New features added**:
+  - Debounced global search (350ms delay, prevents excessive API calls)
+  - Ctrl+K / Cmd+K keyboard shortcut for global search
+  - Scan diff view with side-by-side comparison (metrics table + project overlap)
+  - "Diff Scans" button in History view
+  - Escape handling for global search and history dialogs
+- **Files modified**: `src/app/page.tsx` (major enhancement).
+- **Verification**: All features tested via agent-browser. Lint clean. No console errors after fresh reload. VLM confirmed visual quality.
+
+Unresolved Issues / Risks:
+1. CoinGecko rate limits still cause some tokenomics data to be missing.
+2. Conservative scores (most projects 10-30/100) — by design.
+3. In-memory storage — scan results lost if Python service restarts.
+4. Scan diff only compares the two most recent scans (user can't select which scans to compare yet).
+
+Priority Recommendations for Next Phase:
+1. Persist scan results to SQLite (Prisma configured).
+2. Add WebSocket real-time progress updates.
+3. Add PDF export.
+4. Improve scoring calibration.
+5. Allow user to select which two scans to compare in diff view.
+6. Add scan diff for individual projects (track score changes across scans for same project).
+7. Add export scan diff as CSV/image.

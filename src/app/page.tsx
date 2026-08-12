@@ -327,6 +327,10 @@ export default function Home() {
   const [globalSearchQuery, setGlobalSearchQuery] = useState("");
   const [globalSearchResults, setGlobalSearchResults] = useState<{ scan: ScanListItem; report: ScanSummaryItem }[]>([]);
   const [globalSearchLoading, setGlobalSearchLoading] = useState(false);
+  // scan diff view
+  const [showScanDiff, setShowScanDiff] = useState(false);
+  const [diffScanA, setDiffScanA] = useState<ScanStatus | null>(null);
+  const [diffScanB, setDiffScanB] = useState<ScanStatus | null>(null);
   // search input ref for keyboard shortcut
   const searchInputRef = useRef<HTMLInputElement>(null);
   const pollRef = useRef<NodeJS.Timeout | null>(null);
@@ -363,10 +367,17 @@ export default function Home() {
   // keyboard shortcuts
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
-      // don't trigger when typing in inputs
+      // don't trigger when typing in inputs (except for Escape and Ctrl+K)
       const tag = (e.target as HTMLElement)?.tagName;
       const isInput = tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT";
-      if (isInput && e.key !== "Escape") return;
+      if (isInput && e.key !== "Escape" && !(e.key === "k" && (e.ctrlKey || e.metaKey))) return;
+
+      // Ctrl+K / Cmd+K = global search
+      if (e.key === "k" && (e.ctrlKey || e.metaKey)) {
+        e.preventDefault();
+        setShowGlobalSearch((s) => !s);
+        return;
+      }
 
       if (e.key === "s" && !e.ctrlKey && !e.metaKey) {
         e.preventDefault();
@@ -391,14 +402,20 @@ export default function Home() {
           setSelectedReport(null);
         } else if (compareReports.length > 0) {
           setCompareReports([]);
+        } else if (showGlobalSearch) {
+          setShowGlobalSearch(false);
+          setGlobalSearchQuery("");
+          setGlobalSearchResults([]);
         } else if (showWatchlist) {
           setShowWatchlist(false);
+        } else if (showHistory) {
+          setShowHistory(false);
         }
       }
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [scanning, selectedReport, compareReports.length, showWatchlist]);
+  }, [scanning, selectedReport, compareReports.length, showWatchlist, showGlobalSearch, showHistory]);
 
   // poll active scan
   useEffect(() => {
@@ -583,6 +600,7 @@ export default function Home() {
   };
 
   // --- global search across all scans ---
+  const searchDebounceRef = useRef<NodeJS.Timeout | null>(null);
   const performGlobalSearch = useCallback(async (query: string) => {
     if (!query.trim()) {
       setGlobalSearchResults([]);
@@ -1499,6 +1517,8 @@ export default function Home() {
               <span>compare</span>
               <kbd className="px-1.5 py-0.5 rounded bg-muted/40 border border-border/40 font-mono text-[9px] ml-1">W</kbd>
               <span>watchlist</span>
+              <kbd className="px-1.5 py-0.5 rounded bg-muted/40 border border-border/40 font-mono text-[9px] ml-1">⌘K</kbd>
+              <span>search</span>
               <kbd className="px-1.5 py-0.5 rounded bg-muted/40 border border-border/40 font-mono text-[9px] ml-1">Esc</kbd>
               <span>close</span>
             </div>
@@ -1574,10 +1594,22 @@ export default function Home() {
           <SheetDescription className="sr-only">
             Scan history comparison across recent scans
           </SheetDescription>
-          <HistoryView scans={historyScans} loading={historyLoading} onSelectScan={(s) => {
-            setShowHistory(false);
-            setActiveScan(s);
-          }} />
+          <HistoryView
+            scans={historyScans}
+            loading={historyLoading}
+            onSelectScan={(s) => {
+              setShowHistory(false);
+              setActiveScan(s);
+            }}
+            onCompareScans={() => {
+              if (historyScans.length >= 2) {
+                setDiffScanA(historyScans[0]);
+                setDiffScanB(historyScans[1]);
+                setShowHistory(false);
+                setShowScanDiff(true);
+              }
+            }}
+          />
         </SheetContent>
       </Sheet>
 
@@ -1602,7 +1634,11 @@ export default function Home() {
             query={globalSearchQuery}
             onQueryChange={(q) => {
               setGlobalSearchQuery(q);
-              performGlobalSearch(q);
+              // debounce search to avoid excessive API calls
+              if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current);
+              searchDebounceRef.current = setTimeout(() => {
+                performGlobalSearch(q);
+              }, 350);
             }}
             results={globalSearchResults}
             loading={globalSearchLoading}
@@ -1611,6 +1647,21 @@ export default function Home() {
               await loadReport(reportId);
             }}
           />
+        </SheetContent>
+      </Sheet>
+
+      {/* ----------------------------------------------------------------- */}
+      {/*  Scan diff dialog                                                  */}
+      {/* ----------------------------------------------------------------- */}
+      <Sheet
+        open={showScanDiff}
+        onOpenChange={(o) => !o && setShowScanDiff(false)}
+      >
+        <SheetContent side="right" className="w-full sm:max-w-3xl lg:max-w-4xl p-0 overflow-y-auto">
+          <SheetDescription className="sr-only">
+            Side-by-side comparison of two scans
+          </SheetDescription>
+          <ScanDiffView scanA={diffScanA} scanB={diffScanB} />
         </SheetContent>
       </Sheet>
     </div>
@@ -2894,10 +2945,12 @@ function HistoryView({
   scans,
   loading,
   onSelectScan,
+  onCompareScans,
 }: {
   scans: ScanStatus[];
   loading: boolean;
   onSelectScan: (scan: ScanStatus) => void;
+  onCompareScans?: () => void;
 }) {
   if (loading) {
     return (
@@ -2951,11 +3004,24 @@ function HistoryView({
   return (
     <div>
       <SheetHeader className="px-6 pt-6 pb-4 border-b border-border/60 sticky top-0 bg-background/95 backdrop-blur z-10">
-        <SheetTitle className="flex items-center gap-2 text-base">
-          <History className="h-5 w-5 text-sky-400" />
-          Scan History
-          <Badge variant="secondary" className="font-mono text-[10px]">{scans.length}</Badge>
-        </SheetTitle>
+        <div className="flex items-center justify-between gap-2">
+          <SheetTitle className="flex items-center gap-2 text-base">
+            <History className="h-5 w-5 text-sky-400" />
+            Scan History
+            <Badge variant="secondary" className="font-mono text-[10px]">{scans.length}</Badge>
+          </SheetTitle>
+          {onCompareScans && scans.length >= 2 && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={onCompareScans}
+              className="h-8 text-xs gap-1.5"
+            >
+              <GitCompare className="h-3.5 w-3.5 text-violet-400" />
+              Diff Scans
+            </Button>
+          )}
+        </div>
         <p className="text-xs text-muted-foreground">
           Compare metrics across your last {scans.length} completed scans
         </p>
@@ -3252,6 +3318,191 @@ function GlobalSearchView({
             </div>
           </>
         )}
+      </div>
+    </div>
+  );
+}
+
+// --------------------------------------------------------------------------- //
+//  ScanDiffView — side-by-side comparison of two scans
+// --------------------------------------------------------------------------- //
+function ScanDiffView({ scanA, scanB }: { scanA: ScanStatus | null; scanB: ScanStatus | null }) {
+  if (!scanA || !scanB) {
+    return (
+      <div>
+        <SheetHeader className="px-6 pt-6 pb-4 border-b border-border/60">
+          <SheetTitle className="flex items-center gap-2 text-base">
+            <GitCompare className="h-5 w-5 text-violet-400" />
+            Scan Diff
+          </SheetTitle>
+          <SheetDescription className="sr-only">Select two scans to compare</SheetDescription>
+        </SheetHeader>
+        <div className="flex flex-col items-center justify-center py-16 text-center px-6">
+          <GitCompare className="h-12 w-12 text-muted-foreground/30 mb-3" />
+          <p className="text-sm text-muted-foreground">Select two scans from History to compare them</p>
+        </div>
+      </div>
+    );
+  }
+
+  const statsA = {
+    total: scanA.reports.length,
+    avgQ: scanA.reports.length > 0 ? scanA.reports.reduce((s, r) => s + r.project_quality, 0) / scanA.reports.length : 0,
+    avgConf: scanA.reports.length > 0 ? scanA.reports.reduce((s, r) => s + r.confidence, 0) / scanA.reports.length : 0,
+    highCount: scanA.reports.filter((r) => r.project_quality >= 70).length,
+    vetoCount: scanA.reports.filter((r) => r.veto).length,
+  };
+  const statsB = {
+    total: scanB.reports.length,
+    avgQ: scanB.reports.length > 0 ? scanB.reports.reduce((s, r) => s + r.project_quality, 0) / scanB.reports.length : 0,
+    avgConf: scanB.reports.length > 0 ? scanB.reports.reduce((s, r) => s + r.confidence, 0) / scanB.reports.length : 0,
+    highCount: scanB.reports.filter((r) => r.project_quality >= 70).length,
+    vetoCount: scanB.reports.filter((r) => r.veto).length,
+  };
+
+  const symbolsA = new Set(scanA.reports.map((r) => r.symbol));
+  const commonProjects = scanB.reports.filter((r) => symbolsA.has(r.symbol));
+  const onlyInA = scanA.reports.filter((r) => !scanB.reports.some((s) => s.symbol === r.symbol));
+  const onlyInB = scanB.reports.filter((r) => !scanA.reports.some((s) => s.symbol === r.symbol));
+
+  const diffRows: { label: string; a: number; b: number; format: (v: number) => string; invert?: boolean }[] = [
+    { label: "Total Projects", a: statsA.total, b: statsB.total, format: (v) => v.toString() },
+    { label: "Avg Quality", a: statsA.avgQ, b: statsB.avgQ, format: (v) => v.toFixed(1) },
+    { label: "Avg Confidence", a: statsA.avgConf, b: statsB.avgConf, format: (v) => `${v.toFixed(0)}%` },
+    { label: "High Score (70+)", a: statsA.highCount, b: statsB.highCount, format: (v) => v.toString() },
+    { label: "Vetoed", a: statsA.vetoCount, b: statsB.vetoCount, format: (v) => v.toString(), invert: true },
+  ];
+
+  return (
+    <div>
+      <SheetHeader className="px-6 pt-6 pb-4 border-b border-border/60 sticky top-0 bg-background/95 backdrop-blur z-10">
+        <SheetTitle className="flex items-center gap-2 text-base">
+          <GitCompare className="h-5 w-5 text-violet-400" />
+          Scan Diff
+        </SheetTitle>
+        <SheetDescription className="sr-only">Side-by-side comparison of two scan results</SheetDescription>
+        <p className="text-xs text-muted-foreground">
+          Comparing {scanA.scan_id.slice(0, 8)} vs {scanB.scan_id.slice(0, 8)}
+        </p>
+      </SheetHeader>
+
+      <div className="px-6 py-5 space-y-5">
+        {/* Scan headers */}
+        <div className="grid grid-cols-2 gap-3">
+          {[
+            { scan: scanA, stats: statsA, color: "sky" as const },
+            { scan: scanB, stats: statsB, color: "violet" as const },
+          ].map(({ scan, stats, color }) => (
+            <div key={scan.scan_id} className={cn(
+              "p-3 rounded-xl border",
+              color === "sky" ? "border-sky-500/30 bg-sky-500/5" : "border-violet-500/30 bg-violet-500/5",
+            )}>
+              <div className="flex items-center gap-2 mb-2">
+                <div className={cn("h-2 w-2 rounded-full", color === "sky" ? "bg-sky-500" : "bg-violet-500")} />
+                <span className="font-mono text-xs font-semibold">{scan.scan_id.slice(0, 12)}</span>
+              </div>
+              <div className="text-[10px] text-muted-foreground mb-2">
+                {new Date(scan.started_at).toLocaleString()}
+              </div>
+              <div className="grid grid-cols-2 gap-1.5 text-[11px]">
+                <div>Projects: <span className="font-mono font-semibold">{stats.total}</span></div>
+                <div>Avg Q: <span className={cn("font-mono font-semibold", scoreColor(stats.avgQ))}>{stats.avgQ.toFixed(1)}</span></div>
+                <div>Avg Conf: <span className="font-mono font-semibold text-emerald-400">{stats.avgConf.toFixed(0)}%</span></div>
+                <div>High: <span className="font-mono font-semibold text-lime-400">{stats.highCount}</span></div>
+              </div>
+            </div>
+          ))}
+        </div>
+
+        {/* Metrics diff table */}
+        <Card className="border-border/50 bg-card/30 backdrop-blur-sm">
+          <CardHeader className="pb-2">
+            <CardTitle className="flex items-center gap-2 text-sm">
+              <Gauge className="h-4 w-4 text-emerald-500" />
+              Metrics Comparison
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="pt-2">
+            <div className="space-y-1">
+              <div className="grid grid-cols-[1fr_80px_80px_80px] gap-2 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground pb-1 border-b border-border/30">
+                <div>Metric</div>
+                <div className="text-right text-sky-400">Scan A</div>
+                <div className="text-right text-violet-400">Scan B</div>
+                <div className="text-right">Δ Change</div>
+              </div>
+              {diffRows.map((row, i) => {
+                const diff = row.b - row.a;
+                const isPositive = row.invert ? diff < 0 : diff > 0;
+                const isNegative = row.invert ? diff > 0 : diff < 0;
+                return (
+                  <div key={i} className="grid grid-cols-[1fr_80px_80px_80px] gap-2 py-1.5 text-xs items-center hover:bg-muted/10 rounded px-1">
+                    <div className="text-muted-foreground">{row.label}</div>
+                    <div className="text-right font-mono font-semibold">{row.format(row.a)}</div>
+                    <div className="text-right font-mono font-semibold">{row.format(row.b)}</div>
+                    <div className={cn(
+                      "text-right font-mono font-semibold flex items-center justify-end gap-0.5",
+                      diff === 0 ? "text-muted-foreground" : isPositive ? "text-emerald-400" : isNegative ? "text-rose-400" : "text-muted-foreground",
+                    )}>
+                      {diff > 0 && <TrendingUp className="h-3 w-3" />}
+                      {diff < 0 && <TrendingDown className="h-3 w-3" />}
+                      {diff === 0 ? "—" : `${diff > 0 ? "+" : ""}${row.format(Math.abs(diff))}`}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Project overlap */}
+        <Card className="border-border/50 bg-card/30 backdrop-blur-sm">
+          <CardHeader className="pb-2">
+            <CardTitle className="flex items-center gap-2 text-sm">
+              <Layers className="h-4 w-4 text-amber-500" />
+              Project Overlap
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="pt-2">
+            <div className="grid grid-cols-3 gap-2 text-center">
+              <div className="p-3 rounded-lg bg-sky-500/5 border border-sky-500/20">
+                <div className="text-[10px] text-muted-foreground uppercase">Only in A</div>
+                <div className="text-2xl font-bold text-sky-400">{onlyInA.length}</div>
+              </div>
+              <div className="p-3 rounded-lg bg-emerald-500/5 border border-emerald-500/20">
+                <div className="text-[10px] text-muted-foreground uppercase">Common</div>
+                <div className="text-2xl font-bold text-emerald-400">{commonProjects.length}</div>
+              </div>
+              <div className="p-3 rounded-lg bg-violet-500/5 border border-violet-500/20">
+                <div className="text-[10px] text-muted-foreground uppercase">Only in B</div>
+                <div className="text-2xl font-bold text-violet-400">{onlyInB.length}</div>
+              </div>
+            </div>
+            {onlyInA.length > 0 && (
+              <div className="mt-3">
+                <div className="text-[10px] text-muted-foreground mb-1.5">Only in Scan A:</div>
+                <div className="flex flex-wrap gap-1">
+                  {onlyInA.slice(0, 8).map((r) => (
+                    <Badge key={r.id} variant="outline" className="text-[10px] gap-1 text-sky-400 border-sky-500/30">
+                      {r.symbol}
+                    </Badge>
+                  ))}
+                </div>
+              </div>
+            )}
+            {onlyInB.length > 0 && (
+              <div className="mt-2">
+                <div className="text-[10px] text-muted-foreground mb-1.5">Only in Scan B:</div>
+                <div className="flex flex-wrap gap-1">
+                  {onlyInB.slice(0, 8).map((r) => (
+                    <Badge key={r.id} variant="outline" className="text-[10px] gap-1 text-violet-400 border-violet-500/30">
+                      {r.symbol}
+                    </Badge>
+                  ))}
+                </div>
+              </div>
+            )}
+          </CardContent>
+        </Card>
       </div>
     </div>
   );
