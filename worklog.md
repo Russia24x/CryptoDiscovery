@@ -842,3 +842,67 @@ Priority Recommendations for Next Phase:
 5. Cache score history per project to avoid re-fetching.
 6. Add scan diff for individual projects (track all metric changes across scans).
 7. Add export score history as CSV/image.
+
+---
+Task ID: 13
+Agent: main-agent (cron review round 10)
+Task: Help/onboarding dialog, refresh scan button, header improvements
+
+Work Log:
+- Read worklog.md to understand project context and previous work (Tasks 1-12).
+- Verified both services running: Next.js HTTP 200, Python scanner HTTP 200 (7 scans, 84 reports).
+- Performed QA testing via agent-browser:
+  - Page loads without runtime errors.
+  - VLM analysis identified: need for onboarding guide, refresh scan capability, improved empty states.
+  - Detail drawer verified: 28 SVGs, radar chart, score history, copy button, export buttons, verdict all present.
+- Added help/onboarding dialog:
+  - Created `HelpView` component with comprehensive guide for first-time users.
+  - Added Help button (HelpCircle icon) in header.
+  - Dialog includes 6 sections:
+    1. Core Principle — "Evidence > Narrative · Revenue > Hype · Adoption > Attention" with explanation.
+    2. Configure Your Scan — persona, market cap, sectors, presets.
+    3. Run a Market Scan — 8 phases, progress tracking, timing.
+    4. Explore Results — grid, analytics, sentiment banner, detail drawer.
+    5. Understand the 5 Axes — Invisible Utility, Economic Engine, Moat, Token & Market, Governance/Legal/Security.
+    6. Compare & Track — compare mode, watchlist, history, scan diff, global search.
+    7. Export & Share — MD/JSON export, copy summary, CSV export, keyboard shortcuts.
+  - Keyboard shortcuts grid showing all 8 shortcuts (S, /, G, A, C, W, ⌘K, Esc).
+  - Data sources section (CoinGecko, DeFiLlama) with badges and descriptions.
+  - Disclaimer about not being financial advice.
+  - VLM confirmed: "Core Principle section, step-by-step guide, keyboard shortcuts, clean layout".
+- Added refresh scan button:
+  - Created `refreshScan` function that applies the active scan's config to the form and starts a new scan.
+  - Added Refresh button (RefreshCw icon) to ScanProgressCard, visible only when scan is completed.
+  - Button shows spinner animation when scanning is in progress.
+  - Updated ScanProgressCard to accept `onRefresh` and `scanning` props.
+  - Verified: Refresh button appears on completed scan card.
+- Added HelpCircle and RefreshCw icon imports.
+- Ran lint: 0 errors, 0 warnings (clean).
+- Verified via agent-browser:
+  - Help button visible in header.
+  - Help dialog opens with all 6 sections (Core Principle, Steps, Shortcuts, Data Sources, Disclaimer).
+  - Refresh button appears on completed scan card.
+  - No console errors or warnings after fresh reload.
+
+Stage Summary:
+- **New features added**:
+  - Help/onboarding dialog with 6-step guide, core principles, keyboard shortcuts, data sources, disclaimer
+  - Refresh scan button on completed scan cards (re-runs same config)
+  - Help button in header with HelpCircle icon
+- **Files modified**: `src/app/page.tsx` (major enhancement).
+- **Verification**: All features tested via agent-browser. Lint clean. No console errors. VLM confirmed visual quality.
+
+Unresolved Issues / Risks:
+1. CoinGecko rate limits still cause some tokenomics data to be missing.
+2. Conservative scores (most projects 10-30/100) — by design.
+3. In-memory storage — scan results lost if Python service restarts.
+4. Help dialog is static (no interactive tutorial or video).
+
+Priority Recommendations for Next Phase:
+1. Persist scan results to SQLite (Prisma configured).
+2. Add WebSocket real-time progress updates.
+3. Add PDF export.
+4. Improve scoring calibration.
+5. Add interactive onboarding tour (highlight UI elements step by step).
+6. Add data freshness indicator showing how old the scan data is.
+7. Add notification system for scan completion across browser tabs.

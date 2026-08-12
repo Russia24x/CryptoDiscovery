@@ -33,6 +33,8 @@ import {
   Star,
   Sun,
   Target,
+  HelpCircle,
+  RefreshCw,
   TrendingDown,
   TrendingUp,
   Zap,
@@ -332,6 +334,8 @@ export default function Home() {
   const [showScanDiff, setShowScanDiff] = useState(false);
   const [diffScanA, setDiffScanA] = useState<ScanStatus | null>(null);
   const [diffScanB, setDiffScanB] = useState<ScanStatus | null>(null);
+  // help dialog
+  const [showHelp, setShowHelp] = useState(false);
   // search input ref for keyboard shortcut
   const searchInputRef = useRef<HTMLInputElement>(null);
   const pollRef = useRef<NodeJS.Timeout | null>(null);
@@ -482,6 +486,22 @@ export default function Home() {
       setError(e instanceof Error ? e.message : "scan failed");
       setScanning(false);
     }
+  };
+
+  // --- refresh scan: re-run with the same config as active scan ---
+  const refreshScan = async () => {
+    if (!activeScan || scanning) return;
+    // Apply the active scan's config to the form
+    const config = activeScan.config;
+    if (config) {
+      setPersona(config.persona);
+      setMcMin(String(config.market_cap_min));
+      setMcMax(String(config.market_cap_max));
+      setSectors(config.sectors || []);
+      setMaxProjects(String(config.max_projects));
+    }
+    // Start a new scan
+    await startScan();
   };
 
   const loadReport = async (id: string) => {
@@ -929,6 +949,16 @@ export default function Home() {
                   </Badge>
                 )}
               </Button>
+              {/* Help button */}
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={() => setShowHelp(true)}
+                className="h-9 w-9 hover:bg-muted/40"
+              >
+                <HelpCircle className="h-4 w-4 text-muted-foreground" />
+                <span className="sr-only">Help & Guide</span>
+              </Button>
               <ThemeToggle />
             </div>
           </div>
@@ -1200,7 +1230,7 @@ export default function Home() {
             {!activeScan && scans.length === 0 && <EmptyState />}
 
             {activeScan && (
-              <ScanProgressCard scan={activeScan} />
+              <ScanProgressCard scan={activeScan} onRefresh={refreshScan} scanning={scanning} />
             )}
 
             {/* Market Overview Stats */}
@@ -1760,6 +1790,21 @@ export default function Home() {
           <ScanDiffView scanA={diffScanA} scanB={diffScanB} />
         </SheetContent>
       </Sheet>
+
+      {/* ----------------------------------------------------------------- */}
+      {/*  Help dialog                                                       */}
+      {/* ----------------------------------------------------------------- */}
+      <Sheet
+        open={showHelp}
+        onOpenChange={(o) => !o && setShowHelp(false)}
+      >
+        <SheetContent side="right" className="w-full sm:max-w-lg lg:max-w-xl p-0 overflow-y-auto">
+          <SheetDescription className="sr-only">
+            Help and onboarding guide for the Crypto Discovery Framework
+          </SheetDescription>
+          <HelpView />
+        </SheetContent>
+      </Sheet>
     </div>
   );
 }
@@ -1861,7 +1906,7 @@ function EmptyState() {
   );
 }
 
-function ScanProgressCard({ scan }: { scan: ScanStatus }) {
+function ScanProgressCard({ scan, onRefresh, scanning }: { scan: ScanStatus; onRefresh?: () => void; scanning?: boolean }) {
   const phaseIndex = useMemo(() => {
     const phases = [
       "PHASE 1",
@@ -1893,7 +1938,21 @@ function ScanProgressCard({ scan }: { scan: ScanStatus }) {
               {scan.current_phase} · {scan.processed}/{scan.total_candidates} processed
             </CardDescription>
           </div>
-          <ScanStatusBadge status={scan.status} />
+          <div className="flex items-center gap-2">
+            {scan.status === "completed" && onRefresh && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={onRefresh}
+                disabled={scanning}
+                className="h-7 text-[11px] gap-1"
+              >
+                <RefreshCw className={cn("h-3 w-3", scanning && "animate-spin")} />
+                <span className="hidden sm:inline">Refresh</span>
+              </Button>
+            )}
+            <ScanStatusBadge status={scan.status} />
+          </div>
         </div>
       </CardHeader>
       <CardContent className="space-y-3">
@@ -3672,6 +3731,196 @@ function ScanDiffView({ scanA, scanB }: { scanA: ScanStatus | null; scanB: ScanS
             )}
           </CardContent>
         </Card>
+      </div>
+    </div>
+  );
+}
+
+// --------------------------------------------------------------------------- //
+//  HelpView — onboarding guide and framework explanation
+// --------------------------------------------------------------------------- //
+function HelpView() {
+  const sections = [
+    {
+      icon: Crosshair,
+      title: "1. Configure Your Scan",
+      color: "text-emerald-400",
+      items: [
+        "Choose a Persona (Investor, Researcher, Developer, etc.) — each weights the 5 axes differently",
+        "Set Market Cap range to filter by project size",
+        "Select Sectors (DeFi, Infrastructure, RWA, etc.) or leave empty for all",
+        "Use Quick Presets for common configurations (DeFi Focus, Large Cap, Emerging)",
+      ],
+    },
+    {
+      icon: Zap,
+      title: "2. Run a Market Scan",
+      color: "text-amber-400",
+      items: [
+        "Click 'Scan Market' or press 'S' to start",
+        "The framework runs 8 phases: Discovery → Screening → Evidence → Evaluation → Scoring → Investment → Decision → Output",
+        "Watch the progress bar and phase log for real-time updates",
+        "Scan typically completes in 10-20 seconds",
+      ],
+    },
+    {
+      icon: Gauge,
+      title: "3. Explore Results",
+      color: "text-sky-400",
+      items: [
+        "Ranked Candidates grid shows all discovered projects sorted by quality score",
+        "Click any card to open the detailed analysis drawer",
+        "Switch between Grid and Analytics views for different visualizations",
+        "Use the Market Sentiment banner to gauge overall market health",
+      ],
+    },
+    {
+      icon: ShieldAlert,
+      title: "4. Understand the 5 Axes",
+      color: "text-rose-400",
+      items: [
+        "Invisible Utility — does the project hide blockchain complexity?",
+        "Economic Engine — real revenue, fees, and growth",
+        "Moat — competitive advantages (regulatory, network, distribution)",
+        "Token & Market Structure — tokenomics and liquidity",
+        "Governance / Legal / Security — team, audits, regulatory status",
+      ],
+    },
+    {
+      icon: GitCompare,
+      title: "5. Compare & Track",
+      color: "text-violet-400",
+      items: [
+        "Toggle Compare mode to select up to 4 projects for side-by-side comparison",
+        "Star projects to add them to your Watchlist (saved locally)",
+        "View Scan History to see trends across multiple scans",
+        "Use Scan Diff to compare metrics between two scans",
+        "Search across all scans with Ctrl+K or the Search All button",
+      ],
+    },
+    {
+      icon: Download,
+      title: "6. Export & Share",
+      color: "text-teal-400",
+      items: [
+        "Export individual reports as Markdown or JSON",
+        "Copy a quick summary to clipboard for sharing",
+        "Export all scan results as CSV for spreadsheet analysis",
+        "Use keyboard shortcuts for faster workflow (see footer)",
+      ],
+    },
+  ];
+
+  const shortcuts = [
+    { key: "S", desc: "Start scan" },
+    { key: "/", desc: "Focus search" },
+    { key: "G", desc: "Grid view" },
+    { key: "A", desc: "Analytics view" },
+    { key: "C", desc: "Compare mode" },
+    { key: "W", desc: "Watchlist" },
+    { key: "⌘K", desc: "Global search" },
+    { key: "Esc", desc: "Close dialog" },
+  ];
+
+  return (
+    <div>
+      <SheetHeader className="px-6 pt-6 pb-4 border-b border-border/60 sticky top-0 bg-background/95 backdrop-blur z-10">
+        <SheetTitle className="flex items-center gap-2 text-base">
+          <HelpCircle className="h-5 w-5 text-emerald-400" />
+          How It Works
+        </SheetTitle>
+        <p className="text-xs text-muted-foreground">
+          A quick guide to the Crypto Discovery Framework
+        </p>
+      </SheetHeader>
+
+      <div className="px-6 py-5 space-y-5">
+        {/* Framework philosophy */}
+        <div className="rounded-xl border border-emerald-500/20 bg-gradient-to-br from-emerald-500/10 to-teal-600/5 p-4">
+          <div className="flex items-center gap-2 mb-2">
+            <Sparkles className="h-4 w-4 text-emerald-400" />
+            <h3 className="text-sm font-semibold text-emerald-400">Core Principle</h3>
+          </div>
+          <p className="text-xs text-foreground/80 leading-relaxed">
+            <span className="font-mono font-semibold">Evidence &gt; Narrative</span>
+            {" · "}
+            <span className="font-mono font-semibold">Revenue &gt; Hype</span>
+            {" · "}
+            <span className="font-mono font-semibold">Adoption &gt; Attention</span>
+          </p>
+          <p className="text-[11px] text-muted-foreground mt-2">
+            This framework evaluates crypto projects by verifiable evidence — not social media buzz.
+            Scores are intentionally conservative when data is missing.
+          </p>
+        </div>
+
+        {/* Steps */}
+        {sections.map((section) => {
+          const Icon = section.icon;
+          return (
+            <div key={section.title}>
+              <div className="flex items-center gap-2 mb-2">
+                <Icon className={cn("h-4 w-4", section.color)} />
+                <h3 className="text-sm font-semibold">{section.title}</h3>
+              </div>
+              <ul className="space-y-1.5 ml-6">
+                {section.items.map((item, i) => (
+                  <li key={i} className="text-xs text-muted-foreground flex gap-2">
+                    <span className="text-emerald-500/50 flex-shrink-0">•</span>
+                    <span>{item}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          );
+        })}
+
+        {/* Keyboard shortcuts */}
+        <div className="rounded-xl border border-border/50 bg-card/30 p-4">
+          <h3 className="text-sm font-semibold mb-3 flex items-center gap-2">
+            <Zap className="h-4 w-4 text-amber-400" />
+            Keyboard Shortcuts
+          </h3>
+          <div className="grid grid-cols-2 gap-2">
+            {shortcuts.map((s) => (
+              <div key={s.key} className="flex items-center gap-2 text-xs">
+                <kbd className="px-2 py-1 rounded bg-muted/40 border border-border/40 font-mono text-[10px] font-semibold min-w-[28px] text-center">
+                  {s.key}
+                </kbd>
+                <span className="text-muted-foreground">{s.desc}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Data sources */}
+        <div className="rounded-xl border border-border/50 bg-muted/10 p-4">
+          <h3 className="text-sm font-semibold mb-2 flex items-center gap-2">
+            <Activity className="h-4 w-4 text-sky-400" />
+            Data Sources
+          </h3>
+          <div className="space-y-1 text-xs text-muted-foreground">
+            <div className="flex items-center gap-2">
+              <Badge variant="outline" className="text-[10px]">CoinGecko</Badge>
+              <span>Market data, prices, tokenomics</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <Badge variant="outline" className="text-[10px]">DeFiLlama</Badge>
+              <span>TVL, fees, revenue, protocol metadata</span>
+            </div>
+          </div>
+          <p className="text-[10px] text-muted-foreground/70 mt-2">
+            All data from public APIs. No API key required. CoinGecko rate limits may cause some data to be missing.
+          </p>
+        </div>
+
+        {/* Disclaimer */}
+        <div className="rounded-lg bg-rose-500/5 border border-rose-500/20 p-3">
+          <p className="text-[11px] text-rose-300/80">
+            <strong>Disclaimer:</strong> This framework is a research and analysis tool, not personalized financial advice.
+            Always do your own research (DYOR) before making investment decisions.
+          </p>
+        </div>
       </div>
     </div>
   );
