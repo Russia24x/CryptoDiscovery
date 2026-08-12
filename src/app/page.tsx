@@ -27,6 +27,7 @@ import {
   ShieldAlert,
   ShieldCheck,
   Sparkles,
+  Star,
   Sun,
   Target,
   TrendingDown,
@@ -307,6 +308,11 @@ export default function Home() {
   // risk heatmap data (full reports fetched on demand)
   const [riskReports, setRiskReports] = useState<FullReport[]>([]);
   const [riskLoading, setRiskLoading] = useState(false);
+  // watchlist (persisted to localStorage)
+  const [watchlist, setWatchlist] = useState<Set<string>>(new Set());
+  const [showWatchlist, setShowWatchlist] = useState(false);
+  // search input ref for keyboard shortcut
+  const searchInputRef = useRef<HTMLInputElement>(null);
   const pollRef = useRef<NodeJS.Timeout | null>(null);
 
   // load scan list on mount
@@ -319,7 +325,56 @@ export default function Home() {
 
   useEffect(() => {
     refreshScans();
+    // load watchlist from localStorage
+    try {
+      const stored = localStorage.getItem("crypto-watchlist");
+      if (stored) setWatchlist(new Set(JSON.parse(stored)));
+    } catch {}
   }, [refreshScans]);
+
+  // persist watchlist to localStorage
+  useEffect(() => {
+    try {
+      localStorage.setItem("crypto-watchlist", JSON.stringify(Array.from(watchlist)));
+    } catch {}
+  }, [watchlist]);
+
+  // keyboard shortcuts
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      // don't trigger when typing in inputs
+      const tag = (e.target as HTMLElement)?.tagName;
+      const isInput = tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT";
+      if (isInput && e.key !== "Escape") return;
+
+      if (e.key === "s" && !e.ctrlKey && !e.metaKey) {
+        e.preventDefault();
+        if (!scanning) startScan();
+      } else if (e.key === "/" && !e.ctrlKey && !e.metaKey) {
+        e.preventDefault();
+        searchInputRef.current?.focus();
+      } else if (e.key === "g" && !e.ctrlKey && !e.metaKey) {
+        e.preventDefault();
+        setViewMode("grid");
+      } else if (e.key === "a" && !e.ctrlKey && !e.metaKey) {
+        e.preventDefault();
+        setViewMode("analytics");
+      } else if (e.key === "c" && !e.ctrlKey && !e.metaKey) {
+        e.preventDefault();
+        setCompareMode((m) => !m);
+      } else if (e.key === "Escape") {
+        if (selectedReport) {
+          setSelectedReport(null);
+        } else if (compareReports.length > 0) {
+          setCompareReports([]);
+        } else if (showWatchlist) {
+          setShowWatchlist(false);
+        }
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [scanning, selectedReport, compareReports.length, showWatchlist]);
 
   // poll active scan
   useEffect(() => {
@@ -389,11 +444,58 @@ export default function Home() {
       if (next.has(id)) {
         next.delete(id);
       } else {
-        if (next.size >= 4) return cur; // max 4 for comparison
+        if (next.size >= 4) return cur;
         next.add(id);
       }
       return next;
     });
+  };
+
+  // --- watchlist toggle ---
+  const toggleWatchlist = (id: string) => {
+    setWatchlist((cur) => {
+      const next = new Set(cur);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
+      return next;
+    });
+  };
+
+  // --- scan presets ---
+  const applyPreset = (preset: "defi" | "largecap" | "emerging" | "infrastructure") => {
+    switch (preset) {
+      case "defi":
+        setPersona("investor");
+        setMcMin("500");
+        setMcMax("50000");
+        setSectors(["DeFi"]);
+        setMaxProjects("15");
+        break;
+      case "largecap":
+        setPersona("institutional");
+        setMcMin("5000");
+        setMcMax("50000");
+        setSectors([]);
+        setMaxProjects("10");
+        break;
+      case "emerging":
+        setPersona("researcher");
+        setMcMin("50");
+        setMcMax("500");
+        setSectors([]);
+        setMaxProjects("20");
+        break;
+      case "infrastructure":
+        setPersona("developer");
+        setMcMin("200");
+        setMcMax("50000");
+        setSectors(["Infrastructure"]);
+        setMaxProjects("12");
+        break;
+    }
   };
 
   const runComparison = async () => {
@@ -586,6 +688,21 @@ export default function Home() {
                 <Activity className="h-3 w-3 text-emerald-500" />
                 {scans.length} scans
               </Badge>
+              {/* Watchlist button */}
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setShowWatchlist(true)}
+                className="h-9 gap-1.5"
+              >
+                <Star className="h-4 w-4 text-amber-400" />
+                <span className="hidden sm:inline">Watchlist</span>
+                {watchlist.size > 0 && (
+                  <Badge className="ml-0.5 bg-amber-500/20 text-amber-400 text-[9px] px-1.5 py-0">
+                    {watchlist.size}
+                  </Badge>
+                )}
+              </Button>
               <ThemeToggle />
             </div>
           </div>
@@ -710,6 +827,55 @@ export default function Home() {
                     <AlertTriangle className="h-3 w-3" /> {error}
                   </p>
                 )}
+
+                {/* Scan Presets */}
+                <div className="space-y-1.5">
+                  <Label className="text-xs font-medium flex items-center gap-1.5">
+                    <Zap className="h-3 w-3 text-amber-400" /> Quick Presets
+                  </Label>
+                  <div className="grid grid-cols-2 gap-1.5">
+                    <button
+                      onClick={() => applyPreset("defi")}
+                      className="px-2 py-1.5 rounded-md text-[11px] font-medium bg-muted/30 hover:bg-emerald-500/10 hover:text-emerald-400 border border-border/40 hover:border-emerald-500/30 transition-all text-left"
+                    >
+                      <div className="font-semibold">DeFi Focus</div>
+                      <div className="text-[9px] text-muted-foreground">Investor · $500M+</div>
+                    </button>
+                    <button
+                      onClick={() => applyPreset("largecap")}
+                      className="px-2 py-1.5 rounded-md text-[11px] font-medium bg-muted/30 hover:bg-sky-500/10 hover:text-sky-400 border border-border/40 hover:border-sky-500/30 transition-all text-left"
+                    >
+                      <div className="font-semibold">Large Cap</div>
+                      <div className="text-[9px] text-muted-foreground">Institutional · $5B+</div>
+                    </button>
+                    <button
+                      onClick={() => applyPreset("emerging")}
+                      className="px-2 py-1.5 rounded-md text-[11px] font-medium bg-muted/30 hover:bg-amber-500/10 hover:text-amber-400 border border-border/40 hover:border-amber-500/30 transition-all text-left"
+                    >
+                      <div className="font-semibold">Emerging</div>
+                      <div className="text-[9px] text-muted-foreground">Researcher · $50-500M</div>
+                    </button>
+                    <button
+                      onClick={() => applyPreset("infrastructure")}
+                      className="px-2 py-1.5 rounded-md text-[11px] font-medium bg-muted/30 hover:bg-violet-500/10 hover:text-violet-400 border border-border/40 hover:border-violet-500/30 transition-all text-left"
+                    >
+                      <div className="font-semibold">Infra</div>
+                      <div className="text-[9px] text-muted-foreground">Developer · $200M+</div>
+                    </button>
+                  </div>
+                </div>
+
+                {/* Keyboard shortcuts hint */}
+                <div className="pt-2 border-t border-border/30">
+                  <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground">
+                    <kbd className="px-1.5 py-0.5 rounded bg-muted/40 border border-border/40 font-mono text-[9px]">S</kbd>
+                    <span>scan</span>
+                    <kbd className="px-1.5 py-0.5 rounded bg-muted/40 border border-border/40 font-mono text-[9px] ml-1">/</kbd>
+                    <span>search</span>
+                    <kbd className="px-1.5 py-0.5 rounded bg-muted/40 border border-border/40 font-mono text-[9px] ml-1">G/A</kbd>
+                    <span>views</span>
+                  </div>
+                </div>
               </CardContent>
             </Card>
 
@@ -898,6 +1064,7 @@ export default function Home() {
                       <div className="relative flex-1 min-w-[160px]">
                         <Filter className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
                         <Input
+                          ref={searchInputRef}
                           placeholder="Search name, symbol, category..."
                           value={searchQuery}
                           onChange={(e) => setSearchQuery(e.target.value)}
@@ -984,6 +1151,8 @@ export default function Home() {
                                 compareMode={compareMode}
                                 compareSelected={compareIds.has(r.id)}
                                 onToggleCompare={() => toggleCompare(r.id)}
+                                watchlisted={watchlist.has(r.id)}
+                                onToggleWatchlist={() => toggleWatchlist(r.id)}
                               />
                             ))}
                         </div>
@@ -1007,6 +1176,8 @@ export default function Home() {
                             compareMode={compareMode}
                             compareSelected={compareIds.has(r.id)}
                             onToggleCompare={() => toggleCompare(r.id)}
+                            watchlisted={watchlist.has(r.id)}
+                            onToggleWatchlist={() => toggleWatchlist(r.id)}
                           />
                         ))}
                       </div>
@@ -1176,6 +1347,29 @@ export default function Home() {
             Side-by-side comparison of selected projects
           </SheetDescription>
           <ComparisonView reports={compareReports} />
+        </SheetContent>
+      </Sheet>
+
+      {/* ----------------------------------------------------------------- */}
+      {/*  Watchlist dialog                                                  */}
+      {/* ----------------------------------------------------------------- */}
+      <Sheet
+        open={showWatchlist}
+        onOpenChange={(o) => !o && setShowWatchlist(false)}
+      >
+        <SheetContent side="right" className="w-full sm:max-w-md lg:max-w-lg p-0 overflow-y-auto">
+          <SheetDescription className="sr-only">
+            Your saved watchlist of tracked projects
+          </SheetDescription>
+          <WatchlistView
+            watchlist={watchlist}
+            onRemove={toggleWatchlist}
+            onSelect={async (id) => {
+              setShowWatchlist(false);
+              await loadReport(id);
+            }}
+            reports={activeScan?.reports || []}
+          />
         </SheetContent>
       </Sheet>
     </div>
@@ -1379,12 +1573,16 @@ function ProjectCard({
   compareMode = false,
   compareSelected = false,
   onToggleCompare,
+  watchlisted = false,
+  onToggleWatchlist,
 }: {
   report: ScanSummaryItem;
   onSelect: () => void;
   compareMode?: boolean;
   compareSelected?: boolean;
   onToggleCompare?: () => void;
+  watchlisted?: boolean;
+  onToggleWatchlist?: () => void;
 }) {
   const ab = actionBadge(report.action);
   return (
@@ -1393,14 +1591,34 @@ function ProjectCard({
         "group relative text-left p-4 rounded-xl border bg-card/40 hover:bg-card/80 transition-all overflow-hidden",
         compareSelected
           ? "border-violet-500/60 ring-2 ring-violet-500/20"
+          : watchlisted
+          ? "border-amber-500/40 ring-1 ring-amber-500/10"
           : "border-border/50 hover:border-emerald-500/40",
       )}
     >
       {/* score accent bar */}
       <div className={cn("absolute top-0 left-0 right-0 h-0.5", scoreBg(report.project_quality))} />
 
+      {/* Watchlist star (always visible) */}
+      <div className="absolute top-2 right-2 z-10">
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            onToggleWatchlist?.();
+          }}
+          className={cn(
+            "flex h-6 w-6 items-center justify-center rounded-md transition-all",
+            watchlisted
+              ? "text-amber-400 hover:bg-amber-500/10"
+              : "text-muted-foreground/40 hover:text-amber-400 hover:bg-amber-500/10 opacity-0 group-hover:opacity-100",
+          )}
+        >
+          <Star className={cn("h-3.5 w-3.5", watchlisted && "fill-current")} />
+        </button>
+      </div>
+
       {compareMode && (
-        <div className="absolute top-2 right-2 z-10">
+        <div className="absolute top-2 right-9 z-10">
           <button
             onClick={(e) => {
               e.stopPropagation();
@@ -1920,7 +2138,7 @@ function ComparisonView({ reports }: { reports: FullReport[] }) {
     { label: "FDV", getValue: (r) => fmtUsd(r.tokenomics.fdv) },
     { label: "Supply Growth", getValue: (r) => fmtPct(r.tokenomics.supply_growth_pct) },
     { label: "Utility Level", getValue: (r) => `${r.tokenomics.utility_level}/4` },
-    { label: "Peer Percentile", getValue: (r) => r.peer_benchmark.peer_percentile?.toFixed(0) + "%" ?? "—" },
+    { label: "Peer Percentile", getValue: (r) => (r.peer_benchmark.peer_percentile != null ? r.peer_benchmark.peer_percentile.toFixed(0) + "%" : "—") },
   ];
 
   const axisRows = reports[0]?.axes.map((ax) => ax.name) ?? [];
@@ -2294,6 +2512,106 @@ function ReportSkeleton() {
         {[1, 2, 3, 4, 5, 6].map((i) => (
           <div key={i} className="h-16 rounded-lg bg-muted/20" />
         ))}
+      </div>
+    </div>
+  );
+}
+
+// --------------------------------------------------------------------------- //
+//  WatchlistView — shows saved projects from localStorage
+// --------------------------------------------------------------------------- //
+function WatchlistView({
+  watchlist,
+  onRemove,
+  onSelect,
+  reports,
+}: {
+  watchlist: Set<string>;
+  onRemove: (id: string) => void;
+  onSelect: (id: string) => void;
+  reports: ScanSummaryItem[];
+}) {
+  const watchlisted = reports.filter((r) => watchlist.has(r.id));
+
+  return (
+    <div>
+      <SheetHeader className="px-6 pt-6 pb-4 border-b border-border/60 sticky top-0 bg-background/95 backdrop-blur z-10">
+        <SheetTitle className="flex items-center gap-2 text-base">
+          <Star className="h-5 w-5 text-amber-400 fill-current" />
+          Watchlist
+          <Badge variant="secondary" className="font-mono text-[10px]">
+            {watchlist.size}
+          </Badge>
+        </SheetTitle>
+        <p className="text-xs text-muted-foreground">
+          Projects you're tracking. Saved locally in your browser.
+        </p>
+      </SheetHeader>
+
+      <div className="px-6 py-5">
+        {watchlisted.length === 0 ? (
+          <div className="flex flex-col items-center justify-center py-16 text-center">
+            <div className="flex h-16 w-16 items-center justify-center rounded-full bg-amber-500/10 border border-amber-500/20 mb-4">
+              <Star className="h-8 w-8 text-amber-400/50" />
+            </div>
+            <h3 className="text-sm font-semibold mb-1">No projects in watchlist yet</h3>
+            <p className="text-xs text-muted-foreground max-w-xs">
+              Click the star icon on any project card to add it to your watchlist.
+              Watchlisted projects are saved across scans.
+            </p>
+          </div>
+        ) : (
+          <div className="space-y-2">
+            {watchlisted.map((r) => {
+              const ab = actionBadge(r.action);
+              return (
+                <div
+                  key={r.id}
+                  className="flex items-center gap-3 p-3 rounded-lg border border-border/40 bg-card/30 hover:bg-card/60 transition-colors group"
+                >
+                  <button
+                    onClick={() => onSelect(r.id)}
+                    className="flex items-center gap-3 flex-1 min-w-0 text-left"
+                  >
+                    <div className="flex h-9 w-9 items-center justify-center rounded-full bg-muted/40 border border-border/40 overflow-hidden flex-shrink-0">
+                      {r.image ? (
+                        <img src={r.image} alt={r.symbol} className="h-full w-full object-cover" />
+                      ) : (
+                        <span className="text-[10px] font-bold text-muted-foreground">
+                          {r.symbol.slice(0, 3)}
+                        </span>
+                      )}
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-sm font-semibold truncate">{r.name}</span>
+                        <span className="text-[11px] text-muted-foreground font-mono">${r.symbol}</span>
+                      </div>
+                      <div className="flex items-center gap-1.5 mt-0.5">
+                        <Badge variant="outline" className={cn("text-[9px] gap-0.5 h-4", ab.cls)}>
+                          {r.action}
+                        </Badge>
+                        <span className="text-[10px] text-muted-foreground">{r.category}</span>
+                      </div>
+                    </div>
+                    <div className="text-right flex-shrink-0">
+                      <div className={cn("text-lg font-bold tabular-nums", scoreColor(r.project_quality))}>
+                        {r.project_quality.toFixed(0)}
+                      </div>
+                      <div className="text-[9px] text-muted-foreground">/ 100</div>
+                    </div>
+                  </button>
+                  <button
+                    onClick={() => onRemove(r.id)}
+                    className="flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:text-rose-400 hover:bg-rose-500/10 transition-colors flex-shrink-0"
+                  >
+                    <Star className="h-4 w-4 fill-current text-amber-400 group-hover:text-amber-400" />
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+        )}
       </div>
     </div>
   );

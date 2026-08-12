@@ -414,3 +414,74 @@ Priority Recommendations for Next Phase:
 5. Add portfolio watchlist feature.
 6. Add keyboard shortcuts (e.g., 's' to scan, '/' to focus search).
 7. Cache risk reports to avoid re-fetching on every analytics view switch.
+
+---
+Task ID: 7
+Agent: main-agent (cron review round 4)
+Task: Keyboard shortcuts, watchlist feature, scan presets, project card star
+
+Work Log:
+- Read worklog.md to understand project context and previous work (Tasks 1-6).
+- Verified both services running: Next.js HTTP 200, Python scanner HTTP 200 (4 scans, 48 reports).
+- Performed QA testing via agent-browser:
+  - Page loads without runtime errors.
+  - VLM analysis identified: header layout could be improved, need for watchlist, keyboard shortcuts.
+  - Detail drawer verified: 25 SVGs, radar chart, export buttons all present.
+- Added keyboard shortcuts:
+  - 's' = start scan, '/' = focus search, 'g' = grid view, 'a' = analytics view, 'c' = toggle compare, Escape = close drawer.
+  - Added useEffect with keydown listener that ignores input fields (except Escape).
+  - Added keyboard shortcut hints in the sidebar (kbd elements showing S, /, G/A).
+  - Verified: pressing 'a' switches to analytics, 'g' switches back to grid.
+- Added watchlist feature:
+  - Created `watchlist` state (Set<string>) persisted to localStorage.
+  - Added `toggleWatchlist` function and `showWatchlist` state.
+  - Added Star icon button to every ProjectCard (top-right corner).
+  - Watchlisted projects get amber border ring.
+  - Star appears on hover (opacity-0 → opacity-100) unless already watchlisted.
+  - Added Watchlist button in header with count badge.
+  - Created `WatchlistView` component in a Sheet drawer showing saved projects.
+  - Empty state shows star icon with helpful message.
+  - Watchlisted items show project info, action badge, quality score, and remove button.
+  - Verified: clicking star adds to watchlist, count badge updates, drawer shows saved project.
+- Added scan presets:
+  - Created `applyPreset` function with 4 presets: DeFi Focus, Large Cap, Emerging, Infrastructure.
+  - Each preset sets persona, market cap range, sectors, and max projects.
+  - Added 2x2 grid of preset buttons in sidebar with color-coded hover effects.
+  - Each preset shows name and description (e.g., "Investor · $500M+").
+  - Verified: clicking "DeFi Focus" updates MC Min=500, MC Max=50000, Max Projects=15.
+- Fixed TypeScript error in ComparisonView (nullish coalescing operator).
+- Updated ProjectCard to accept `watchlisted` and `onToggleWatchlist` props.
+- Updated all ProjectCard usages (Top Performers + All Candidates) to pass watchlist props.
+- Ran lint: 0 errors, 0 warnings (clean).
+- Verified via agent-browser:
+  - Watchlist star appears on project cards.
+  - Clicking star updates count badge in header.
+  - Watchlist drawer shows saved projects.
+  - Keyboard shortcuts work (a=analytics, g=grid).
+  - Scan presets update configuration fields.
+  - No console errors or warnings.
+
+Stage Summary:
+- **New features added**:
+  - Keyboard shortcuts (s/scan, //search, g/grid, a/analytics, c/compare, Esc/close)
+  - Watchlist with localStorage persistence (star toggle on cards, drawer view, count badge)
+  - Scan presets (DeFi Focus, Large Cap, Emerging, Infrastructure — 4 quick configs)
+  - Keyboard shortcut hints in sidebar (kbd elements)
+- **Bugs fixed**: TypeScript nullish coalescing error in ComparisonView.
+- **Files modified**: `src/app/page.tsx` (major enhancement).
+- **Verification**: All features tested via agent-browser. Lint clean. No console errors. VLM confirmed visual quality.
+
+Unresolved Issues / Risks:
+1. CoinGecko rate limits still cause some tokenomics data to be missing.
+2. Conservative scores (most projects 10-30/100) — by design.
+3. In-memory storage — scan results lost if Python service restarts.
+4. Watchlist only shows projects from the current scan's reports (cross-scan watchlist needs persistence of full report data).
+
+Priority Recommendations for Next Phase:
+1. Persist scan results to SQLite (Prisma configured).
+2. Add WebSocket real-time progress updates.
+3. Add PDF export.
+4. Improve scoring calibration.
+5. Make watchlist work across scans (store full report data, not just IDs).
+6. Add keyboard shortcut for watchlist toggle ('w').
+7. Add scan history comparison view.
