@@ -18,6 +18,7 @@ import {
   Gauge,
   GitCompare,
   Grid3x3,
+  History,
   Layers,
   ListFilter,
   Loader2,
@@ -316,6 +317,10 @@ export default function Home() {
   const [recentlyViewed, setRecentlyViewed] = useState<string[]>([]);
   // toast notifications
   const { toast } = useToast();
+  // scan history comparison
+  const [showHistory, setShowHistory] = useState(false);
+  const [historyScans, setHistoryScans] = useState<ScanStatus[]>([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
   // search input ref for keyboard shortcut
   const searchInputRef = useRef<HTMLInputElement>(null);
   const pollRef = useRef<NodeJS.Timeout | null>(null);
@@ -372,6 +377,9 @@ export default function Home() {
       } else if (e.key === "c" && !e.ctrlKey && !e.metaKey) {
         e.preventDefault();
         setCompareMode((m) => !m);
+      } else if (e.key === "w" && !e.ctrlKey && !e.metaKey) {
+        e.preventDefault();
+        setShowWatchlist((w) => !w);
       } else if (e.key === "Escape") {
         if (selectedReport) {
           setSelectedReport(null);
@@ -550,6 +558,24 @@ export default function Home() {
     }
   };
 
+  // --- scan history comparison ---
+  const loadHistory = async () => {
+    setHistoryLoading(true);
+    try {
+      const completedScans = scans.filter((s) => s.status === "completed").slice(0, 5);
+      const fullScans = await Promise.all(
+        completedScans.map(async (s) => {
+          const r = await fetch(`/api/scanner/scan/${s.scan_id}`);
+          return r.ok ? ((await r.json()) as ScanStatus) : null;
+        }),
+      );
+      setHistoryScans(fullScans.filter(Boolean) as ScanStatus[]);
+    } catch {
+    } finally {
+      setHistoryLoading(false);
+    }
+  };
+
   // fetch full reports for risk heatmap when entering analytics view
   const fetchRiskReports = useCallback(async () => {
     if (!activeScan?.reports || riskReports.length > 0) return;
@@ -723,6 +749,19 @@ export default function Home() {
                 <Activity className="h-3 w-3 text-emerald-500" />
                 {scans.length} scans
               </Badge>
+              {/* History button */}
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  setShowHistory(true);
+                  loadHistory();
+                }}
+                className="h-9 gap-1.5"
+              >
+                <History className="h-4 w-4 text-sky-400" />
+                <span className="hidden sm:inline">History</span>
+              </Button>
               {/* Watchlist button */}
               <Button
                 variant="outline"
@@ -1401,6 +1440,8 @@ export default function Home() {
               <span>views</span>
               <kbd className="px-1.5 py-0.5 rounded bg-muted/40 border border-border/40 font-mono text-[9px] ml-1">C</kbd>
               <span>compare</span>
+              <kbd className="px-1.5 py-0.5 rounded bg-muted/40 border border-border/40 font-mono text-[9px] ml-1">W</kbd>
+              <span>watchlist</span>
               <kbd className="px-1.5 py-0.5 rounded bg-muted/40 border border-border/40 font-mono text-[9px] ml-1">Esc</kbd>
               <span>close</span>
             </div>
@@ -1462,6 +1503,24 @@ export default function Home() {
             }}
             reports={activeScan?.reports || []}
           />
+        </SheetContent>
+      </Sheet>
+
+      {/* ----------------------------------------------------------------- */}
+      {/*  History dialog                                                    */}
+      {/* ----------------------------------------------------------------- */}
+      <Sheet
+        open={showHistory}
+        onOpenChange={(o) => !o && setShowHistory(false)}
+      >
+        <SheetContent side="right" className="w-full sm:max-w-2xl lg:max-w-3xl p-0 overflow-y-auto">
+          <SheetDescription className="sr-only">
+            Scan history comparison across recent scans
+          </SheetDescription>
+          <HistoryView scans={historyScans} loading={historyLoading} onSelectScan={(s) => {
+            setShowHistory(false);
+            setActiveScan(s);
+          }} />
         </SheetContent>
       </Sheet>
     </div>
@@ -1680,7 +1739,7 @@ function ProjectCard({
   return (
     <div
       className={cn(
-        "group relative text-left p-4 rounded-xl border bg-card/40 hover:bg-card/80 transition-all overflow-hidden",
+        "group relative text-left p-4 rounded-xl border bg-card/40 hover:bg-card/80 hover:shadow-lg hover:shadow-emerald-500/5 hover:-translate-y-0.5 transition-all duration-200 overflow-hidden",
         compareSelected
           ? "border-violet-500/60 ring-2 ring-violet-500/20"
           : watchlisted
@@ -2733,6 +2792,172 @@ function WatchlistView({
             })}
           </div>
         )}
+      </div>
+    </div>
+  );
+}
+
+// --------------------------------------------------------------------------- //
+//  HistoryView — scan history comparison across recent scans
+// --------------------------------------------------------------------------- //
+function HistoryView({
+  scans,
+  loading,
+  onSelectScan,
+}: {
+  scans: ScanStatus[];
+  loading: boolean;
+  onSelectScan: (scan: ScanStatus) => void;
+}) {
+  if (loading) {
+    return (
+      <div>
+        <SheetHeader className="px-6 pt-6 pb-4 border-b border-border/60">
+          <SheetTitle className="flex items-center gap-2 text-base">
+            <History className="h-5 w-5 text-sky-400" />
+            Scan History
+          </SheetTitle>
+          <SheetDescription className="sr-only">Loading scan history data</SheetDescription>
+        </SheetHeader>
+        <div className="flex items-center justify-center py-16">
+          <Loader2 className="h-8 w-8 animate-spin text-sky-500" />
+        </div>
+      </div>
+    );
+  }
+
+  if (scans.length === 0) {
+    return (
+      <div>
+        <SheetHeader className="px-6 pt-6 pb-4 border-b border-border/60">
+          <SheetTitle className="flex items-center gap-2 text-base">
+            <History className="h-5 w-5 text-sky-400" />
+            Scan History
+          </SheetTitle>
+          <SheetDescription className="sr-only">No completed scans available</SheetDescription>
+        </SheetHeader>
+        <div className="flex flex-col items-center justify-center py-16 text-center px-6">
+          <History className="h-12 w-12 text-muted-foreground/30 mb-3" />
+          <p className="text-sm text-muted-foreground">No completed scans yet</p>
+        </div>
+      </div>
+    );
+  }
+
+  // Calculate stats for each scan
+  const scanStats = scans.map((s) => {
+    const reports = s.reports;
+    const total = reports.length;
+    const avgQ = total > 0 ? reports.reduce((sum, r) => sum + r.project_quality, 0) / total : 0;
+    const avgConf = total > 0 ? reports.reduce((sum, r) => sum + r.confidence, 0) / total : 0;
+    const highCount = reports.filter((r) => r.project_quality >= 70).length;
+    const vetoCount = reports.filter((r) => r.veto).length;
+    const topProject = reports.length > 0
+      ? reports.reduce((best, r) => r.project_quality > best.project_quality ? r : best, reports[0])
+      : null;
+    return { scan: s, total, avgQ, avgConf, highCount, vetoCount, topProject };
+  });
+
+  return (
+    <div>
+      <SheetHeader className="px-6 pt-6 pb-4 border-b border-border/60 sticky top-0 bg-background/95 backdrop-blur z-10">
+        <SheetTitle className="flex items-center gap-2 text-base">
+          <History className="h-5 w-5 text-sky-400" />
+          Scan History
+          <Badge variant="secondary" className="font-mono text-[10px]">{scans.length}</Badge>
+        </SheetTitle>
+        <p className="text-xs text-muted-foreground">
+          Compare metrics across your last {scans.length} completed scans
+        </p>
+      </SheetHeader>
+
+      <div className="px-6 py-5 space-y-4">
+        {/* Trend chart: avg quality over time */}
+        <Card className="border-border/50 bg-card/30 backdrop-blur-sm">
+          <CardHeader className="pb-2">
+            <CardTitle className="flex items-center gap-2 text-sm">
+              <TrendingUp className="h-4 w-4 text-emerald-500" />
+              Quality Trend
+            </CardTitle>
+            <CardDescription className="text-xs">
+              Average project quality across recent scans
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="pt-2">
+            <div className="flex items-end justify-between gap-2 h-32 px-2">
+              {scanStats.slice().reverse().map((stat, i) => {
+                const heightPct = Math.max(5, (stat.avgQ / 100) * 100);
+                return (
+                  <div key={i} className="flex-1 flex flex-col items-center gap-1.5 h-full justify-end">
+                    <span className="text-xs font-mono font-semibold text-foreground">{stat.avgQ.toFixed(0)}</span>
+                    <div className="w-full flex-1 flex items-end">
+                      <div
+                        className={cn("w-full rounded-t-md transition-all duration-700 min-h-[4px]", scoreBg(stat.avgQ))}
+                        style={{ height: `${heightPct}%` }}
+                      />
+                    </div>
+                    <span className="text-[9px] text-muted-foreground font-mono truncate w-full text-center">
+                      {stat.scan.scan_id.slice(0, 6)}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Scan cards */}
+        <div className="space-y-3">
+          <div className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+            Individual Scans
+          </div>
+          {scanStats.map((stat) => (
+            <button
+              key={stat.scan.scan_id}
+              onClick={() => onSelectScan(stat.scan)}
+              className="w-full text-left p-4 rounded-xl border border-border/50 bg-card/30 hover:bg-card/60 hover:border-sky-500/40 transition-all group"
+            >
+              <div className="flex items-center justify-between gap-3 mb-3">
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2">
+                    <span className="font-mono text-xs text-muted-foreground">{stat.scan.scan_id.slice(0, 12)}</span>
+                    <Badge variant="outline" className="text-[10px] capitalize">{stat.scan.config.persona}</Badge>
+                  </div>
+                  <div className="text-[10px] text-muted-foreground mt-0.5">
+                    {new Date(stat.scan.started_at).toLocaleString()}
+                  </div>
+                </div>
+                <ArrowRight className="h-4 w-4 text-muted-foreground group-hover:text-sky-400 transition-colors" />
+              </div>
+              <div className="grid grid-cols-4 gap-2">
+                <div className="text-center p-2 rounded-lg bg-muted/20">
+                  <div className="text-[10px] text-muted-foreground">Projects</div>
+                  <div className="text-sm font-bold font-mono">{stat.total}</div>
+                </div>
+                <div className="text-center p-2 rounded-lg bg-muted/20">
+                  <div className="text-[10px] text-muted-foreground">Avg Quality</div>
+                  <div className={cn("text-sm font-bold font-mono", scoreColor(stat.avgQ))}>{stat.avgQ.toFixed(1)}</div>
+                </div>
+                <div className="text-center p-2 rounded-lg bg-muted/20">
+                  <div className="text-[10px] text-muted-foreground">Avg Conf</div>
+                  <div className="text-sm font-bold font-mono text-emerald-400">{stat.avgConf.toFixed(0)}%</div>
+                </div>
+                <div className="text-center p-2 rounded-lg bg-muted/20">
+                  <div className="text-[10px] text-muted-foreground">High (70+)</div>
+                  <div className="text-sm font-bold font-mono text-lime-400">{stat.highCount}</div>
+                </div>
+              </div>
+              {stat.topProject && (
+                <div className="mt-2 flex items-center gap-1.5 text-[11px]">
+                  <Sparkles className="h-3 w-3 text-amber-400" />
+                  <span className="text-muted-foreground">Top:</span>
+                  <span className="font-semibold">{stat.topProject.name}</span>
+                  <span className="text-muted-foreground font-mono">({stat.topProject.project_quality.toFixed(0)})</span>
+                </div>
+              )}
+            </button>
+          ))}
+        </div>
       </div>
     </div>
   );

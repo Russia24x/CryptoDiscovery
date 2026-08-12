@@ -561,3 +561,72 @@ Priority Recommendations for Next Phase:
 5. Make recently viewed work across scans (store full report data).
 6. Add scan history comparison view.
 7. Add keyboard shortcut for watchlist toggle ('w').
+
+---
+Task ID: 9
+Agent: main-agent (cron review round 6)
+Task: Scan history comparison view, keyboard shortcut 'w', card hover effects, accessibility fixes
+
+Work Log:
+- Read worklog.md to understand project context and previous work (Tasks 1-8).
+- Verified both services running: Next.js HTTP 200, Python scanner HTTP 200 (7 scans, 84 reports).
+- Performed QA testing via agent-browser:
+  - Page loads without runtime errors.
+  - VLM analysis identified: need for scan history comparison, card hover effects, keyboard shortcut for watchlist.
+  - Detail drawer verified: 26 SVGs, radar chart, export buttons, verdict all present.
+- Added scan history comparison view:
+  - Created `HistoryView` component with quality trend bar chart and individual scan cards.
+  - Added `showHistory`, `historyScans`, `historyLoading` state.
+  - Created `loadHistory` function that fetches up to 5 completed scans with full report data.
+  - Added History button in header (sky-colored History icon).
+  - Quality Trend chart shows average quality score per scan as vertical bars (oldest to newest).
+  - Individual scan cards show: scan ID, persona badge, timestamp, 4 metric tiles (Projects, Avg Quality, Avg Conf, High 70+), and top project with score.
+  - Clicking a scan card closes the dialog and loads that scan as the active scan.
+  - Loading state shows spinner with proper SheetTitle for accessibility.
+  - Empty state shows History icon with "No completed scans yet" message.
+  - Verified: History dialog opens with all 3 sections (Scan History, Quality Trend, Individual Scans), shows actual scan IDs.
+  - VLM confirmed: "quality trend bar chart", "individual scan cards with metrics", "clean layout".
+- Added keyboard shortcut 'w' for watchlist toggle:
+  - Added `w` key handler in keyboard shortcuts useEffect.
+  - Toggles `showWatchlist` state.
+  - Updated footer keyboard legend to include W (watchlist).
+  - Verified: pressing 'w' opens watchlist dialog.
+- Improved project card hover effects:
+  - Added `hover:shadow-lg hover:shadow-emerald-500/5 hover:-translate-y-0.5` for subtle lift effect.
+  - Added `duration-200` for smooth transition.
+  - Creates a premium micro-interaction on hover.
+- Fixed accessibility error:
+  - Added SheetTitle and SheetDescription to HistoryView loading state (was missing, causing DialogContent accessibility error).
+  - Added SheetDescription to HistoryView empty state.
+  - Fixed "DialogContent requires DialogTitle for accessible screen reader users" console error.
+- Ran lint: 0 errors, 0 warnings (clean).
+- Verified via agent-browser:
+  - History dialog: all 3 sections present (Scan History, Quality Trend, Individual Scans).
+  - 'w' keyboard shortcut opens watchlist.
+  - No console errors or warnings after fresh reload.
+  - VLM confirmed visual quality of history view.
+
+Stage Summary:
+- **New features added**:
+  - Scan history comparison view with quality trend chart and individual scan cards
+  - Keyboard shortcut 'w' for watchlist toggle
+  - Enhanced project card hover effects (shadow + lift)
+  - History button in header with sky-colored icon
+- **Bugs fixed**: DialogContent accessibility error (missing SheetTitle in loading state).
+- **Files modified**: `src/app/page.tsx` (major enhancement).
+- **Verification**: All features tested via agent-browser. Lint clean. No console errors. VLM confirmed visual quality.
+
+Unresolved Issues / Risks:
+1. CoinGecko rate limits still cause some tokenomics data to be missing.
+2. Conservative scores (most projects 10-30/100) — by design.
+3. In-memory storage — scan results lost if Python service restarts.
+4. History view fetches all scan data on open (could be slow with many scans).
+
+Priority Recommendations for Next Phase:
+1. Persist scan results to SQLite (Prisma configured).
+2. Add WebSocket real-time progress updates.
+3. Add PDF export.
+4. Improve scoring calibration.
+5. Add scan diff view (compare two specific scans side-by-side).
+6. Add export history view as image/CSV.
+7. Add global search across all scans.
