@@ -630,3 +630,68 @@ Priority Recommendations for Next Phase:
 5. Add scan diff view (compare two specific scans side-by-side).
 6. Add export history view as image/CSV.
 7. Add global search across all scans.
+
+---
+Task ID: 10
+Agent: main-agent (cron review round 7)
+Task: Market sentiment banner, global search across all scans
+
+Work Log:
+- Read worklog.md to understand project context and previous work (Tasks 1-9).
+- Verified both services running: Next.js HTTP 200, Python scanner HTTP 200 (7 scans, 84 reports).
+- Performed QA testing via agent-browser:
+  - Page loads without runtime errors.
+  - VLM analysis identified: need for market sentiment indicator, global search, radar chart improvements.
+  - Detail drawer verified: 26 SVGs, radar chart, export buttons, verdict all present.
+- Added Market Sentiment banner:
+  - Created `MarketSentimentBanner` component showing composite sentiment score (0-100).
+  - Score formula: 40% avg quality + 25% avg confidence + 35% high-score ratio - 20% veto penalty.
+  - 4 sentiment levels: Bullish (≥70, emerald), Cautiously Optimistic (≥50, lime), Neutral (≥30, amber), Bearish (<30, rose).
+  - Gradient background that matches sentiment level.
+  - Large icon (TrendingUp/Activity/Gauge/TrendingDown) in circular badge.
+  - Prominent score display with "/100" suffix.
+  - Horizontal meter bar with Bearish/Bullish labels and tick marks at 25/50/75.
+  - Shows summary stats: "Based on X projects · Y high-score · Z vetoed".
+  - Compact metrics display: Q (quality), C (confidence), H (high count).
+  - VLM confirmed: "Market Sentiment banner with a gauge/meter, visually prominent at the top".
+- Added global search across all scans:
+  - Created `GlobalSearchView` component with search input and results list.
+  - Added `performGlobalSearch` function that fetches all completed scans and searches by name, symbol, category, or sector.
+  - Added "Search all" button in header with Search icon.
+  - Results show: project logo, name, symbol, action badge, category, scan ID, and quality score.
+  - Result count and scan count displayed at top.
+  - Empty state shows Search icon with helpful message.
+  - No results state shows "No results found for '{query}'".
+  - Auto-focuses search input when dialog opens.
+  - Clicking a result opens the project detail drawer.
+  - Verified: searching "aave" found 7 results across 7 scans with different scores.
+  - VLM confirmed: "7 results for 'aave' across 7 scans, clean and well-organized layout".
+- Added Search icon import.
+- Ran lint: 0 errors, 0 warnings (clean).
+- Verified via agent-browser:
+  - Market Sentiment banner renders with score, label, and meter bar.
+  - Global Search dialog opens, accepts input, shows results.
+  - No console errors or warnings after fresh reload.
+
+Stage Summary:
+- **New features added**:
+  - Market Sentiment banner with composite score (4 levels: Bullish/Cautiously Optimistic/Neutral/Bearish)
+  - Global search across all completed scans (by name, symbol, category, sector)
+  - Search all button in header
+- **Files modified**: `src/app/page.tsx` (major enhancement).
+- **Verification**: All features tested via agent-browser. Lint clean. No console errors. VLM confirmed visual quality.
+
+Unresolved Issues / Risks:
+1. CoinGecko rate limits still cause some tokenomics data to be missing.
+2. Conservative scores (most projects 10-30/100) — by design.
+3. In-memory storage — scan results lost if Python service restarts.
+4. Global search fetches all scan data on each query (could be slow with many scans).
+
+Priority Recommendations for Next Phase:
+1. Persist scan results to SQLite (Prisma configured).
+2. Add WebSocket real-time progress updates.
+3. Add PDF export.
+4. Improve scoring calibration.
+5. Add scan diff view (compare two specific scans side-by-side).
+6. Add debounce to global search to avoid excessive API calls.
+7. Add keyboard shortcut for global search (e.g., 'Ctrl+K' or 'Shift+/').

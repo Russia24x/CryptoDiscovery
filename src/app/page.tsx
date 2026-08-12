@@ -25,6 +25,7 @@ import {
   Moon,
   PieChart,
   Radar,
+  Search,
   ShieldAlert,
   ShieldCheck,
   Sparkles,
@@ -321,6 +322,11 @@ export default function Home() {
   const [showHistory, setShowHistory] = useState(false);
   const [historyScans, setHistoryScans] = useState<ScanStatus[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
+  // global search across all scans
+  const [showGlobalSearch, setShowGlobalSearch] = useState(false);
+  const [globalSearchQuery, setGlobalSearchQuery] = useState("");
+  const [globalSearchResults, setGlobalSearchResults] = useState<{ scan: ScanListItem; report: ScanSummaryItem }[]>([]);
+  const [globalSearchLoading, setGlobalSearchLoading] = useState(false);
   // search input ref for keyboard shortcut
   const searchInputRef = useRef<HTMLInputElement>(null);
   const pollRef = useRef<NodeJS.Timeout | null>(null);
@@ -576,6 +582,43 @@ export default function Home() {
     }
   };
 
+  // --- global search across all scans ---
+  const performGlobalSearch = useCallback(async (query: string) => {
+    if (!query.trim()) {
+      setGlobalSearchResults([]);
+      return;
+    }
+    setGlobalSearchLoading(true);
+    try {
+      const completedScans = scans.filter((s) => s.status === "completed");
+      const fullScans = await Promise.all(
+        completedScans.map(async (s) => {
+          const r = await fetch(`/api/scanner/scan/${s.scan_id}`);
+          return r.ok ? ((await r.json()) as ScanStatus) : null;
+        }),
+      );
+      const results: { scan: ScanListItem; report: ScanSummaryItem }[] = [];
+      const q = query.toLowerCase().trim();
+      fullScans.filter(Boolean).forEach((scan) => {
+        scan.reports.forEach((report) => {
+          if (
+            report.name.toLowerCase().includes(q) ||
+            report.symbol.toLowerCase().includes(q) ||
+            report.category.toLowerCase().includes(q) ||
+            report.sector.toLowerCase().includes(q)
+          ) {
+            const scanListItem = scans.find((s) => s.scan_id === scan.scan_id);
+            if (scanListItem) results.push({ scan: scanListItem, report });
+          }
+        });
+      });
+      setGlobalSearchResults(results);
+    } catch {
+    } finally {
+      setGlobalSearchLoading(false);
+    }
+  }, [scans]);
+
   // fetch full reports for risk heatmap when entering analytics view
   const fetchRiskReports = useCallback(async () => {
     if (!activeScan?.reports || riskReports.length > 0) return;
@@ -749,6 +792,16 @@ export default function Home() {
                 <Activity className="h-3 w-3 text-emerald-500" />
                 {scans.length} scans
               </Badge>
+              {/* Global search button */}
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setShowGlobalSearch(true)}
+                className="h-9 gap-1.5"
+              >
+                <Search className="h-4 w-4 text-muted-foreground" />
+                <span className="hidden lg:inline">Search all</span>
+              </Button>
               {/* History button */}
               <Button
                 variant="outline"
@@ -1053,44 +1106,48 @@ export default function Home() {
 
             {/* Market Overview Stats */}
             {marketStats && (
-              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
-                <StatCard
-                  icon={ChartNoAxesColumn}
-                  label="Total Scanned"
-                  value={marketStats.total.toString()}
-                  color="text-sky-400"
-                />
-                <StatCard
-                  icon={Gauge}
-                  label="Avg Quality"
-                  value={marketStats.avgQ.toFixed(1)}
-                  color={scoreColor(marketStats.avgQ)}
-                />
-                <StatCard
-                  icon={BadgeCheck}
-                  label="Avg Confidence"
-                  value={`${marketStats.avgConf.toFixed(0)}%`}
-                  color="text-emerald-400"
-                />
-                <StatCard
-                  icon={Target}
-                  label="High Score (70+)"
-                  value={marketStats.highCount.toString()}
-                  color="text-lime-400"
-                />
-                <StatCard
-                  icon={ShieldAlert}
-                  label="Vetoed"
-                  value={marketStats.vetoCount.toString()}
-                  color={marketStats.vetoCount > 0 ? "text-rose-400" : "text-muted-foreground"}
-                />
-                <StatCard
-                  icon={Layers}
-                  label="Top Sector"
-                  value={marketStats.topSector}
-                  color="text-amber-400"
-                />
-              </div>
+              <>
+                {/* Market Sentiment Banner */}
+                <MarketSentimentBanner stats={marketStats} />
+                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+                  <StatCard
+                    icon={ChartNoAxesColumn}
+                    label="Total Scanned"
+                    value={marketStats.total.toString()}
+                    color="text-sky-400"
+                  />
+                  <StatCard
+                    icon={Gauge}
+                    label="Avg Quality"
+                    value={marketStats.avgQ.toFixed(1)}
+                    color={scoreColor(marketStats.avgQ)}
+                  />
+                  <StatCard
+                    icon={BadgeCheck}
+                    label="Avg Confidence"
+                    value={`${marketStats.avgConf.toFixed(0)}%`}
+                    color="text-emerald-400"
+                  />
+                  <StatCard
+                    icon={Target}
+                    label="High Score (70+)"
+                    value={marketStats.highCount.toString()}
+                    color="text-lime-400"
+                  />
+                  <StatCard
+                    icon={ShieldAlert}
+                    label="Vetoed"
+                    value={marketStats.vetoCount.toString()}
+                    color={marketStats.vetoCount > 0 ? "text-rose-400" : "text-muted-foreground"}
+                  />
+                  <StatCard
+                    icon={Layers}
+                    label="Top Sector"
+                    value={marketStats.topSector}
+                    color="text-amber-400"
+                  />
+                </div>
+              </>
             )}
 
             {/* Reports grid with filtering */}
@@ -1521,6 +1578,39 @@ export default function Home() {
             setShowHistory(false);
             setActiveScan(s);
           }} />
+        </SheetContent>
+      </Sheet>
+
+      {/* ----------------------------------------------------------------- */}
+      {/*  Global search dialog                                              */}
+      {/* ----------------------------------------------------------------- */}
+      <Sheet
+        open={showGlobalSearch}
+        onOpenChange={(o) => {
+          if (!o) {
+            setShowGlobalSearch(false);
+            setGlobalSearchQuery("");
+            setGlobalSearchResults([]);
+          }
+        }}
+      >
+        <SheetContent side="right" className="w-full sm:max-w-lg lg:max-w-xl p-0 overflow-y-auto">
+          <SheetDescription className="sr-only">
+            Search across all completed scans
+          </SheetDescription>
+          <GlobalSearchView
+            query={globalSearchQuery}
+            onQueryChange={(q) => {
+              setGlobalSearchQuery(q);
+              performGlobalSearch(q);
+            }}
+            results={globalSearchResults}
+            loading={globalSearchLoading}
+            onSelect={async (reportId) => {
+              setShowGlobalSearch(false);
+              await loadReport(reportId);
+            }}
+          />
         </SheetContent>
       </Sheet>
     </div>
@@ -2958,6 +3048,210 @@ function HistoryView({
             </button>
           ))}
         </div>
+      </div>
+    </div>
+  );
+}
+
+// --------------------------------------------------------------------------- //
+//  MarketSentimentBanner — prominent gauge showing overall market health
+// --------------------------------------------------------------------------- //
+function MarketSentimentBanner({
+  stats,
+}: {
+  stats: { total: number; avgQ: number; avgConf: number; highCount: number; vetoCount: number; topSector: string };
+}) {
+  // Calculate a composite sentiment score (0-100)
+  const qualityComponent = stats.avgQ; // 0-100
+  const confidenceComponent = stats.avgConf; // 0-100
+  const highRatio = stats.total > 0 ? (stats.highCount / stats.total) * 100 : 0;
+  const vetoPenalty = stats.total > 0 ? (stats.vetoCount / stats.total) * 100 : 0;
+  const sentiment = Math.round(
+    qualityComponent * 0.4 + confidenceComponent * 0.25 + highRatio * 0.35 - vetoPenalty * 0.2,
+  );
+  const clampedSentiment = Math.max(0, Math.min(100, sentiment));
+
+  let label: string;
+  let color: string;
+  let bgGradient: string;
+  let icon: typeof Gauge;
+  if (clampedSentiment >= 70) {
+    label = "Bullish";
+    color = "text-emerald-400";
+    bgGradient = "from-emerald-500/15 via-teal-500/10 to-transparent";
+    icon = TrendingUp;
+  } else if (clampedSentiment >= 50) {
+    label = "Cautiously Optimistic";
+    color = "text-lime-400";
+    bgGradient = "from-lime-500/15 via-amber-500/5 to-transparent";
+    icon = Activity;
+  } else if (clampedSentiment >= 30) {
+    label = "Neutral";
+    color = "text-amber-400";
+    bgGradient = "from-amber-500/15 via-orange-500/5 to-transparent";
+    icon = Gauge;
+  } else {
+    label = "Bearish";
+    color = "text-rose-400";
+    bgGradient = "from-rose-500/15 via-red-500/5 to-transparent";
+    icon = TrendingDown;
+  }
+
+  const SentimentIcon = icon;
+
+  return (
+    <div className={cn("relative overflow-hidden rounded-xl border p-4 bg-gradient-to-r", bgGradient, "border-border/50")}>
+      <div className="flex items-center justify-between gap-4">
+        <div className="flex items-center gap-4">
+          <div className={cn("flex h-14 w-14 items-center justify-center rounded-full bg-background/60 border border-border/40", color)}>
+            <SentimentIcon className="h-7 w-7" />
+          </div>
+          <div>
+            <div className="flex items-center gap-2">
+              <span className="text-[10px] text-muted-foreground uppercase tracking-wide font-semibold">Market Sentiment</span>
+              <Badge className={cn("text-[10px] border-transparent", color.replace("text-", "bg-").replace("-400", "-500/20"))}>
+                {label}
+              </Badge>
+            </div>
+            <div className="flex items-baseline gap-2 mt-0.5">
+              <span className={cn("text-3xl font-bold tabular-nums", color)}>{clampedSentiment}</span>
+              <span className="text-sm text-muted-foreground">/ 100</span>
+            </div>
+            <p className="text-[11px] text-muted-foreground mt-0.5">
+              Based on {stats.total} projects · {stats.highCount} high-score · {stats.vetoCount} vetoed
+            </p>
+          </div>
+        </div>
+        {/* Sentiment meter bar */}
+        <div className="hidden sm:flex flex-col items-end gap-1.5 flex-shrink-0">
+          <div className="flex items-center gap-1.5">
+            <span className="text-[10px] text-muted-foreground">Bearish</span>
+            <div className="relative w-32 h-2 rounded-full bg-muted/30 overflow-hidden">
+              <div
+                className={cn("absolute inset-y-0 left-0 rounded-full transition-all duration-1000", scoreBg(clampedSentiment))}
+                style={{ width: `${clampedSentiment}%` }}
+              />
+              {/* Tick marks */}
+              {[25, 50, 75].map((tick) => (
+                <div key={tick} className="absolute inset-y-0 w-px bg-background/40" style={{ left: `${tick}%` }} />
+              ))}
+            </div>
+            <span className="text-[10px] text-muted-foreground">Bullish</span>
+          </div>
+          <div className="text-[10px] text-muted-foreground font-mono">
+            Q:{stats.avgQ.toFixed(0)} · C:{stats.avgConf.toFixed(0)}% · H:{stats.highCount}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// --------------------------------------------------------------------------- //
+//  GlobalSearchView — search across all completed scans
+// --------------------------------------------------------------------------- //
+function GlobalSearchView({
+  query,
+  onQueryChange,
+  results,
+  loading,
+  onSelect,
+}: {
+  query: string;
+  onQueryChange: (q: string) => void;
+  results: { scan: ScanListItem; report: ScanSummaryItem }[];
+  loading: boolean;
+  onSelect: (reportId: string) => void;
+}) {
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    inputRef.current?.focus();
+  }, []);
+
+  return (
+    <div>
+      <SheetHeader className="px-6 pt-6 pb-4 border-b border-border/60 sticky top-0 bg-background/95 backdrop-blur z-10">
+        <SheetTitle className="flex items-center gap-2 text-base">
+          <Search className="h-5 w-5 text-muted-foreground" />
+          Global Search
+        </SheetTitle>
+        <SheetDescription className="sr-only">
+          Search for projects by name, symbol, or category across all completed scans
+        </SheetDescription>
+        <div className="relative mt-2">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+          <Input
+            ref={inputRef}
+            placeholder="Search across all scans..."
+            value={query}
+            onChange={(e) => onQueryChange(e.target.value)}
+            className="h-10 pl-10 text-sm"
+          />
+          {loading && (
+            <Loader2 className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 animate-spin text-muted-foreground" />
+          )}
+        </div>
+      </SheetHeader>
+
+      <div className="px-6 py-5">
+        {!query.trim() ? (
+          <div className="flex flex-col items-center justify-center py-16 text-center">
+            <Search className="h-12 w-12 text-muted-foreground/30 mb-3" />
+            <p className="text-sm text-muted-foreground">Start typing to search across all scans</p>
+            <p className="text-[11px] text-muted-foreground/70 mt-1">Search by name, symbol, category, or sector</p>
+          </div>
+        ) : results.length === 0 && !loading ? (
+          <div className="flex flex-col items-center justify-center py-16 text-center">
+            <p className="text-sm text-muted-foreground">No results found for "{query}"</p>
+          </div>
+        ) : (
+          <>
+            <div className="text-[10px] text-muted-foreground mb-3">
+              {results.length} result{results.length !== 1 ? "s" : ""} across {new Set(results.map((r) => r.scan.scan_id)).size} scan{new Set(results.map((r) => r.scan.scan_id)).size !== 1 ? "s" : ""}
+            </div>
+            <div className="space-y-2">
+              {results.map((result, i) => {
+                const ab = actionBadge(result.report.action);
+                return (
+                  <button
+                    key={`${result.report.id}-${i}`}
+                    onClick={() => onSelect(result.report.id)}
+                    className="w-full flex items-center gap-3 p-3 rounded-lg border border-border/40 bg-card/30 hover:bg-card/60 hover:border-emerald-500/40 transition-all group text-left"
+                  >
+                    <div className="flex h-9 w-9 items-center justify-center rounded-full bg-muted/40 border border-border/40 overflow-hidden flex-shrink-0">
+                      {result.report.image ? (
+                        <img src={result.report.image} alt={result.report.symbol} className="h-full w-full object-cover" />
+                      ) : (
+                        <span className="text-[10px] font-bold text-muted-foreground">{result.report.symbol.slice(0, 3)}</span>
+                      )}
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-sm font-semibold truncate">{result.report.name}</span>
+                        <span className="text-[11px] text-muted-foreground font-mono">${result.report.symbol}</span>
+                      </div>
+                      <div className="flex items-center gap-1.5 mt-0.5">
+                        <Badge variant="outline" className={cn("text-[9px] gap-0.5 h-4", ab.cls)}>
+                          {result.report.action}
+                        </Badge>
+                        <span className="text-[10px] text-muted-foreground">{result.report.category}</span>
+                        <span className="text-[10px] text-muted-foreground/50">·</span>
+                        <span className="text-[10px] text-muted-foreground font-mono">{result.scan.scan_id.slice(0, 8)}</span>
+                      </div>
+                    </div>
+                    <div className="text-right flex-shrink-0">
+                      <div className={cn("text-lg font-bold tabular-nums", scoreColor(result.report.project_quality))}>
+                        {result.report.project_quality.toFixed(0)}
+                      </div>
+                      <div className="text-[9px] text-muted-foreground">/ 100</div>
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          </>
+        )}
       </div>
     </div>
   );
