@@ -11,6 +11,7 @@ import {
   ChartNoAxesColumn,
   CircleDollarSign,
   Clock,
+  Copy,
   Crosshair,
   Download,
   Filter,
@@ -490,6 +491,10 @@ export default function Home() {
       if (r.ok) {
         const report = await r.json();
         setSelectedReport(report);
+        // fetch score history for this project
+        if (report.candidate?.symbol) {
+          fetchProjectScoreHistory(report.candidate.symbol);
+        }
         // track recently viewed
         setRecentlyViewed((cur) => {
           const next = [id, ...cur.filter((x) => x !== id)].slice(0, 5);
@@ -618,6 +623,7 @@ export default function Home() {
       const results: { scan: ScanListItem; report: ScanSummaryItem }[] = [];
       const q = query.toLowerCase().trim();
       fullScans.filter(Boolean).forEach((scan) => {
+        if (!scan) return;
         scan.reports.forEach((report) => {
           if (
             report.name.toLowerCase().includes(q) ||
@@ -683,6 +689,81 @@ export default function Home() {
     a.click();
     URL.revokeObjectURL(url);
   };
+
+  // --- CSV export for all projects in a scan ---
+  const exportScanCSV = () => {
+    if (!activeScan?.reports || activeScan.reports.length === 0) return;
+    const headers = [
+      "Name", "Symbol", "Category", "Sector", "Project Quality", "Token Quality",
+      "Confidence", "Action", "Vetoed", "Image URL",
+    ];
+    const rows = activeScan.reports.map((r) => [
+      r.name,
+      r.symbol,
+      r.category,
+      r.sector,
+      r.project_quality.toFixed(1),
+      r.token_quality != null ? r.token_quality.toFixed(1) : "",
+      r.confidence.toFixed(0),
+      r.action,
+      r.veto ? "Yes" : "No",
+      r.image || "",
+    ]);
+    const csv = [headers, ...rows]
+      .map((row) => row.map((cell) => `"${String(cell).replace(/"/g, '""')}"`).join(","))
+      .join("\n");
+    const blob = new Blob([csv], { type: "text/csv" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `scan-${activeScan.scan_id.slice(0, 12)}-results.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+    toast({ title: "✅ CSV exported", description: `${activeScan.reports.length} projects exported to CSV` });
+  };
+
+  // --- copy report summary to clipboard ---
+  const copyReportSummary = (report: FullReport) => {
+    const summary = [
+      `${report.candidate.name} ($${report.candidate.symbol})`,
+      `Quality: ${report.project_quality_score}/100 | Token: ${report.token_quality_score ?? "N/A"} | Confidence: ${report.confidence}%`,
+      `Action: ${report.decision.action_label}`,
+      `Verdict: ${report.executive_verdict}`,
+      `Thesis: ${report.final_thesis}`,
+    ].join("\n");
+    navigator.clipboard.writeText(summary).then(() => {
+      toast({ title: "📋 Copied to clipboard", description: "Report summary ready to paste" });
+    }).catch(() => {
+      toast({ title: "❌ Copy failed", description: "Could not copy to clipboard", variant: "destructive" });
+    });
+  };
+
+  // --- project score history across scans ---
+  const [projectScoreHistory, setProjectScoreHistory] = useState<{ scanId: string; score: number; date: string }[]>([]);
+  const fetchProjectScoreHistory = useCallback(async (symbol: string) => {
+    try {
+      const completedScans = scans.filter((s) => s.status === "completed");
+      const fullScans = await Promise.all(
+        completedScans.map(async (s) => {
+          const r = await fetch(`/api/scanner/scan/${s.scan_id}`);
+          return r.ok ? ((await r.json()) as ScanStatus) : null;
+        }),
+      );
+      const history: { scanId: string; score: number; date: string }[] = [];
+      fullScans.filter(Boolean).forEach((scan) => {
+        if (!scan) return;
+        const report = scan.reports.find((r) => r.symbol === symbol);
+        if (report) {
+          history.push({
+            scanId: scan.scan_id,
+            score: report.project_quality,
+            date: scan.started_at,
+          });
+        }
+      });
+      setProjectScoreHistory(history);
+    } catch {}
+  }, [scans]);
 
   const toggleSector = (s: string) => {
     setSectors((cur) => (cur.includes(s) ? cur.filter((x) => x !== s) : [...cur, s]));
@@ -1185,6 +1266,16 @@ export default function Home() {
                       </Badge>
                     </h2>
                     <div className="flex items-center gap-2">
+                      {/* CSV export */}
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={exportScanCSV}
+                        className="h-8 text-xs gap-1.5"
+                      >
+                        <Download className="h-3.5 w-3.5" />
+                        <span className="hidden sm:inline">CSV</span>
+                      </Button>
                       {/* View mode toggle */}
                       <div className="flex items-center rounded-lg border border-border/50 bg-muted/20 p-0.5">
                         <button
@@ -1538,7 +1629,12 @@ export default function Home() {
             Detailed project analysis report with all framework sections
           </SheetDescription>
           {selectedReport ? (
-            <ReportDetail report={selectedReport} onExport={exportReport} />
+            <ReportDetail
+              report={selectedReport}
+              onExport={exportReport}
+              onCopy={copyReportSummary}
+              scoreHistory={projectScoreHistory}
+            />
           ) : reportLoading ? (
             <ReportSkeleton />
           ) : null}
@@ -2023,9 +2119,13 @@ function ProjectCard({
 function ReportDetail({
   report,
   onExport,
+  onCopy,
+  scoreHistory = [],
 }: {
   report: FullReport;
   onExport?: (r: FullReport, format: "json" | "markdown") => void;
+  onCopy?: (r: FullReport) => void;
+  scoreHistory?: { scanId: string; score: number; date: string }[];
 }) {
   const ab = actionBadge(report.decision.action_label);
   return (
@@ -2076,8 +2176,8 @@ function ReportDetail({
               Evidence {report.evidence_grade.split(" - ")[0]}
             </Badge>
           </div>
-          {onExport && (
-            <div className="flex items-center gap-1">
+          <div className="flex items-center gap-1">
+            {onCopy && (
               <TooltipProvider>
                 <Tooltip>
                   <TooltipTrigger asChild>
@@ -2085,26 +2185,46 @@ function ReportDetail({
                       variant="outline"
                       size="sm"
                       className="h-7 text-[11px] gap-1"
-                      onClick={() => onExport(report, "markdown")}
+                      onClick={() => onCopy(report)}
                     >
-                      <Download className="h-3 w-3" />
-                      MD
+                      <Copy className="h-3 w-3" />
+                      <span className="hidden sm:inline">Copy</span>
                     </Button>
                   </TooltipTrigger>
-                  <TooltipContent>Export as Markdown</TooltipContent>
+                  <TooltipContent>Copy summary to clipboard</TooltipContent>
                 </Tooltip>
               </TooltipProvider>
-              <Button
-                variant="outline"
-                size="sm"
-                className="h-7 text-[11px] gap-1"
-                onClick={() => onExport(report, "json")}
-              >
-                <Download className="h-3 w-3" />
-                JSON
-              </Button>
-            </div>
-          )}
+            )}
+            {onExport && (
+              <>
+                <TooltipProvider>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="h-7 text-[11px] gap-1"
+                        onClick={() => onExport(report, "markdown")}
+                      >
+                        <Download className="h-3 w-3" />
+                        MD
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent>Export as Markdown</TooltipContent>
+                  </Tooltip>
+                </TooltipProvider>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-7 text-[11px] gap-1"
+                  onClick={() => onExport(report, "json")}
+                >
+                  <Download className="h-3 w-3" />
+                  JSON
+                </Button>
+              </>
+            )}
+          </div>
         </div>
       </SheetHeader>
 
@@ -2128,6 +2248,55 @@ function ReportDetail({
             </p>
           </div>
         </section>
+
+        {/* Score Trend Across Scans */}
+        {scoreHistory.length > 1 && (
+          <section>
+            <SectionTitle icon={TrendingUp} title="Score History" />
+            <div className="border border-border/40 rounded-lg p-3 bg-card/20">
+              <div className="flex items-end justify-between gap-2 h-20 mb-2">
+                {scoreHistory.map((point, i) => {
+                  const heightPct = Math.max(8, (point.score / 100) * 100);
+                  const isLast = i === scoreHistory.length - 1;
+                  const prevScore = i > 0 ? scoreHistory[i - 1].score : point.score;
+                  const trend = point.score - prevScore;
+                  return (
+                    <div key={i} className="flex-1 flex flex-col items-center gap-1 h-full justify-end group">
+                      <span className={cn(
+                        "text-[10px] font-mono font-semibold",
+                        isLast ? scoreColor(point.score) : "text-muted-foreground",
+                      )}>
+                        {point.score.toFixed(0)}
+                      </span>
+                      <div className="w-full flex-1 flex items-end">
+                        <div
+                          className={cn(
+                            "w-full rounded-t-md transition-all duration-500",
+                            isLast ? scoreBg(point.score) : "bg-muted-40",
+                          )}
+                          style={{ height: `${heightPct}%`, opacity: isLast ? 1 : 0.5 }}
+                        />
+                      </div>
+                      {isLast && trend !== 0 && (
+                        <div className={cn(
+                          "flex items-center gap-0.5 text-[9px] font-mono",
+                          trend > 0 ? "text-emerald-400" : "text-rose-400",
+                        )}>
+                          {trend > 0 ? <TrendingUp className="h-2.5 w-2.5" /> : <TrendingDown className="h-2.5 w-2.5" />}
+                          {trend > 0 ? "+" : ""}{trend.toFixed(0)}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+              <div className="flex items-center justify-between text-[9px] text-muted-foreground">
+                <span>{scoreHistory.length} scans</span>
+                <span>Oldest → Latest</span>
+              </div>
+            </div>
+          </section>
+        )}
 
         {/* 5 Fundamental Axes */}
         <section>

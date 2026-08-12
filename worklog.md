@@ -768,3 +768,77 @@ Priority Recommendations for Next Phase:
 5. Allow user to select which two scans to compare in diff view.
 6. Add scan diff for individual projects (track score changes across scans for same project).
 7. Add export scan diff as CSV/image.
+
+---
+Task ID: 12
+Agent: main-agent (cron review round 9)
+Task: CSV export, copy-to-clipboard, project score history chart
+
+Work Log:
+- Read worklog.md to understand project context and previous work (Tasks 1-11).
+- Verified both services running: Next.js HTTP 200, Python scanner HTTP 200 (7 scans, 84 reports).
+- Performed QA testing via agent-browser:
+  - Page loads without runtime errors.
+  - VLM analysis identified: need for CSV export, copy-to-clipboard, score history tracking.
+  - Detail drawer verified: 26 SVGs, radar chart, export buttons, verdict, catalysts, kill conditions all present.
+  - Mobile responsive verified: sidebar visible at 390px, grid adapts.
+- Added CSV export for scan results:
+  - Created `exportScanCSV` function that generates CSV with 10 columns (Name, Symbol, Category, Sector, Project Quality, Token Quality, Confidence, Action, Vetoed, Image URL).
+  - Properly escapes CSV values (quotes, double-quotes).
+  - Downloads as `scan-{scanId}-results.csv`.
+  - Shows toast notification on success: "✅ CSV exported, X projects exported to CSV".
+  - Added CSV button in results toolbar (next to view mode toggle).
+- Added copy-to-clipboard for project report summary:
+  - Created `copyReportSummary` function that copies a formatted summary (name, scores, action, verdict, thesis) to clipboard.
+  - Uses `navigator.clipboard.writeText` with Promise-based success/error handling.
+  - Shows toast on success: "📋 Copied to clipboard, Report summary ready to paste".
+  - Shows toast on error: "❌ Copy failed" (destructive variant).
+  - Added Copy button to ReportDetail header (with Copy icon and tooltip).
+  - Button placed before MD/JSON export buttons.
+- Added project score history chart:
+  - Created `projectScoreHistory` state and `fetchProjectScoreHistory` function.
+  - Fetches all completed scans and finds the project's score in each scan by symbol.
+  - `loadReport` now triggers score history fetch when a project is opened.
+  - Added `Score History` section to detail drawer (appears between Executive Verdict and Five Fundamental Axes).
+  - Vertical bar chart showing score across all scans (oldest to latest).
+  - Latest bar highlighted with score color, previous bars dimmed (50% opacity).
+  - Trend indicator (TrendingUp/TrendingDown icon with delta value) on the latest bar.
+  - Shows scan count and "Oldest → Latest" label.
+  - Only appears when score history has >1 data points.
+  - VLM confirmed: "Score History bar chart showing values across 7 scans".
+- Fixed TypeScript errors:
+  - Added null checks for `scan` in `performGlobalSearch` and `fetchProjectScoreHistory` (filter(Boolean) didn't narrow the type).
+  - Added `if (!scan) return;` guards in forEach callbacks.
+- Added Copy icon import.
+- Ran lint: 0 errors, 0 warnings (clean).
+- Verified via agent-browser:
+  - CSV button present in toolbar.
+  - Copy button present in detail drawer header.
+  - Score History chart appears in detail drawer with 7 data points.
+  - No console errors or warnings after fresh reload.
+  - VLM confirmed all 3 new features visible and layout clean.
+
+Stage Summary:
+- **New features added**:
+  - CSV export for all projects in a scan (10 columns, proper escaping, toast notification)
+  - Copy-to-clipboard for project report summary (formatted text, toast feedback)
+  - Project score history chart in detail drawer (bar chart across scans, trend indicator)
+  - Copy button with tooltip in detail drawer header
+- **Bugs fixed**: TypeScript null safety errors in forEach callbacks.
+- **Files modified**: `src/app/page.tsx` (major enhancement).
+- **Verification**: All features tested via agent-browser. Lint clean. No console errors. VLM confirmed visual quality.
+
+Unresolved Issues / Risks:
+1. CoinGecko rate limits still cause some tokenomics data to be missing.
+2. Conservative scores (most projects 10-30/100) — by design.
+3. In-memory storage — scan results lost if Python service restarts.
+4. Score history fetches all scans on each project open (could be slow with many scans).
+
+Priority Recommendations for Next Phase:
+1. Persist scan results to SQLite (Prisma configured).
+2. Add WebSocket real-time progress updates.
+3. Add PDF export.
+4. Improve scoring calibration.
+5. Cache score history per project to avoid re-fetching.
+6. Add scan diff for individual projects (track all metric changes across scans).
+7. Add export score history as CSV/image.
