@@ -1,20 +1,22 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import Image from "next/image";
 import {
   Activity,
   AlertTriangle,
   ArrowRight,
+  ArrowUpDown,
   BadgeCheck,
   Brain,
   ChartNoAxesColumn,
   CircleDollarSign,
   Clock,
   Crosshair,
+  Download,
   Filter,
   FlaskConical,
   Gauge,
+  GitCompare,
   Layers,
   Loader2,
   Radar,
@@ -50,11 +52,12 @@ import { Separator } from "@/components/ui/separator";
 import {
   Sheet,
   SheetContent,
+  SheetDescription,
   SheetHeader,
   SheetTitle,
-  SheetTrigger,
 } from "@/components/ui/sheet";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { ScoreRadial } from "@/components/dashboard/score-radial";
+import { AxisRadarChart } from "@/components/dashboard/axis-radar-chart";
 import {
   Tooltip,
   TooltipContent,
@@ -281,6 +284,16 @@ export default function Home() {
   const [error, setError] = useState<string | null>(null);
   const [selectedReport, setSelectedReport] = useState<FullReport | null>(null);
   const [reportLoading, setReportLoading] = useState(false);
+  // new: sorting & filtering
+  const [sortBy, setSortBy] = useState<"quality" | "token" | "confidence" | "action">("quality");
+  const [actionFilter, setActionFilter] = useState<string>("all");
+  const [sectorFilter, setSectorFilter] = useState<string>("all");
+  const [searchQuery, setSearchQuery] = useState("");
+  // new: comparison mode
+  const [compareMode, setCompareMode] = useState(false);
+  const [compareIds, setCompareIds] = useState<Set<string>>(new Set());
+  const [compareReports, setCompareReports] = useState<FullReport[]>([]);
+  const [compareLoading, setCompareLoading] = useState(false);
   const pollRef = useRef<NodeJS.Timeout | null>(null);
 
   // load scan list on mount
@@ -356,9 +369,133 @@ export default function Home() {
     }
   };
 
+  // --- new: comparison & export helpers ---
+  const toggleCompare = (id: string) => {
+    setCompareIds((cur) => {
+      const next = new Set(cur);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        if (next.size >= 4) return cur; // max 4 for comparison
+        next.add(id);
+      }
+      return next;
+    });
+  };
+
+  const runComparison = async () => {
+    if (compareIds.size < 2) return;
+    setCompareLoading(true);
+    try {
+      const reports = await Promise.all(
+        Array.from(compareIds).map(async (id) => {
+          const r = await fetch(`/api/scanner/project/${id}`);
+          return r.ok ? ((await r.json()) as FullReport) : null;
+        }),
+      );
+      setCompareReports(reports.filter(Boolean) as FullReport[]);
+    } catch {
+    } finally {
+      setCompareLoading(false);
+    }
+  };
+
+  const exportReport = (report: FullReport, format: "json" | "markdown") => {
+    let content: string;
+    let mime: string;
+    let ext: string;
+    if (format === "json") {
+      content = JSON.stringify(report, null, 2);
+      mime = "application/json";
+      ext = "json";
+    } else {
+      content = reportToMarkdown(report);
+      mime = "text/markdown";
+      ext = "md";
+    }
+    const blob = new Blob([content], { type: mime });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${report.candidate.symbol.toLowerCase()}-analysis.${ext}`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
   const toggleSector = (s: string) => {
     setSectors((cur) => (cur.includes(s) ? cur.filter((x) => x !== s) : [...cur, s]));
   };
+
+  // --- filtered & sorted reports ---
+  const filteredReports = useMemo(() => {
+    if (!activeScan?.reports) return [];
+    let list = activeScan.reports.slice();
+    if (actionFilter !== "all") {
+      list = list.filter((r) => r.action.toLowerCase().includes(actionFilter));
+    }
+    if (sectorFilter !== "all") {
+      list = list.filter((r) => r.sector === sectorFilter);
+    }
+    if (searchQuery.trim()) {
+      const q = searchQuery.toLowerCase().trim();
+      list = list.filter(
+        (r) =>
+          r.name.toLowerCase().includes(q) ||
+          r.symbol.toLowerCase().includes(q) ||
+          r.category.toLowerCase().includes(q),
+      );
+    }
+    list.sort((a, b) => {
+      switch (sortBy) {
+        case "token":
+          return (b.token_quality ?? 0) - (a.token_quality ?? 0);
+        case "confidence":
+          return b.confidence - a.confidence;
+        case "action":
+          return a.action.localeCompare(b.action);
+        default:
+          return b.project_quality - a.project_quality;
+      }
+    });
+    return list;
+  }, [activeScan?.reports, actionFilter, sectorFilter, searchQuery, sortBy]);
+
+  // --- market overview stats ---
+  const marketStats = useMemo(() => {
+    if (!activeScan?.reports || activeScan.reports.length === 0) return null;
+    const reports = activeScan.reports;
+    const total = reports.length;
+    const avgQ = reports.reduce((s, r) => s + r.project_quality, 0) / total;
+    const avgConf = reports.reduce((s, r) => s + r.confidence, 0) / total;
+    const highCount = reports.filter((r) => r.project_quality >= 70).length;
+    const vetoCount = reports.filter((r) => r.veto).length;
+    const sectorCounts: Record<string, number> = {};
+    reports.forEach((r) => {
+      sectorCounts[r.sector] = (sectorCounts[r.sector] ?? 0) + 1;
+    });
+    const topSector = Object.entries(sectorCounts).sort((a, b) => b[1] - a[1])[0]?.[0] ?? "—";
+    return { total, avgQ, avgConf, highCount, vetoCount, topSector };
+  }, [activeScan?.reports]);
+
+  // unique sectors & actions for filter dropdowns
+  const availableSectors = useMemo(() => {
+    if (!activeScan?.reports) return [];
+    return Array.from(new Set(activeScan.reports.map((r) => r.sector))).sort();
+  }, [activeScan?.reports]);
+  const availableActions = useMemo(() => {
+    if (!activeScan?.reports) return [];
+    const set = new Set<string>();
+    activeScan.reports.forEach((r) => {
+      const a = r.action.toLowerCase();
+      if (a.includes("high conviction")) set.add("High Conviction");
+      else if (a.includes("core")) set.add("Core");
+      else if (a.includes("small")) set.add("Small");
+      else if (a.includes("research")) set.add("Research");
+      else if (a.includes("watch")) set.add("Watch");
+      else set.add("Ignore");
+    });
+    return Array.from(set).sort();
+  }, [activeScan?.reports]);
 
   return (
     <div className="min-h-screen flex flex-col bg-background text-foreground">
@@ -570,31 +707,177 @@ export default function Home() {
               <ScanProgressCard scan={activeScan} />
             )}
 
-            {/* Reports grid */}
+            {/* Market Overview Stats */}
+            {marketStats && (
+              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+                <StatCard
+                  icon={ChartNoAxesColumn}
+                  label="Total Scanned"
+                  value={marketStats.total.toString()}
+                  color="text-sky-400"
+                />
+                <StatCard
+                  icon={Gauge}
+                  label="Avg Quality"
+                  value={marketStats.avgQ.toFixed(1)}
+                  color={scoreColor(marketStats.avgQ)}
+                />
+                <StatCard
+                  icon={BadgeCheck}
+                  label="Avg Confidence"
+                  value={`${marketStats.avgConf.toFixed(0)}%`}
+                  color="text-emerald-400"
+                />
+                <StatCard
+                  icon={Target}
+                  label="High Score (70+)"
+                  value={marketStats.highCount.toString()}
+                  color="text-lime-400"
+                />
+                <StatCard
+                  icon={ShieldAlert}
+                  label="Vetoed"
+                  value={marketStats.vetoCount.toString()}
+                  color={marketStats.vetoCount > 0 ? "text-rose-400" : "text-muted-foreground"}
+                />
+                <StatCard
+                  icon={Layers}
+                  label="Top Sector"
+                  value={marketStats.topSector}
+                  color="text-amber-400"
+                />
+              </div>
+            )}
+
+            {/* Reports grid with filtering */}
             {activeScan && activeScan.reports.length > 0 && (
-              <div className="space-y-3">
-                <div className="flex items-center justify-between">
-                  <h2 className="text-sm font-semibold flex items-center gap-2">
-                    <ChartNoAxesColumn className="h-4 w-4 text-emerald-500" />
-                    Ranked Candidates
-                    <Badge variant="secondary" className="font-mono text-[10px]">
-                      {activeScan.reports.length}
-                    </Badge>
-                  </h2>
-                  <p className="text-[11px] text-muted-foreground">
-                    Sorted by project quality score
-                  </p>
-                </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
-                  {activeScan.reports
-                    .slice()
-                    .sort((a, b) => b.project_quality - a.project_quality)
-                    .map((r) => (
-                      <ProjectCard
-                        key={r.id}
-                        report={r}
-                        onSelect={() => loadReport(r.id)}
+              <div className="space-y-4">
+                {/* Filter & sort toolbar */}
+                <div className="flex flex-col gap-3 p-3 rounded-xl border border-border/50 bg-card/30 backdrop-blur-sm">
+                  <div className="flex items-center justify-between gap-2 flex-wrap">
+                    <h2 className="text-sm font-semibold flex items-center gap-2">
+                      <ChartNoAxesColumn className="h-4 w-4 text-emerald-500" />
+                      Ranked Candidates
+                      <Badge variant="secondary" className="font-mono text-[10px]">
+                        {filteredReports.length}
+                        {filteredReports.length !== activeScan.reports.length && (
+                          <span className="text-muted-foreground">/{activeScan.reports.length}</span>
+                        )}
+                      </Badge>
+                    </h2>
+                    <div className="flex items-center gap-2">
+                      {/* Compare mode toggle */}
+                      <Button
+                        variant={compareMode ? "default" : "outline"}
+                        size="sm"
+                        onClick={() => {
+                          setCompareMode(!compareMode);
+                          if (compareMode) setCompareIds(new Set());
+                        }}
+                        className={cn(
+                          "h-8 text-xs gap-1.5",
+                          compareMode && "bg-gradient-to-r from-violet-500 to-purple-600 text-white border-transparent",
+                        )}
+                      >
+                        <GitCompare className="h-3.5 w-3.5" />
+                        Compare
+                        {compareIds.size > 0 && (
+                          <Badge className="ml-1 bg-white/20 text-white text-[9px] px-1.5 py-0">
+                            {compareIds.size}
+                          </Badge>
+                        )}
+                      </Button>
+                      {compareMode && compareIds.size >= 2 && (
+                        <Button
+                          size="sm"
+                          onClick={runComparison}
+                          disabled={compareLoading}
+                          className="h-8 text-xs bg-gradient-to-r from-violet-500 to-purple-600 text-white"
+                        >
+                          {compareLoading ? (
+                            <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />
+                          ) : (
+                            <GitCompare className="h-3.5 w-3.5 mr-1" />
+                          )}
+                          View ({compareIds.size})
+                        </Button>
+                      )}
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <div className="relative flex-1 min-w-[160px]">
+                      <Filter className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+                      <Input
+                        placeholder="Search name, symbol, category..."
+                        value={searchQuery}
+                        onChange={(e) => setSearchQuery(e.target.value)}
+                        className="h-8 pl-8 text-xs"
                       />
+                    </div>
+                    <Select value={sortBy} onValueChange={(v) => setSortBy(v as typeof sortBy)}>
+                      <SelectTrigger className="h-8 w-[140px] text-xs">
+                        <ArrowUpDown className="h-3.5 w-3.5 mr-1.5 text-muted-foreground" />
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="quality">Project Quality</SelectItem>
+                        <SelectItem value="token">Token Quality</SelectItem>
+                        <SelectItem value="confidence">Confidence</SelectItem>
+                        <SelectItem value="action">Action</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    <Select value={actionFilter} onValueChange={setActionFilter}>
+                      <SelectTrigger className="h-8 w-[130px] text-xs">
+                        <SelectValue placeholder="Action" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">All Actions</SelectItem>
+                        {availableActions.map((a) => (
+                          <SelectItem key={a} value={a.toLowerCase()}>{a}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    {availableSectors.length > 0 && (
+                      <Select value={sectorFilter} onValueChange={setSectorFilter}>
+                        <SelectTrigger className="h-8 w-[130px] text-xs">
+                          <SelectValue placeholder="Sector" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="all">All Sectors</SelectItem>
+                          {availableSectors.map((s) => (
+                            <SelectItem key={s} value={s}>{s}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    )}
+                    {(actionFilter !== "all" || sectorFilter !== "all" || searchQuery || sortBy !== "quality") && (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => {
+                          setActionFilter("all");
+                          setSectorFilter("all");
+                          setSearchQuery("");
+                          setSortBy("quality");
+                        }}
+                        className="h-8 text-xs text-muted-foreground hover:text-foreground"
+                      >
+                        Reset
+                      </Button>
+                    )}
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
+                  {filteredReports.map((r) => (
+                    <ProjectCard
+                      key={r.id}
+                      report={r}
+                      onSelect={() => loadReport(r.id)}
+                      compareMode={compareMode}
+                      compareSelected={compareIds.has(r.id)}
+                      onToggleCompare={() => toggleCompare(r.id)}
+                    />
                     ))}
                 </div>
               </div>
@@ -622,13 +905,31 @@ export default function Home() {
       {/* ----------------------------------------------------------------- */}
       <Sheet open={!!selectedReport} onOpenChange={(o) => !o && setSelectedReport(null)}>
         <SheetContent side="right" className="w-full sm:max-w-2xl lg:max-w-3xl p-0 overflow-y-auto">
+          <SheetDescription className="sr-only">
+            Detailed project analysis report with all framework sections
+          </SheetDescription>
           {selectedReport ? (
-            <ReportDetail report={selectedReport} />
+            <ReportDetail report={selectedReport} onExport={exportReport} />
           ) : reportLoading ? (
             <div className="flex items-center justify-center h-full">
               <Loader2 className="h-8 w-8 animate-spin text-emerald-500" />
             </div>
           ) : null}
+        </SheetContent>
+      </Sheet>
+
+      {/* ----------------------------------------------------------------- */}
+      {/*  Comparison dialog                                                 */}
+      {/* ----------------------------------------------------------------- */}
+      <Sheet
+        open={compareReports.length > 0}
+        onOpenChange={(o) => !o && setCompareReports([])}
+      >
+        <SheetContent side="right" className="w-full sm:max-w-5xl lg:max-w-6xl p-0 overflow-y-auto">
+          <SheetDescription className="sr-only">
+            Side-by-side comparison of selected projects
+          </SheetDescription>
+          <ComparisonView reports={compareReports} />
         </SheetContent>
       </Sheet>
     </div>
@@ -824,84 +1125,125 @@ function ScanProgressCard({ scan }: { scan: ScanStatus }) {
   );
 }
 
-function ProjectCard({ report, onSelect }: { report: ScanSummaryItem; onSelect: () => void }) {
+function ProjectCard({
+  report,
+  onSelect,
+  compareMode = false,
+  compareSelected = false,
+  onToggleCompare,
+}: {
+  report: ScanSummaryItem;
+  onSelect: () => void;
+  compareMode?: boolean;
+  compareSelected?: boolean;
+  onToggleCompare?: () => void;
+}) {
   const ab = actionBadge(report.action);
   return (
-    <button
-      onClick={onSelect}
-      className="group text-left p-4 rounded-xl border border-border/50 bg-card/40 hover:bg-card/80 hover:border-emerald-500/40 transition-all relative overflow-hidden"
+    <div
+      className={cn(
+        "group relative text-left p-4 rounded-xl border bg-card/40 hover:bg-card/80 transition-all overflow-hidden",
+        compareSelected
+          ? "border-violet-500/60 ring-2 ring-violet-500/20"
+          : "border-border/50 hover:border-emerald-500/40",
+      )}
     >
       {/* score accent bar */}
-      <div
-        className={cn("absolute top-0 left-0 right-0 h-0.5", scoreBg(report.project_quality))}
-      />
+      <div className={cn("absolute top-0 left-0 right-0 h-0.5", scoreBg(report.project_quality))} />
 
-      <div className="flex items-start gap-3 mb-3">
-        <div className="flex h-10 w-10 items-center justify-center rounded-full bg-muted/40 border border-border/40 overflow-hidden flex-shrink-0">
-          {report.image ? (
-            <img src={report.image} alt={report.symbol} className="h-full w-full object-cover" />
-          ) : (
-            <span className="text-xs font-bold text-muted-foreground">
-              {report.symbol.slice(0, 3)}
-            </span>
-          )}
+      {compareMode && (
+        <div className="absolute top-2 right-2 z-10">
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              onToggleCompare?.();
+            }}
+            className={cn(
+              "flex h-5 w-5 items-center justify-center rounded border transition-all",
+              compareSelected
+                ? "bg-violet-500 border-violet-500 text-white"
+                : "bg-background/60 border-border hover:border-violet-500/50",
+            )}
+          >
+            {compareSelected && <BadgeCheck className="h-3.5 w-3.5" />}
+          </button>
         </div>
-        <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-1.5">
-            <h3 className="font-semibold text-sm truncate">{report.name}</h3>
-            {report.veto && (
-              <TooltipProvider>
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <ShieldAlert className="h-3.5 w-3.5 text-rose-500 flex-shrink-0" />
-                  </TooltipTrigger>
-                  <TooltipContent>Hard veto triggered</TooltipContent>
-                </Tooltip>
-              </TooltipProvider>
+      )}
+
+      <button onClick={onSelect} className="w-full text-left">
+        <div className="flex items-start gap-3 mb-3">
+          <div className="flex h-10 w-10 items-center justify-center rounded-full bg-muted/40 border border-border/40 overflow-hidden flex-shrink-0">
+            {report.image ? (
+              <img src={report.image} alt={report.symbol} className="h-full w-full object-cover" />
+            ) : (
+              <span className="text-xs font-bold text-muted-foreground">
+                {report.symbol.slice(0, 3)}
+              </span>
             )}
           </div>
-          <p className="text-[11px] text-muted-foreground font-mono">${report.symbol}</p>
-        </div>
-        <div className="text-right flex-shrink-0">
-          <div className={cn("text-xl font-bold tabular-nums", scoreColor(report.project_quality))}>
-            {report.project_quality.toFixed(0)}
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center gap-1.5">
+              <h3 className="font-semibold text-sm truncate">{report.name}</h3>
+              {report.veto && (
+                <TooltipProvider>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <ShieldAlert className="h-3.5 w-3.5 text-rose-500 flex-shrink-0" />
+                    </TooltipTrigger>
+                    <TooltipContent>Hard veto triggered</TooltipContent>
+                  </Tooltip>
+                </TooltipProvider>
+              )}
+            </div>
+            <p className="text-[11px] text-muted-foreground font-mono">${report.symbol}</p>
           </div>
-          <div className="text-[10px] text-muted-foreground">/ 100</div>
+          <div className="text-right flex-shrink-0">
+            <div className={cn("text-xl font-bold tabular-nums", scoreColor(report.project_quality))}>
+              {report.project_quality.toFixed(0)}
+            </div>
+            <div className="text-[10px] text-muted-foreground">/ 100</div>
+          </div>
         </div>
-      </div>
 
-      <div className="flex items-center gap-1.5 flex-wrap mb-3">
-        <Badge variant="outline" className={cn("text-[10px] gap-1", ab.cls)}>
-          {ab.label}
-        </Badge>
-        <Badge variant="outline" className="text-[10px] text-muted-foreground">
-          {report.category}
-        </Badge>
-      </div>
+        <div className="flex items-center gap-1.5 flex-wrap mb-3">
+          <Badge variant="outline" className={cn("text-[10px] gap-1", ab.cls)}>
+            {ab.label}
+          </Badge>
+          <Badge variant="outline" className="text-[10px] text-muted-foreground">
+            {report.category}
+          </Badge>
+        </div>
 
-      {/* mini metrics */}
-      <div className="grid grid-cols-3 gap-2 text-[10px]">
-        <div className="flex flex-col">
-          <span className="text-muted-foreground">Token Q</span>
-          <span className={cn("font-mono font-semibold", report.token_quality != null ? scoreColor(report.token_quality) : "text-muted-foreground")}>
-            {report.token_quality != null ? report.token_quality.toFixed(0) : "—"}
-          </span>
+        {/* mini metrics */}
+        <div className="grid grid-cols-3 gap-2 text-[10px]">
+          <div className="flex flex-col">
+            <span className="text-muted-foreground">Token Q</span>
+            <span className={cn("font-mono font-semibold", report.token_quality != null ? scoreColor(report.token_quality) : "text-muted-foreground")}>
+              {report.token_quality != null ? report.token_quality.toFixed(0) : "—"}
+            </span>
+          </div>
+          <div className="flex flex-col">
+            <span className="text-muted-foreground">Confidence</span>
+            <span className="font-mono font-semibold text-foreground">{report.confidence.toFixed(0)}%</span>
+          </div>
+          <div className="flex flex-col items-end justify-end">
+            <span className="text-muted-foreground group-hover:text-emerald-400 transition-colors flex items-center gap-0.5">
+              Details <ArrowRight className="h-2.5 w-2.5" />
+            </span>
+          </div>
         </div>
-        <div className="flex flex-col">
-          <span className="text-muted-foreground">Confidence</span>
-          <span className="font-mono font-semibold text-foreground">{report.confidence.toFixed(0)}%</span>
-        </div>
-        <div className="flex flex-col items-end justify-end">
-          <span className="text-muted-foreground group-hover:text-emerald-400 transition-colors flex items-center gap-0.5">
-            Details <ArrowRight className="h-2.5 w-2.5" />
-          </span>
-        </div>
-      </div>
-    </button>
+      </button>
+    </div>
   );
 }
 
-function ReportDetail({ report }: { report: FullReport }) {
+function ReportDetail({
+  report,
+  onExport,
+}: {
+  report: FullReport;
+  onExport?: (r: FullReport, format: "json" | "markdown") => void;
+}) {
   const ab = actionBadge(report.decision.action_label);
   return (
     <div>
@@ -928,11 +1270,40 @@ function ReportDetail({ report }: { report: FullReport }) {
               {report.candidate.category} · {report.candidate.sector}
             </p>
           </div>
-          <div className="text-right flex-shrink-0">
-            <div className={cn("text-2xl font-bold tabular-nums", scoreColor(report.project_quality_score))}>
-              {report.project_quality_score.toFixed(1)}
-            </div>
-            <div className="text-[10px] text-muted-foreground">Project Quality / 100</div>
+          <div className="flex items-center gap-3 flex-shrink-0">
+            {onExport && (
+              <div className="flex items-center gap-1">
+                <TooltipProvider>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        variant="outline"
+                        size="icon"
+                        className="h-8 w-8"
+                        onClick={() => onExport(report, "markdown")}
+                      >
+                        <Download className="h-3.5 w-3.5" />
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent>Export as Markdown</TooltipContent>
+                  </Tooltip>
+                </TooltipProvider>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-8 text-[11px]"
+                  onClick={() => onExport(report, "json")}
+                >
+                  JSON
+                </Button>
+              </div>
+            )}
+            <ScoreRadial
+              score={report.project_quality_score}
+              label="Quality"
+              size={64}
+              strokeWidth={5}
+            />
           </div>
         </div>
         <div className="flex items-center gap-1.5 flex-wrap mt-3">
@@ -961,7 +1332,13 @@ function ReportDetail({ report }: { report: FullReport }) {
 
         {/* 5 Fundamental Axes */}
         <section>
-          <SectionTitle icon={Gauge} title="Five Fundamental Axes" />
+          <div className="flex items-center justify-between gap-2 mb-2">
+            <SectionTitle icon={Gauge} title="Five Fundamental Axes" />
+          </div>
+          {/* Radar chart visualization */}
+          <div className="flex justify-center mb-4 p-3 rounded-lg border border-border/40 bg-card/20">
+            <AxisRadarChart axes={report.axes} size={260} />
+          </div>
           <div className="space-y-2.5">
             {report.axes.map((ax) => {
               const Icon = AXIS_ICONS[ax.name] || Brain;
@@ -1229,4 +1606,305 @@ function Metric({
       </div>
     </div>
   );
+}
+
+// --------------------------------------------------------------------------- //
+//  StatCard — small KPI tile for the market overview bar
+// --------------------------------------------------------------------------- //
+function StatCard({
+  icon: Icon,
+  label,
+  value,
+  color,
+}: {
+  icon: typeof Brain;
+  label: string;
+  value: string;
+  color: string;
+}) {
+  return (
+    <div className="flex items-center gap-2.5 p-3 rounded-xl border border-border/50 bg-card/40 backdrop-blur-sm">
+      <div className={cn("flex h-9 w-9 items-center justify-center rounded-lg bg-muted/30 flex-shrink-0", color)}>
+        <Icon className="h-4 w-4" />
+      </div>
+      <div className="min-w-0">
+        <div className="text-[10px] text-muted-foreground uppercase tracking-wide truncate">{label}</div>
+        <div className={cn("text-sm font-bold tabular-nums truncate", color)}>{value}</div>
+      </div>
+    </div>
+  );
+}
+
+// --------------------------------------------------------------------------- //
+//  ComparisonView — side-by-side project comparison
+// --------------------------------------------------------------------------- //
+function ComparisonView({ reports }: { reports: FullReport[] }) {
+  if (reports.length === 0) return null;
+
+  const rows: { label: string; getValue: (r: FullReport) => string; getColor?: (r: FullReport) => string }[] = [
+    { label: "Project Quality", getValue: (r) => r.project_quality_score.toFixed(1), getColor: (r) => scoreColor(r.project_quality_score) },
+    { label: "Token Quality", getValue: (r) => r.token_quality_score?.toFixed(1) ?? "—", getColor: (r) => (r.token_quality_score != null ? scoreColor(r.token_quality_score) : "text-muted-foreground") },
+    { label: "Confidence", getValue: (r) => `${r.confidence.toFixed(0)}%` },
+    { label: "Risk-Adjusted", getValue: (r) => r.decision.risk_adjusted_score.toFixed(0) },
+    { label: "Action", getValue: (r) => r.decision.action_label },
+    { label: "Valuation", getValue: (r) => r.valuation_label },
+    { label: "Investment Attr.", getValue: (r) => r.investment_attractiveness_score?.toFixed(0) ?? "—" },
+    { label: "Evidence Grade", getValue: (r) => r.evidence_grade.split(" - ")[0] },
+    { label: "Cycle Phase", getValue: (r) => r.cycle_phase.replace("Phase ", "P") },
+    { label: "Category", getValue: (r) => r.candidate.category },
+    { label: "Sector", getValue: (r) => r.candidate.sector },
+    { label: "TVL", getValue: (r) => fmtUsd(r.economic_engine.tvl) },
+    { label: "Revenue (24h)", getValue: (r) => fmtUsd(r.economic_engine.revenue) },
+    { label: "Fees (24h)", getValue: (r) => fmtUsd(r.economic_engine.fees) },
+    { label: "Market Cap", getValue: (r) => fmtUsd(r.tokenomics.market_cap) },
+    { label: "FDV", getValue: (r) => fmtUsd(r.tokenomics.fdv) },
+    { label: "Supply Growth", getValue: (r) => fmtPct(r.tokenomics.supply_growth_pct) },
+    { label: "Utility Level", getValue: (r) => `${r.tokenomics.utility_level}/4` },
+    { label: "Peer Percentile", getValue: (r) => r.peer_benchmark.peer_percentile?.toFixed(0) + "%" ?? "—" },
+  ];
+
+  const axisRows = reports[0]?.axes.map((ax) => ax.name) ?? [];
+
+  return (
+    <div>
+      <SheetHeader className="px-6 pt-6 pb-4 border-b border-border/60 sticky top-0 bg-background/95 backdrop-blur z-10">
+        <SheetTitle className="flex items-center gap-2 text-base">
+          <GitCompare className="h-5 w-5 text-violet-400" />
+          Project Comparison
+          <Badge variant="secondary" className="font-mono text-[10px]">{reports.length}</Badge>
+        </SheetTitle>
+        <p className="text-xs text-muted-foreground">
+          Side-by-side comparison across {rows.length + axisRows.length} metrics
+        </p>
+      </SheetHeader>
+
+      <div className="px-6 py-5">
+        {/* Project headers */}
+        <div
+          className="grid gap-3 mb-4 sticky top-[88px] bg-background/80 backdrop-blur z-10 py-2"
+          style={{ gridTemplateColumns: `140px repeat(${reports.length}, minmax(0, 1fr))` }}
+        >
+          <div></div>
+          {reports.map((r) => (
+            <div key={r.id} className="flex items-center gap-2 p-2 rounded-lg border border-border/40 bg-card/40">
+              <div className="flex h-8 w-8 items-center justify-center rounded-full bg-muted/40 border border-border/40 overflow-hidden flex-shrink-0">
+                {r.candidate.image ? (
+                  <img src={r.candidate.image} alt={r.candidate.symbol} className="h-full w-full object-cover" />
+                ) : (
+                  <span className="text-[10px] font-bold">{r.candidate.symbol.slice(0, 3)}</span>
+                )}
+              </div>
+              <div className="min-w-0">
+                <div className="text-xs font-semibold truncate">{r.candidate.name}</div>
+                <div className="text-[10px] text-muted-foreground font-mono">${r.candidate.symbol}</div>
+              </div>
+            </div>
+          ))}
+        </div>
+
+        {/* Comparison rows */}
+        <div className="space-y-0.5">
+          {/* Core metrics */}
+          <div className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground py-1.5">
+            Core Metrics
+          </div>
+          {rows.map((row, i) => {
+            const values = reports.map(row.getValue);
+            const maxIdx = values.reduce((best, v, idx) => {
+              const num = parseFloat(v.replace(/[^0-9.-]/g, ""));
+              const bestNum = parseFloat(values[best].replace(/[^0-9.-]/g, ""));
+              if (isNaN(num) || isNaN(bestNum)) return best;
+              return num > bestNum ? idx : best;
+            }, 0);
+            return (
+              <div
+                key={row.label}
+                className={cn(
+                  "grid gap-3 py-1.5 px-2 rounded items-center",
+                  i % 2 === 0 ? "bg-muted/10" : "",
+                  "hover:bg-emerald-500/5 transition-colors",
+                )}
+                style={{ gridTemplateColumns: `140px repeat(${reports.length}, minmax(0, 1fr))` }}
+              >
+                <div className="text-[11px] text-muted-foreground font-medium">{row.label}</div>
+                {reports.map((r, idx) => (
+                  <div
+                    key={r.id}
+                    className={cn(
+                      "text-xs font-mono font-semibold",
+                      row.getColor?.(r) ?? "text-foreground",
+                      idx === maxIdx && !isNaN(parseFloat(values[idx].replace(/[^0-9.-]/g, ""))) && "flex items-center gap-1",
+                    )}
+                  >
+                    {row.getValue(r)}
+                    {idx === maxIdx && !isNaN(parseFloat(values[idx].replace(/[^0-9.-]/g, ""))) && values.length > 1 && (
+                      <BadgeCheck className="h-3 w-3 text-emerald-400" />
+                    )}
+                  </div>
+                ))}
+              </div>
+            );
+          })}
+
+          {/* Axis breakdown */}
+          {axisRows.length > 0 && (
+            <>
+              <div className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground py-1.5 pt-4">
+                Fundamental Axes (0-10)
+              </div>
+              {axisRows.map((axisName, i) => {
+                const axisValues = reports.map((r) => r.axes.find((a) => a.name === axisName));
+                const scores = axisValues.map((a) => a?.score ?? 0);
+                const maxScore = Math.max(...scores);
+                return (
+                  <div
+                    key={axisName}
+                    className={cn(
+                      "grid gap-3 py-1.5 px-2 rounded items-center",
+                      i % 2 === 0 ? "bg-muted/10" : "",
+                    )}
+                    style={{ gridTemplateColumns: `140px repeat(${reports.length}, minmax(0, 1fr))` }}
+                  >
+                    <div className="text-[11px] text-muted-foreground font-medium truncate">{axisName}</div>
+                    {axisValues.map((ax, idx) => (
+                      <div key={idx} className="flex items-center gap-2">
+                        <span className={cn("text-xs font-mono font-semibold w-8", scoreColor(ax?.score ?? 0, 10))}>
+                          {ax?.score.toFixed(1) ?? "—"}
+                        </span>
+                        <div className="flex-1 h-1.5 rounded-full bg-muted/40 overflow-hidden">
+                          <div
+                            className={cn("h-full rounded-full", scoreBg(ax?.score ?? 0, 10))}
+                            style={{ width: `${((ax?.score ?? 0) / 10) * 100}%` }}
+                          />
+                        </div>
+                        {(ax?.score ?? 0) === maxScore && reports.length > 1 && (
+                          <BadgeCheck className="h-3 w-3 text-emerald-400 flex-shrink-0" />
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                );
+              })}
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// --------------------------------------------------------------------------- //
+//  reportToMarkdown — serialize a FullReport to Markdown for export
+// --------------------------------------------------------------------------- //
+function reportToMarkdown(r: FullReport): string {
+  const lines: string[] = [];
+  lines.push(`# ${r.candidate.name} (${r.candidate.symbol})`);
+  lines.push("");
+  lines.push(`> ${r.final_thesis}`);
+  lines.push("");
+  lines.push(`**Data Cutoff:** ${new Date(r.data_cutoff).toISOString()}`);
+  lines.push(`**Evidence Grade:** ${r.evidence_grade}`);
+  lines.push("");
+
+  lines.push("## Executive Verdict");
+  lines.push(r.executive_verdict);
+  lines.push("");
+
+  lines.push("## Scores");
+  lines.push(`- **Project Quality:** ${r.project_quality_score}/100`);
+  lines.push(`- **Token Quality:** ${r.token_quality_score ?? "N/A"}/100`);
+  lines.push(`- **Investment Attractiveness:** ${r.investment_attractiveness_score ?? "N/A"}/100`);
+  lines.push(`- **Confidence:** ${r.confidence}%`);
+  lines.push(`- **Risk-Adjusted Score:** ${r.decision.risk_adjusted_score}`);
+  lines.push(`- **Action:** ${r.decision.action_label}`);
+  lines.push(`- **Valuation:** ${r.valuation_label}`);
+  lines.push("");
+
+  lines.push("## Five Fundamental Axes");
+  lines.push("| Axis | Score | Confidence | Key Reason |");
+  lines.push("|------|-------|------------|------------|");
+  r.axes.forEach((ax) => {
+    lines.push(`| ${ax.name} | ${ax.score.toFixed(1)}/10 | ${ax.confidence.toFixed(0)}% | ${ax.key_reason} |`);
+  });
+  lines.push("");
+
+  lines.push("## Economic Engine");
+  const e = r.economic_engine;
+  lines.push(`- TVL: ${fmtUsd(e.tvl)}`);
+  lines.push(`- Fees (24h): ${fmtUsd(e.fees)}`);
+  lines.push(`- Revenue (24h): ${fmtUsd(e.revenue)}`);
+  lines.push(`- Net Revenue: ${fmtUsd(e.net_revenue)}`);
+  lines.push(`- Revenue Growth: ${fmtPct(e.revenue_growth_pct)}`);
+  lines.push(`- AUM: ${fmtUsd(e.aum)}`);
+  lines.push(`- Recurrence: ${e.recurrence ?? "—"}`);
+  lines.push("");
+
+  lines.push("## Tokenomics");
+  const t = r.tokenomics;
+  lines.push(`- Market Cap: ${fmtUsd(t.market_cap)}`);
+  lines.push(`- FDV: ${fmtUsd(t.fdv)}`);
+  lines.push(`- Supply Growth: ${fmtPct(t.supply_growth_pct)}`);
+  lines.push(`- Insider Allocation: ${fmtPct(t.insider_allocation_pct)}`);
+  lines.push(`- Utility Level: ${t.utility_level}/4`);
+  lines.push(`- Value Capture: ${t.value_capture ?? "—"}`);
+  lines.push(`- Buyback: ${t.buyback ?? "—"}`);
+  lines.push(`- Burn: ${t.burn ?? "—"}`);
+  lines.push("");
+
+  lines.push("## Institutional Adoption");
+  lines.push(r.institutional_adoption);
+  lines.push("");
+
+  lines.push("## Competitive Moat");
+  lines.push(r.competitive_moat);
+  lines.push("");
+
+  lines.push("## Cycle Phase");
+  lines.push(r.cycle_phase);
+  lines.push("");
+
+  lines.push("## Peer Benchmark");
+  lines.push(`- Percentile: ${r.peer_benchmark.peer_percentile?.toFixed(0) ?? "—"}%`);
+  lines.push(`- Rank: ${r.peer_benchmark.category_rank ?? "—"}`);
+  lines.push(`- Comparables: ${r.peer_benchmark.closest_comparables.join(", ") || "—"}`);
+  lines.push("");
+
+  lines.push("## Catalysts");
+  r.catalysts.forEach((c) => {
+    lines.push(`- ${c.positive ? "✅" : "⚠️"} ${c.description}${c.eta ? ` _(${c.eta})_` : ""}`);
+  });
+  lines.push("");
+
+  lines.push("## Thesis Kill Conditions");
+  r.thesis_kill_conditions.forEach((k, i) => {
+    lines.push(`${i + 1}. ${k}`);
+  });
+  lines.push("");
+
+  if (r.severe_risks.some((sr) => sr.present)) {
+    lines.push("## Severe Risks");
+    r.severe_risks.filter((sr) => sr.present).forEach((sr) => {
+      lines.push(`- ${sr.name}`);
+    });
+    lines.push("");
+  }
+
+  lines.push("## Five Final Questions");
+  r.five_final_answers.forEach((a, i) => {
+    lines.push(`${i + 1}. ${a}`);
+  });
+  lines.push("");
+
+  if (r.data_needing_verification.length > 0) {
+    lines.push("## Data Requiring Verification");
+    r.data_needing_verification.forEach((d) => {
+      lines.push(`- ${d}`);
+    });
+    lines.push("");
+  }
+
+  lines.push("---");
+  lines.push("*Generated by Crypto Discovery Framework v1.0 · Not personalized financial advice*");
+
+  return lines.join("\n");
 }
