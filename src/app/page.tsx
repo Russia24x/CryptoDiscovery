@@ -74,6 +74,7 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
 
 // --------------------------------------------------------------------------- //
@@ -311,6 +312,10 @@ export default function Home() {
   // watchlist (persisted to localStorage)
   const [watchlist, setWatchlist] = useState<Set<string>>(new Set());
   const [showWatchlist, setShowWatchlist] = useState(false);
+  // recently viewed projects (persisted to localStorage)
+  const [recentlyViewed, setRecentlyViewed] = useState<string[]>([]);
+  // toast notifications
+  const { toast } = useToast();
   // search input ref for keyboard shortcut
   const searchInputRef = useRef<HTMLInputElement>(null);
   const pollRef = useRef<NodeJS.Timeout | null>(null);
@@ -329,6 +334,11 @@ export default function Home() {
     try {
       const stored = localStorage.getItem("crypto-watchlist");
       if (stored) setWatchlist(new Set(JSON.parse(stored)));
+    } catch {}
+    // load recently viewed from localStorage
+    try {
+      const recent = localStorage.getItem("crypto-recent");
+      if (recent) setRecentlyViewed(JSON.parse(recent));
     } catch {}
   }, [refreshScans]);
 
@@ -391,6 +401,22 @@ export default function Home() {
           if (data.status === "completed" || data.status === "failed") {
             refreshScans();
             setScanning(false);
+            // Show completion toast
+            if (data.status === "completed" && data.reports.length > 0) {
+              const reports = data.reports;
+              const avgQ = reports.reduce((s, r) => s + r.project_quality, 0) / reports.length;
+              const topProject = reports.reduce((best, r) => r.project_quality > best.project_quality ? r : best, reports[0]);
+              toast({
+                title: "✅ Scan completed",
+                description: `${reports.length} projects analyzed · Avg quality ${avgQ.toFixed(1)} · Top: ${topProject.name} (${topProject.project_quality.toFixed(0)})`,
+              });
+            } else if (data.status === "failed") {
+              toast({
+                title: "❌ Scan failed",
+                description: data.error || "Unknown error occurred",
+                variant: "destructive",
+              });
+            }
           }
         }
       } catch {}
@@ -430,7 +456,16 @@ export default function Home() {
     setReportLoading(true);
     try {
       const r = await fetch(`/api/scanner/project/${id}`);
-      if (r.ok) setSelectedReport(await r.json());
+      if (r.ok) {
+        const report = await r.json();
+        setSelectedReport(report);
+        // track recently viewed
+        setRecentlyViewed((cur) => {
+          const next = [id, ...cur.filter((x) => x !== id)].slice(0, 5);
+          try { localStorage.setItem("crypto-recent", JSON.stringify(next)); } catch {}
+          return next;
+        });
+      }
     } catch {
     } finally {
       setReportLoading(false);
@@ -879,6 +914,48 @@ export default function Home() {
               </CardContent>
             </Card>
 
+            {/* Recently viewed projects */}
+            {recentlyViewed.length > 0 && (
+              <Card className="border-border/60 bg-card/40 backdrop-blur-sm">
+                <CardHeader className="pb-3">
+                  <CardTitle className="flex items-center gap-2 text-sm">
+                    <Clock className="h-4 w-4 text-violet-400" />
+                    Recently Viewed
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="p-0">
+                  <div className="px-6 pb-4 space-y-1.5">
+                    {recentlyViewed.map((id) => {
+                      const report = activeScan?.reports?.find((r) => r.id === id);
+                      if (!report) return null;
+                      return (
+                        <button
+                          key={id}
+                          onClick={() => loadReport(id)}
+                          className="w-full flex items-center gap-2 p-2 rounded-lg border border-border/40 bg-muted/20 hover:bg-muted/40 hover:border-border transition-colors group"
+                        >
+                          <div className="flex h-7 w-7 items-center justify-center rounded-full bg-muted/40 border border-border/40 overflow-hidden flex-shrink-0">
+                            {report.image ? (
+                              <img src={report.image} alt={report.symbol} className="h-full w-full object-cover" />
+                            ) : (
+                              <span className="text-[9px] font-bold text-muted-foreground">{report.symbol.slice(0, 3)}</span>
+                            )}
+                          </div>
+                          <div className="min-w-0 flex-1 text-left">
+                            <div className="text-xs font-semibold truncate">{report.name}</div>
+                            <div className="text-[10px] text-muted-foreground font-mono">${report.symbol}</div>
+                          </div>
+                          <span className={cn("text-sm font-bold tabular-nums", scoreColor(report.project_quality))}>
+                            {report.project_quality.toFixed(0)}
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+
             {/* Recent scans */}
             <Card className="border-border/60 bg-card/40 backdrop-blur-sm">
               <CardHeader className="pb-3">
@@ -1309,12 +1386,27 @@ export default function Home() {
       {/*  Footer                                                            */}
       {/* ----------------------------------------------------------------- */}
       <footer className="mt-auto border-t border-border/60 bg-background/60 backdrop-blur-sm">
-        <div className="mx-auto max-w-[1600px] px-4 sm:px-6 lg:px-8 py-4 flex flex-col sm:flex-row items-center justify-between gap-2">
+        <div className="mx-auto max-w-[1600px] px-4 sm:px-6 lg:px-8 py-3 flex flex-col sm:flex-row items-center justify-between gap-3">
+          <div className="flex items-center gap-4 flex-wrap">
+            <p className="text-[11px] text-muted-foreground">
+              Crypto Discovery Framework · Evidence &gt; Narrative
+            </p>
+            <div className="hidden md:flex items-center gap-2 text-[10px] text-muted-foreground">
+              <kbd className="px-1.5 py-0.5 rounded bg-muted/40 border border-border/40 font-mono text-[9px]">S</kbd>
+              <span>scan</span>
+              <kbd className="px-1.5 py-0.5 rounded bg-muted/40 border border-border/40 font-mono text-[9px] ml-1">/</kbd>
+              <span>search</span>
+              <kbd className="px-1.5 py-0.5 rounded bg-muted/40 border border-border/40 font-mono text-[9px] ml-1">G</kbd>
+              <kbd className="px-1.5 py-0.5 rounded bg-muted/40 border border-border/40 font-mono text-[9px]">A</kbd>
+              <span>views</span>
+              <kbd className="px-1.5 py-0.5 rounded bg-muted/40 border border-border/40 font-mono text-[9px] ml-1">C</kbd>
+              <span>compare</span>
+              <kbd className="px-1.5 py-0.5 rounded bg-muted/40 border border-border/40 font-mono text-[9px] ml-1">Esc</kbd>
+              <span>close</span>
+            </div>
+          </div>
           <p className="text-[11px] text-muted-foreground">
-            Crypto Discovery Framework · Evidence &gt; Narrative · Data from CoinGecko + DeFiLlama (public APIs)
-          </p>
-          <p className="text-[11px] text-muted-foreground">
-            Not personalized financial advice · For research only
+            Data: CoinGecko + DeFiLlama · Not financial advice
           </p>
         </div>
       </footer>
@@ -1690,7 +1782,32 @@ function ProjectCard({
           </div>
           <div className="flex flex-col">
             <span className="text-muted-foreground">Confidence</span>
-            <span className="font-mono font-semibold text-foreground">{report.confidence.toFixed(0)}%</span>
+            <div className="flex items-center gap-1.5">
+              <span className="font-mono font-semibold text-foreground">{report.confidence.toFixed(0)}%</span>
+              {/* Confidence sparkline bar */}
+              <div className="flex items-end gap-[1px] h-3">
+                {[0, 1, 2, 3, 4].map((i) => {
+                  const threshold = 20 + i * 20;
+                  const active = report.confidence >= threshold;
+                  return (
+                    <div
+                      key={i}
+                      className={cn(
+                        "w-[2px] rounded-sm transition-all",
+                        active
+                          ? report.confidence >= 70
+                            ? "bg-emerald-500"
+                            : report.confidence >= 50
+                            ? "bg-amber-500"
+                            : "bg-rose-500"
+                          : "bg-muted/40",
+                      )}
+                      style={{ height: `${30 + i * 17}%` }}
+                    />
+                  );
+                })}
+              </div>
+            </div>
           </div>
           <div className="flex flex-col items-end justify-end">
             <span className="text-muted-foreground group-hover:text-emerald-400 transition-colors flex items-center gap-0.5">
@@ -1736,54 +1853,58 @@ function ReportDetail({
               {report.candidate.category} · {report.candidate.sector}
             </p>
           </div>
-          <div className="flex items-center gap-3 flex-shrink-0">
-            {onExport && (
-              <div className="flex items-center gap-1">
-                <TooltipProvider>
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <Button
-                        variant="outline"
-                        size="icon"
-                        className="h-8 w-8"
-                        onClick={() => onExport(report, "markdown")}
-                      >
-                        <Download className="h-3.5 w-3.5" />
-                      </Button>
-                    </TooltipTrigger>
-                    <TooltipContent>Export as Markdown</TooltipContent>
-                  </Tooltip>
-                </TooltipProvider>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="h-8 text-[11px]"
-                  onClick={() => onExport(report, "json")}
-                >
-                  JSON
-                </Button>
-              </div>
-            )}
-            <ScoreRadial
-              score={report.project_quality_score}
-              label="Quality"
-              size={64}
-              strokeWidth={5}
-            />
-          </div>
+          {/* Score ring - clean, no clutter next to it */}
+          <ScoreRadial
+            score={report.project_quality_score}
+            label="Quality"
+            size={72}
+            strokeWidth={6}
+          />
         </div>
-        <div className="flex items-center gap-1.5 flex-wrap mt-3">
-          <Badge className={cn("text-[10px]", ab.cls)}>{report.decision.action_label}</Badge>
-          <Badge variant="outline" className="text-[10px]">
-            <Gauge className="h-3 w-3 mr-1" />
-            Risk-adj {report.decision.risk_adjusted_score.toFixed(0)}
-          </Badge>
-          <Badge variant="outline" className="text-[10px]">
-            Confidence {report.confidence.toFixed(0)}%
-          </Badge>
-          <Badge variant="outline" className="text-[10px]">
-            Evidence {report.evidence_grade.split(" - ")[0]}
-          </Badge>
+        {/* Badges + export buttons on a separate row */}
+        <div className="flex items-center justify-between gap-2 flex-wrap mt-3">
+          <div className="flex items-center gap-1.5 flex-wrap">
+            <Badge className={cn("text-[10px]", ab.cls)}>{report.decision.action_label}</Badge>
+            <Badge variant="outline" className="text-[10px]">
+              <Gauge className="h-3 w-3 mr-1" />
+              Risk-adj {report.decision.risk_adjusted_score.toFixed(0)}
+            </Badge>
+            <Badge variant="outline" className="text-[10px]">
+              Confidence {report.confidence.toFixed(0)}%
+            </Badge>
+            <Badge variant="outline" className="text-[10px]">
+              Evidence {report.evidence_grade.split(" - ")[0]}
+            </Badge>
+          </div>
+          {onExport && (
+            <div className="flex items-center gap-1">
+              <TooltipProvider>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="h-7 text-[11px] gap-1"
+                      onClick={() => onExport(report, "markdown")}
+                    >
+                      <Download className="h-3 w-3" />
+                      MD
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>Export as Markdown</TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-7 text-[11px] gap-1"
+                onClick={() => onExport(report, "json")}
+              >
+                <Download className="h-3 w-3" />
+                JSON
+              </Button>
+            </div>
+          )}
         </div>
       </SheetHeader>
 
