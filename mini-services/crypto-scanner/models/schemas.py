@@ -107,7 +107,9 @@ class MarketStructure(BaseModel):
 
 class EconomicEngine(BaseModel):
     gross_volume: Optional[float] = None
-    fees: Optional[float] = None
+    fees: Optional[float] = None          # 24h fees
+    fees_7d: Optional[float] = None       # 7d fees (for stability check)
+    fees_30d: Optional[float] = None      # 30d fees (for stability check)
     revenue: Optional[float] = None
     net_revenue: Optional[float] = None
     revenue_growth_pct: Optional[float] = None

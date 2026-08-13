@@ -307,6 +307,11 @@ def _apply_fees_overview(b: EvidenceBundle, f: dict[str, Any]) -> None:
         b.economic.fees = f24
     if r24 > 0:
         b.economic.revenue = r24
+    # Store 7d/30d fees for proper fee stability calculation
+    if f7d > 0:
+        b.economic.fees_7d = f7d
+    if f30d > 0:
+        b.economic.fees_30d = f30d
 
     # growth: 24h vs 7d avg
     if f24 > 0 and f7d > 0:

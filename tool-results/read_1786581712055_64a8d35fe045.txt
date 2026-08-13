@@ -1,0 +1,706 @@
+     1→"""
+     2→PHASE 5-8 — Scoring, Investment Analysis, Decision, and Output Formatting.
+     3→
+     4→Combines axis scores into project quality, runs weakest-link penalty,
+     5→derives token quality, investment attractiveness, cycle phase, catalysts,
+     6→thesis & kill conditions, and the final 23-section report.
+     7→"""
+     8→from __future__ import annotations
+     9→
+    10→import hashlib
+    11→import time
+    12→from datetime import datetime
+    13→from typing import Any
+    14→
+    15→from models.schemas import (
+    16→    ActionLevel,
+    17→    Catalyst,
+    18→    CandidateInfo,
+    19→    CyclePhase,
+    20→    Decision,
+    21→    EvidenceGrade,
+    22→    InvestmentAnalysis,
+    23→    PeerBenchmark,
+    24→    ProjectReport,
+    25→    ScanConfig,
+    26→    ValuationVerdict,
+    27→)
+    28→from framework.core import (
+    29→    PERSONA_WEIGHTS,
+    30→    action_from_scores,
+    31→    build_severe_risks,
+    32→    evaluate_vetoes,
+    33→    project_quality_band,
+    34→    weakest_link_penalty,
+    35→)
+    36→from framework.evidence import EvidenceBundle
+    37→from framework.evaluation import (
+    38→    score_economic_engine,
+    39→    score_governance_legal,
+    40→    score_invisible_utility,
+    41→    score_moat,
+    42→    score_token_market,
+    43→    token_quality_score,
+    44→)
+    45→
+    46→
+    47→# --------------------------------------------------------------------------- #
+    48→#  Build a full report from evidence
+    49→# --------------------------------------------------------------------------- #
+    50→def build_report(
+    51→    candidate: CandidateInfo,
+    52→    ev: EvidenceBundle,
+    53→    config: ScanConfig,
+    54→    scan_id: str,
+    55→) -> ProjectReport:
+    56→    now = datetime.utcnow()
+    57→
+    58→    # --- PHASE 2: Veto gates ---
+    59→    veto = evaluate_vetoes(
+    60→        guaranteed_return_claims=ev.guaranteed_return_claims,
+    61→        ponzi_structure=ev.ponzi_structure,
+    62→        unresolved_hack=ev.unresolved_hack,
+    63→        single_key_custody=ev.single_key_custody,
+    64→        opaque_custody=ev.opaque_custody,
+    65→        backing_transparency_failure=ev.backing_transparency_failure,
+    66→        legal_deception=ev.legal_deception,
+    67→    )
+    68→
+    69→    # severe risks
+    70→    severe = build_severe_risks({
+    71→        "Anonymous team": ev.anonymous_team,
+    72→        "Stale audit": ev.audit_status == "stale",
+    73→        "Centralized governance": ev.centralized_governance,
+    74→        "Centralized upgrade authority": ev.centralized_upgrade,
+    75→        "Single solver dependency": False,
+    76→        "High customer concentration": ev.high_customer_concentration,
+    77→        "Near token unlock cliff": ev.near_unlock_cliff,
+    78→        "Market maker dependency": ev.market_maker_dependency,
+    79→        "Critical bridge dependency": ev.bridge_dependency,
+    80→        "Critical chain dependency": ev.chain_dependency,
+    81→        "Unclear token value capture": ev.unclear_token_value_capture,
+    82→        "Regulatory uncertainty": ev.regulatory_uncertainty,
+    83→    })
+    84→
+    85→    # --- PHASE 4: Axes ---
+    86→    a1 = score_invisible_utility(
+    87→        has_api=ev.has_api,
+    88→        has_sdk=ev.has_sdk,
+    89→        has_docs=ev.has_docs,
+    90→        developer_count=ev.developer_count,
+    91→        github_stars=ev.github_stars,
+    92→        is_infrastructure=ev.is_infrastructure,
+    93→        is_user_facing_app=ev.is_user_facing_app,
+    94→        switching_cost_signal=ev.switching_cost_signal,
+    95→        evidence_grade=ev.grade,
+    96→        sources=ev.sources,
+    97→    )
+    98→    a2 = score_economic_engine(ev.economic, evidence_grade=ev.grade, sources=ev.sources)
+    99→    a3 = score_moat(
+   100→        tvl_rank=ev.tvl_rank,
+   101→        category=ev.category,
+   102→        chain_count=ev.chain_count,
+   103→        has_regulatory_license=ev.has_regulatory_license,
+   104→        partner_integrations=ev.partner_integrations,
+   105→        liquidity_tvl=ev.liquidity_tvl,
+   106→        evidence_grade=ev.grade,
+   107→        sources=ev.sources,
+   108→    )
+   109→    a4 = score_token_market(
+   110→        ev.tokenomics, ev.market,
+   111→        has_token=ev.has_token,
+   112→        evidence_grade=ev.grade,
+   113→        sources=ev.sources,
+   114→    )
+   115→    a5 = score_governance_legal(
+   116→        team_transparent=ev.team_transparent,
+   117→        has_legal_entity=ev.has_legal_entity,
+   118→        audit_status=ev.audit_status,
+   119→        incident_history=ev.incident_history,
+   120→        multisig=ev.multisig,
+   121→        upgrade_admin_decentralized=ev.upgrade_admin_decentralized,
+   122→        regulatory_status="clear" if not ev.regulatory_uncertainty else "uncertain",
+   123→        disclosure_quality=ev.disclosure_quality,
+   124→        evidence_grade=ev.grade,
+   125→        sources=ev.sources,
+   126→    )
+   127→    axes = [a1, a2, a3, a4, a5]
+   128→
+   129→    # --- PHASE 5: Weighted scoring ---
+   130→    weights = PERSONA_WEIGHTS[config.persona]
+   131→    raw = sum(weights[a.name] * a.score * 10.0 for a in axes)  # 0-100
+   132→
+   133→    min_axis = min(a.score for a in axes)
+   134→    min_sub = None
+   135→    for a in axes:
+   136→        for v in a.sub_factors.values():
+   137→            if min_sub is None or v < min_sub:
+   138→                min_sub = v
+   139→    penalty, high_risk = weakest_link_penalty(min_axis, min_sub)
+   140→    project_quality = max(0.0, raw - penalty)
+   141→
+   142→    # overall confidence: weighted by axis confidence
+   143→    overall_conf = sum(weights[a.name] * a.confidence for a in axes)
+   144→
+   145→    risk_adjusted = project_quality * (overall_conf / 100.0)
+   146→
+   147→    # Token quality
+   148→    tq = token_quality_score(ev.tokenomics, ev.market) if ev.has_token else None
+   149→
+   150→    # --- PHASE 6: Investment analysis ---
+   151→    inv = _build_investment_analysis(ev, project_quality, tq, overall_conf)
+   152→
+   153→    # cycle phase
+   154→    cycle = _infer_cycle_phase(ev, project_quality)
+   155→
+   156→    # peer benchmark
+   157→    peer = PeerBenchmark(
+   158→        peer_percentile=round(_peer_percentile(project_quality), 1),
+   159→        category_rank=f"#{_rank_from_score(project_quality)}",
+   160→        closest_comparables=_comparables(ev.category, candidate.name),
+   161→    )
+   162→
+   163→    # catalysts
+   164→    catalysts = _build_catalysts(ev, cycle)
+   165→
+   166→    # thesis + kill conditions
+   167→    thesis = _build_thesis(candidate, ev, cycle)
+   168→    kills = _build_kill_conditions(ev)
+   169→
+   170→    # --- PHASE 7: Decision ---
+   171→    action_level, action_label = action_from_scores(
+   172→        project_quality=project_quality,
+   173→        token_quality=tq,
+   174→        investment_attractiveness=inv.investment_attractiveness,
+   175→        confidence=overall_conf,
+   176→        veto_triggered=veto.triggered,
+   177→    )
+   178→    decision = Decision(
+   179→        raw_score=round(project_quality, 1),
+   180→        confidence=round(overall_conf, 1),
+   181→        risk_adjusted_score=round(risk_adjusted, 1),
+   182→        action=ActionLevel(action_level),
+   183→        action_label=action_label,
+   184→        underfollowed=_underfollowed_test(ev, project_quality),
+   185→        key_risks=[r.name for r in severe if r.present][:6],
+   186→    )
+   187→
+   188→    # executive verdict
+   189→    if veto.triggered:
+   190→        verdict = f"HARD REJECT — {veto.reason}"
+   191→    elif high_risk:
+   192→        verdict = (
+   193→            f"{project_quality_band(project_quality)} but flagged HIGH RISK due to a critical "
+   194→            f"sub-factor below 3. Action: {action_label}."
+   195→        )
+   196→    else:
+   197→        verdict = (
+   198→            f"{project_quality_band(project_quality)} (score {project_quality:.0f}/100). "
+   199→            f"Token quality {('N/A' if tq is None else f'{tq:.0f}')}. "
+   200→            f"Valuation {inv.valuation.value}. Action: {action_label}."
+   201→        )
+   202→
+   203→    # five final answers
+   204→    answers = _five_answers(candidate, ev, veto, thesis, kills)
+   205→
+   206→    # data needing verification
+   207→    needs_verify = _data_to_verify(ev)
+   208→
+   209→    # Framework 3.0 additions
+   210→    cross_verifs = _build_cross_verifications(ev)
+   211→    bias_checks = _build_bias_checks(ev, project_quality, candidate)
+   212→    val_multiples = _build_valuation_multiples(inv)
+   213→    fee_stability = "volatile" if inv.fee_volatility_pct and inv.fee_volatility_pct > 40 else "stable" if inv.fee_volatility_pct is not None else "unknown"
+   214→
+   215→    # final thesis one-liner
+   216→    final_thesis = thesis
+   217→
+   218→    # report id
+   219→    rid = hashlib.sha1(f"{candidate.symbol}:{scan_id}:{time.time()}".encode()).hexdigest()[:12]
+   220→
+   221→    return ProjectReport(
+   222→        id=rid,
+   223→        candidate=candidate,
+   224→        data_cutoff=config.data_cutoff,
+   225→        veto=veto,
+   226→        severe_risks=severe,
+   227→        executive_verdict=verdict,
+   228→        project_quality_score=round(project_quality, 1),
+   229→        token_quality_score=tq,
+   230→        valuation_label=inv.valuation,
+   231→        investment_attractiveness_score=inv.investment_attractiveness,
+   232→        confidence=round(overall_conf, 1),
+   233→        axes=axes,
+   234→        economic_engine=ev.economic,
+   235→        tokenomics=ev.tokenomics,
+   236→        market_structure=ev.market,
+   237→        institutional_adoption=_institutional_adoption(ev),
+   238→        competitive_moat=_competitive_moat(ev, a3),
+   239→        cycle_phase=cycle,
+   240→        peer_benchmark=peer,
+   241→        catalysts=catalysts,
+   242→        thesis_kill_conditions=kills,
+   243→        decision=decision,
+   244→        evidence_grade=ev.grade,
+   245→        data_needing_verification=needs_verify,
+   246→        final_thesis=final_thesis,
+   247→        five_final_answers=answers,
+   248→        valuation_multiples=val_multiples,
+   249→        cross_verifications=cross_verifs,
+   250→        fee_stability=fee_stability,
+   251→        bias_checks=bias_checks,
+   252→        scan_id=scan_id,
+   253→        created_at=now,
+   254→    )
+   255→
+   256→
+   257→# --------------------------------------------------------------------------- #
+   258→#  Investment analysis
+   259→# --------------------------------------------------------------------------- #
+   260→def _build_investment_analysis(
+   261→    ev: EvidenceBundle, project_quality: float, token_q: float | None, confidence: float
+   262→) -> InvestmentAnalysis:
+   263→    mc = ev.market_cap_usd
+   264→    fdv = ev.fdv_usd or mc
+   265→    annual_rev = (ev.economic.revenue or 0.0) * 365.0
+   266→    annual_fees = (ev.economic.fees or 0.0) * 365.0
+   267→    tvl = ev.economic.tvl or 0.0
+   268→
+   269→    fdv_rev = (fdv / annual_rev) if (fdv and annual_rev > 0) else None
+   270→    mc_rev = (mc / annual_rev) if (mc and annual_rev > 0) else None
+   271→    fdv_fees = (fdv / annual_fees) if (fdv and annual_fees > 0) else None
+   272→    mc_tvl = (mc / tvl) if (mc and tvl > 0) else None
+   273→
+   274→    # valuation verdict
+   275→    valuation = ValuationVerdict.UNABLE
+   276→    if fdv_rev is not None:
+   277→        if fdv_rev < 8:
+   278→            valuation = ValuationVerdict.CHEAP
+   279→        elif fdv_rev < 20:
+   280→            valuation = ValuationVerdict.FAIR
+   281→        else:
+   282→            valuation = ValuationVerdict.EXPENSIVE
+   283→    elif mc_tvl is not None:
+   284→        if mc_tvl < 0.15:
+   285→            valuation = ValuationVerdict.CHEAP
+   286→        elif mc_tvl < 0.4:
+   287→            valuation = ValuationVerdict.FAIR
+   288→        else:
+   289→            valuation = ValuationVerdict.EXPENSIVE
+   290→
+   291→    # valuation attractiveness (0-100): lower multiples = more attractive
+   292→    val_attr = None
+   293→    if fdv_rev is not None:
+   294→        val_attr = max(0.0, min(100.0, 100.0 - fdv_rev * 2.5))
+   295→    elif mc_tvl is not None:
+   296→        val_attr = max(0.0, min(100.0, 100.0 - mc_tvl * 150.0))
+   297→
+   298→    # timing: blend momentum (24h change) + cycle position
+   299→    timing = 50.0
+   300→    if ev.economic.revenue_growth_pct is not None:
+   301→        timing = max(0.0, min(100.0, 50.0 + ev.economic.revenue_growth_pct * 0.5))
+   302→
+   303→    # investment attractiveness = blend of project, token, valuation, timing
+   304→    inv_attr = None
+   305→    if val_attr is not None:
+   306→        inv_attr = 0.35 * project_quality + 0.25 * (token_q or 50) + 0.25 * val_attr + 0.15 * timing
+   307→        inv_attr = round(max(0.0, min(100.0, inv_attr)), 1)
+   308→
+   309→    # Framework 3.0: P/R, P/F, P/T valuation multiples
+   310→    # P/R = MC / Annualized Revenue (real revenue only)
+   311→    # P/F = FDV / Annualized Fees (fees ≠ revenue, explicitly)
+   312→    # P/T = MC / TVL
+   313→    p_r = (mc / annual_rev) if (mc and annual_rev > 0) else None
+   314→    p_f = (fdv / annual_fees) if (fdv and annual_fees > 0) else None
+   315→    p_t = (mc / tvl) if (mc and tvl > 0) else None
+   316→
+   317→    # Fee volatility check (7d vs 30d average)
+   318→    fees_7d = ev.economic.fees or 0.0
+   319→    fees_30d = (ev.economic.fees or 0.0) * 30  # approximate if only 24h available
+   320→    fee_vol = None
+   321→    if fees_7d > 0 and fees_30d > 0:
+   322→        avg_7d_daily = fees_7d
+   323→        avg_30d_daily = fees_30d / 30
+   324→        if avg_30d_daily > 0:
+   325→            fee_vol = abs(avg_7d_daily - avg_30d_daily) / avg_30d_daily * 100
+   326→
+   327→    # Fee stability label
+   328→    fee_stability = "unknown"
+   329→    if fee_vol is not None:
+   330→        if fee_vol > 40:
+   331→            fee_stability = "volatile"
+   332→        else:
+   333→            fee_stability = "stable"
+   334→
+   335→    # Valuation verdict: Framework 3.0 prefers P/R, falls back to P/F, then P/T
+   336→    valuation = ValuationVerdict.UNABLE
+   337→    if p_r is not None:
+   338→        if p_r < 8:
+   339→            valuation = ValuationVerdict.CHEAP
+   340→        elif p_r < 20:
+   341→            valuation = ValuationVerdict.FAIR
+   342→        else:
+   343→            valuation = ValuationVerdict.EXPENSIVE
+   344→    elif p_f is not None:
+   345→        # Using P/F as proxy (fees ≠ revenue, so wider thresholds)
+   346→        if p_f < 10:
+   347→            valuation = ValuationVerdict.CHEAP
+   348→        elif p_f < 25:
+   349→            valuation = ValuationVerdict.FAIR
+   350→        else:
+   351→            valuation = ValuationVerdict.EXPENSIVE
+   352→    elif p_t is not None:
+   353→        if p_t < 0.15:
+   354→            valuation = ValuationVerdict.CHEAP
+   355→        elif p_t < 0.4:
+   356→            valuation = ValuationVerdict.FAIR
+   357→        else:
+   358→            valuation = ValuationVerdict.EXPENSIVE
+   359→
+   360→    # valuation attractiveness (0-100): lower multiples = more attractive
+   361→    val_attr = None
+   362→    if p_r is not None:
+   363→        val_attr = max(0.0, min(100.0, 100.0 - p_r * 2.5))
+   364→    elif p_f is not None:
+   365→        val_attr = max(0.0, min(100.0, 100.0 - p_f * 2.0))
+   366→    elif p_t is not None:
+   367→        val_attr = max(0.0, min(100.0, 100.0 - p_t * 150.0))
+   368→
+   369→    # timing: blend momentum (24h change) + cycle position
+   370→    timing = 50.0
+   371→    if ev.economic.revenue_growth_pct is not None:
+   372→        timing = max(0.0, min(100.0, 50.0 + ev.economic.revenue_growth_pct * 0.5))
+   373→
+   374→    # investment attractiveness = blend of project, token, valuation, timing
+   375→    inv_attr = None
+   376→    if val_attr is not None:
+   377→        inv_attr = 0.35 * project_quality + 0.25 * (token_q or 50) + 0.25 * val_attr + 0.15 * timing
+   378→        inv_attr = round(max(0.0, min(100.0, inv_attr)), 1)
+   379→
+   380→    return InvestmentAnalysis(
+   381→        fdv_revenue=round(fdv_rev, 2) if fdv_rev else None,
+   382→        mc_revenue=round(mc_rev, 2) if mc_rev else None,
+   383→        fdv_fees=round(fdv_fees, 2) if fdv_fees else None,
+   384→        mc_fees=round(mc / annual_fees, 2) if (mc and annual_fees > 0) else None,
+   385→        mc_tvl=round(mc_tvl, 2) if mc_tvl else None,
+   386→        p_r=round(p_r, 2) if p_r is not None else None,
+   387→        p_f=round(p_f, 2) if p_f is not None else None,
+   388→        p_t=round(p_t, 2) if p_t is not None else None,
+   389→        annualized_fees=round(annual_fees, 0) if annual_fees > 0 else None,
+   390→        annualized_revenue=round(annual_rev, 0) if annual_rev > 0 else None,
+   391→        fee_volatility_pct=round(fee_vol, 1) if fee_vol is not None else None,
+   392→        valuation=valuation,
+   393→        project_quality=round(project_quality, 1),
+   394→        token_quality=token_q,
+   395→        valuation_attractiveness=round(val_attr, 1) if val_attr is not None else None,
+   396→        timing=round(timing, 1),
+   397→        investment_attractiveness=inv_attr,
+   398→        cycle_phase=CyclePhase.HIDDEN_DEV,  # set later
+   399→        catalysts=[],
+   400→        thesis="",
+   401→        kill_conditions=[],
+   402→    )
+   403→
+   404→
+   405→def _infer_cycle_phase(ev: EvidenceBundle, project_quality: float) -> CyclePhase:
+   406→    rev = ev.economic.revenue or 0.0
+   407→    tvl = ev.economic.tvl or 0.0
+   408→    if ev.has_regulatory_license and rev * 365 > 50_000_000:
+   409→        return CyclePhase.INSTITUTIONAL
+   410→    if rev * 365 > 100_000_000:
+   411→        return CyclePhase.SCALE
+   412→    if rev * 365 > 10_000_000:
+   413→        return CyclePhase.MONETIZATION
+   414→    if tvl > 500_000_000:
+   415→        return CyclePhase.ADOPTION
+   416→    if tvl > 50_000_000:
+   417→        return CyclePhase.PMF
+   418→    return CyclePhase.HIDDEN_DEV
+   419→
+   420→
+   421→def _peer_percentile(score: float) -> float:
+   422→    # very rough mapping of absolute score → percentile
+   423→    if score >= 90:
+   424→        return 98.0
+   425→    if score >= 80:
+   426→        return 90.0
+   427→    if score >= 70:
+   428→        return 75.0
+   429→    if score >= 60:
+   430→        return 55.0
+   431→    if score >= 50:
+   432→        return 35.0
+   433→    if score >= 40:
+   434→        return 20.0
+   435→    return 8.0
+   436→
+   437→
+   438→def _rank_from_score(score: float) -> int:
+   439→    if score >= 90:
+   440→        return 1
+   441→    if score >= 80:
+   442→        return 3
+   443→    if score >= 70:
+   444→        return 8
+   445→    if score >= 60:
+   446→        return 20
+   447→    if score >= 50:
+   448→        return 50
+   449→    return 100
+   450→
+   451→
+   452→def _comparables(category: str, self_name: str = "") -> list[str]:
+   453→    c = (category or "").lower()
+   454→    sn = (self_name or "").lower()
+   455→    pool: list[str]
+   456→    if "dex" in c:
+   457→        pool = ["Uniswap", "Curve", "PancakeSwap", "Balancer", "Trader Joe"]
+   458→    elif "lending" in c or "liquid staking" in c:
+   459→        pool = ["Aave", "Lido", "Maker", "Compound", "Spark"]
+   460→    elif "oracle" in c:
+   461→        pool = ["Chainlink", "Pyth", "API3", "Switchboard"]
+   462→    elif "stablecoin" in c:
+   463→        pool = ["USDC", "USDT", "DAI", "FRAX", "PYUSD"]
+   464→    elif "rwa" in c:
+   465→        pool = ["Ondo", "Maple", "Centrifuge", "Goldfinch", "Backed"]
+   466→    elif "bridge" in c:
+   467→        pool = ["Wormhole", "LayerZero", "Across", "Stargate"]
+   468→    elif "smart contract" in c or "layer" in c:
+   469→        pool = ["Ethereum", "Solana", "Arbitrum", "Optimism", "Base"]
+   470→    else:
+   471→        pool = []
+   472→    return [p for p in pool if p.lower() != sn][:3]
+   473→
+   474→
+   475→def _build_catalysts(ev: EvidenceBundle, cycle: CyclePhase) -> list[Catalyst]:
+   476→    out: list[Catalyst] = []
+   477→    if ev.has_regulatory_license:
+   478→        out.append(Catalyst(description="Institutional / regulatory license in place", positive=True, eta="ongoing"))
+   479→    if (ev.economic.revenue_growth_pct or 0) > 20:
+   480→        out.append(Catalyst(description=f"Revenue growing +{ev.economic.revenue_growth_pct:.0f}% WoW", positive=True, eta="current"))
+   481→    if ev.chain_count >= 3:
+   482→        out.append(Catalyst(description=f"Multi-chain deployment ({ev.chain_count} chains)", positive=True, eta="ongoing"))
+   483→    if ev.tokenomics.buyback:
+   484→        out.append(Catalyst(description="Active buyback program", positive=True))
+   485→    if ev.tokenomics.burn:
+   486→        out.append(Catalyst(description="Token burn mechanism", positive=True))
+   487→    if ev.near_unlock_cliff:
+   488→        out.append(Catalyst(description="Major token unlock cliff approaching", positive=False, eta="<90d"))
+   489→    if ev.bridge_dependency:
+   490→        out.append(Catalyst(description="Critical bridge dependency — security risk", positive=False))
+   491→    if ev.regulatory_uncertainty:
+   492→        out.append(Catalyst(description="Regulatory uncertainty unresolved", positive=False))
+   493→    if not out:
+   494→        out.append(Catalyst(description="No strong near-term catalyst identified", positive=False))
+   495→    return out[:6]
+   496→
+   497→
+   498→def _build_thesis(c: CandidateInfo, ev: EvidenceBundle, cycle: CyclePhase) -> str:
+   499→    rail = "infrastructure" if ev.is_infrastructure else "application"
+   500→    rev_part = "with real fee/revenue generation" if (ev.economic.revenue or 0) > 0 else "pre-revenue"
+   501→    return (
+   502→        f"If on-chain {c.seector_lower()} activity grows, then {c.name} ({c.symbol}) "
+   503→        f"{rail} demand should increase, because it sits {ev.position_phrase()} "
+   504→        f"the transaction/liquidity rail {rev_part}."
+   505→    )
+   506→
+   507→
+   508→def _build_kill_conditions(ev: EvidenceBundle) -> list[str]:
+   509→    out = [
+   510→        "Revenue / fees decline >40% for 2 consecutive months.",
+   511→        "A critical security exploit occurs without transparent remediation.",
+   512→        "Core integration or largest customer is discontinued.",
+   513→    ]
+   514→    if ev.tokenomics.market_cap:
+   515→        out.append("Token unlock cliff materially exceeds value capture (>2x annual revenue).")
+   516→    if ev.regulatory_uncertainty:
+   517→        out.append("Regulatory status materially deteriorates (enforcement action / delisting).")
+   518→    if ev.bridge_dependency:
+   519→        out.append("Dependent bridge suffers a critical failure.")
+   520→    return out[:5]
+   521→
+   522→
+   523→def _institutional_adoption(ev: EvidenceBundle) -> str:
+   524→    bits = []
+   525→    if ev.has_regulatory_license:
+   526→        bits.append("Regulatory license / clear status present.")
+   527→    if ev.chain_count >= 3:
+   528→        bits.append(f"Deployed across {ev.chain_count} chains.")
+   529→    if (ev.economic.tvl or 0) > 1_000_000_000:
+   530→        bits.append("TVL above $1B — institutional-grade liquidity.")
+   531→    if (ev.economic.revenue or 0) * 365 > 50_000_000:
+   532→        bits.append("Annualized revenue >$50M — meaningful cash flow.")
+   533→    if not bits:
+   534→        bits.append("Limited institutional adoption evidence — requires verification.")
+   535→    return " ".join(bits)
+   536→
+   537→
+   538→def _competitive_moat(ev: EvidenceBundle, a3) -> str:
+   539→    return (
+   540→        f"Moat score {a3.score:.1f}/10 (conf {a3.confidence:.0f}%). "
+   541→        f"Key factors: {', '.join(list(a3.sub_factors.keys())[:3])}. "
+   542→        f"Switching cost: {'high' if ev.switching_cost_signal else 'moderate'}. "
+   543→        f"Network effect: {'strong' if (ev.liquidity_tvl or 0) > 1e9 else 'developing'}."
+   544→    )
+   545→
+   546→
+   547→def _underfollowed_test(ev: EvidenceBundle, project_quality: float) -> bool:
+   548→    # heuristic: high quality + low social signal
+   549→    return project_quality >= 70 and ev.github_stars < 3000
+   550→
+   551→
+   552→def _five_answers(c: CandidateInfo, ev: EvidenceBundle, veto, thesis: str, kills: list[str]) -> list[str]:
+   553→    a1 = (
+   554→        "Yes — appears to be a settlement / infrastructure layer for real business."
+   555→        if ev.is_infrastructure and (ev.economic.revenue or 0) > 0
+   556→        else "Partially — has infrastructure traits but revenue evidence is limited."
+   557→        if ev.is_infrastructure
+   558→        else "No — primarily a consumer-facing or speculative asset."
+   559→    )
+   560→    a2 = (
+   561→        "Yes — fee/revenue generation would persist without crypto-twitter attention."
+   562→        if (ev.economic.revenue or 0) > 0
+   563→        else "Unclear — limited recurring revenue evidence."
+   564→    )
+   565→    a3 = (
+   566→        f"Revenue flows to {c.name} protocol treasury and (partially) to token holders via "
+   567→        f"{ev.tokenomics.value_capture or 'unclear'} value capture."
+   568→    )
+   569→    a4 = (
+   570→        f"Token utility level {ev.tokenomics.utility_level}/4 — "
+   571→        f"{'captures value' if ev.tokenomics.utility_level >= 3 else 'limited value capture'}."
+   572→        if ev.has_token
+   573→        else "N/A — no token."
+   574→    )
+   575→    a5 = " · ".join(kills[:3]) if kills else "Not specified."
+   576→    return [a1, a2, a3, a4, a5]
+   577→
+   578→
+   579→def _data_to_verify(ev: EvidenceBundle) -> list[str]:
+   580→    out = []
+   581→    if ev.economic.revenue is None:
+   582→        out.append("Revenue / fee figures — verify on official dashboard.")
+   583→    if ev.tokenomics.insider_allocation_pct is None:
+   584→        out.append("Token allocation breakdown — verify in tokenomics docs.")
+   585→    if ev.audit_status == "none":
+   586→        out.append("Security audits — verify with protocol team.")
+   587→    if ev.team_transparent is False:
+   588→        out.append("Team identity — verify publicly.")
+   589→    if ev.tokenomics.value_capture == "moderate":
+   590→        out.append("Token value capture mechanism — verify revenue share / burn details.")
+   591→    if ev.regulatory_uncertainty:
+   592→        out.append("Regulatory status — verify jurisdiction & licenses.")
+   593→    return out or ["All key data points have at least secondary evidence."]
+   594→
+   595→
+   596→# --------------------------------------------------------------------------- #
+   597→#  Monkey-patches for thesis templating (kept tiny & local)
+   598→# --------------------------------------------------------------------------- #
+   599→def _sector_lower(self) -> str:
+   600→    return (self.sector or "").lower()
+   601→
+   602→
+   603→def _position_phrase(self) -> str:
+   604→    return "inside" if self.is_infrastructure else "adjacent to"
+   605→
+   606→
+   607→# attach helpers to CandidateInfo / EvidenceBundle at import time
+   608→CandidateInfo.seector_lower = _sector_lower  # type: ignore[attr-defined]
+   609→EvidenceBundle.position_phrase = _position_phrase  # type: ignore[attr-defined]
+   610→
+   611→
+   612→# --------------------------------------------------------------------------- #
+   613→#  Framework 3.0: Cross-Verification Engine (PHASE 8)
+   614→# --------------------------------------------------------------------------- #
+   615→def _build_cross_verifications(ev: EvidenceBundle) -> list:
+   616→    """Cross-verify key metrics between CoinGecko and DeFiLlama."""
+   617→    from models.schemas import CrossVerification
+   618→    results = []
+   619→
+   620→    # TVL cross-verification
+   621→    if ev.economic.tvl and ev.economic.tvl > 0:
+   622→        results.append(CrossVerification(
+   623→            metric="TVL",
+   624→            source_a="DeFiLlama",
+   625→            value_a=ev.economic.tvl,
+   626→            source_b="CoinGecko",
+   627→            value_b=None,  # CoinGecko doesn't provide TVL directly
+   628→            status="single-source",
+   629→        ))
+   630→
+   631→    # Market cap cross-verification
+   632→    if ev.market_cap_usd and ev.market_cap_usd > 0:
+   633→        results.append(CrossVerification(
+   634→            metric="Market Cap",
+   635→            source_a="CoinGecko",
+   636→            value_a=ev.market_cap_usd,
+   637→            source_b="DeFiLlama",
+   638→            value_b=None,  # DeFiLlama doesn't provide MC directly
+   639→            status="single-source",
+   640→        ))
+   641→
+   642→    # Fees cross-verification
+   643→    if ev.economic.fees and ev.economic.fees > 0:
+   644→        results.append(CrossVerification(
+   645→            metric="Fees 24h",
+   646→            source_a="DeFiLlama Fees",
+   647→            value_a=ev.economic.fees,
+   648→            source_b="Protocol Dashboard",
+   649→            value_b=None,  # Would need direct protocol dashboard
+   650→            status="single-source",
+   651→        ))
+   652→
+   653→    return results
+   654→
+   655→
+   656→# --------------------------------------------------------------------------- #
+   657→#  Framework 3.0: Self-Correction Engine (PHASE 31)
+   658→# --------------------------------------------------------------------------- #
+   659→def _build_bias_checks(ev: EvidenceBundle, project_quality: float, candidate) -> list[str]:
+   660→    """Framework 3.0 PHASE 31: Bias checks for self-correction."""
+   661→    checks = []
+   662→
+   663→    # Bias Check: Popular project bias
+   664→    popular_names = {"aave", "uniswap", "bitcoin", "ethereum", "solana", "chainlink"}
+   665→    if candidate.name.lower() in popular_names:
+   666→        checks.append("⚠️ Bias Check: Popular project — ensure score is evidence-based, not reputation-based.")
+   667→
+   668→    # English-Source Bias
+   669→    checks.append("ℹ️ Source Bias: Primary sources are English-language (CoinGecko, DeFiLlama).")
+   670→
+   671→    # Snapshot Bias
+   672→    if ev.economic.fees and not ev.economic.revenue_growth_pct:
+   673→        checks.append("⚠️ Snapshot Bias: Fees data is point-in-time, not trend-verified.")
+   674→
+   675→    # Precision Illusion
+   676→    if project_quality > 0 and ev.grade.value.startswith("D"):
+   677→        checks.append("⚠️ Precision Illusion: Low evidence grade — score may not reflect reality.")
+   678→
+   679→    # Narrative Bias
+   680→    if ev.is_infrastructure and project_quality < 30:
+   681→        checks.append("ℹ️ Narrative Check: Infrastructure classification doesn't guarantee quality.")
+   682→
+   683→    # Confirmation Bias
+   684→    checks.append("ℹ️ Confirmation Check: Ensure both positive and negative evidence collected.")
+   685→
+   686→    # Anti-Promise
+   687→    checks.append("ℹ️ Anti-Promise: No guaranteed outcomes — all scores are probabilistic.")
+   688→
+   689→    return checks
+   690→
+   691→
+   692→# --------------------------------------------------------------------------- #
+   693→#  Framework 3.0: Valuation Multiples Summary
+   694→# --------------------------------------------------------------------------- #
+   695→def _build_valuation_multiples(inv: InvestmentAnalysis) -> dict:
+   696→    """Build valuation multiples summary for Framework 3.0."""
+   697→    return {
+   698→        "p_r": inv.p_r,  # Price-to-Revenue
+   699→        "p_f": inv.p_f,  # Price-to-Fees
+   700→        "p_t": inv.p_t,  # Price-to-TVL
+   701→        "annualized_revenue": inv.annualized_revenue,
+   702→        "annualized_fees": inv.annualized_fees,
+   703→        "fee_volatility_pct": inv.fee_volatility_pct,
+   704→        "note": "P/R uses real revenue. P/F uses fees (≠ revenue). P/T uses TVL.",
+   705→    }
+   706→

@@ -266,45 +266,11 @@ def _build_investment_analysis(
     annual_fees = (ev.economic.fees or 0.0) * 365.0
     tvl = ev.economic.tvl or 0.0
 
+    # Legacy multiples (kept for backward compat in report)
     fdv_rev = (fdv / annual_rev) if (fdv and annual_rev > 0) else None
     mc_rev = (mc / annual_rev) if (mc and annual_rev > 0) else None
     fdv_fees = (fdv / annual_fees) if (fdv and annual_fees > 0) else None
     mc_tvl = (mc / tvl) if (mc and tvl > 0) else None
-
-    # valuation verdict
-    valuation = ValuationVerdict.UNABLE
-    if fdv_rev is not None:
-        if fdv_rev < 8:
-            valuation = ValuationVerdict.CHEAP
-        elif fdv_rev < 20:
-            valuation = ValuationVerdict.FAIR
-        else:
-            valuation = ValuationVerdict.EXPENSIVE
-    elif mc_tvl is not None:
-        if mc_tvl < 0.15:
-            valuation = ValuationVerdict.CHEAP
-        elif mc_tvl < 0.4:
-            valuation = ValuationVerdict.FAIR
-        else:
-            valuation = ValuationVerdict.EXPENSIVE
-
-    # valuation attractiveness (0-100): lower multiples = more attractive
-    val_attr = None
-    if fdv_rev is not None:
-        val_attr = max(0.0, min(100.0, 100.0 - fdv_rev * 2.5))
-    elif mc_tvl is not None:
-        val_attr = max(0.0, min(100.0, 100.0 - mc_tvl * 150.0))
-
-    # timing: blend momentum (24h change) + cycle position
-    timing = 50.0
-    if ev.economic.revenue_growth_pct is not None:
-        timing = max(0.0, min(100.0, 50.0 + ev.economic.revenue_growth_pct * 0.5))
-
-    # investment attractiveness = blend of project, token, valuation, timing
-    inv_attr = None
-    if val_attr is not None:
-        inv_attr = 0.35 * project_quality + 0.25 * (token_q or 50) + 0.25 * val_attr + 0.15 * timing
-        inv_attr = round(max(0.0, min(100.0, inv_attr)), 1)
 
     # Framework 3.0: P/R, P/F, P/T valuation multiples
     # P/R = MC / Annualized Revenue (real revenue only)
@@ -314,15 +280,23 @@ def _build_investment_analysis(
     p_f = (fdv / annual_fees) if (fdv and annual_fees > 0) else None
     p_t = (mc / tvl) if (mc and tvl > 0) else None
 
-    # Fee volatility check (7d vs 30d average)
-    fees_7d = ev.economic.fees or 0.0
-    fees_30d = (ev.economic.fees or 0.0) * 30  # approximate if only 24h available
+    # Fee volatility check — uses REAL 7d and 30d fees from DeFiLlama
+    # Framework 3.0: "If Fee Volatility > 40%, P/R Reliability Low"
+    f7d_total = ev.economic.fees_7d or 0.0   # total 7d fees
+    f30d_total = ev.economic.fees_30d or 0.0  # total 30d fees
+    f24h = ev.economic.fees or 0.0            # 24h fees
     fee_vol = None
-    if fees_7d > 0 and fees_30d > 0:
-        avg_7d_daily = fees_7d
-        avg_30d_daily = fees_30d / 30
+    if f7d_total > 0 and f30d_total > 0:
+        # Compare daily averages: (7d avg daily) vs (30d avg daily)
+        avg_7d_daily = f7d_total / 7.0
+        avg_30d_daily = f30d_total / 30.0
         if avg_30d_daily > 0:
             fee_vol = abs(avg_7d_daily - avg_30d_daily) / avg_30d_daily * 100
+    elif f24h > 0 and f7d_total > 0:
+        # Fallback: compare 24h vs 7d average
+        avg_7d_daily = f7d_total / 7.0
+        if avg_7d_daily > 0:
+            fee_vol = abs(f24h - avg_7d_daily) / avg_7d_daily * 100
 
     # Fee stability label
     fee_stability = "unknown"

@@ -390,6 +390,9 @@ export default function Home() {
     } catch {}
   }, [watchlist]);
 
+  // Ref to always have latest startScan (avoids stale closure in keyboard handler)
+  const startScanRef = useRef<() => void>(() => {});
+
   // keyboard shortcuts
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -407,7 +410,7 @@ export default function Home() {
 
       if (e.key === "s" && !e.ctrlKey && !e.metaKey) {
         e.preventDefault();
-        if (!scanning) startScan();
+        if (!scanning) startScanRef.current();
       } else if (e.key === "/" && !e.ctrlKey && !e.metaKey) {
         e.preventDefault();
         searchInputRef.current?.focus();
@@ -508,6 +511,9 @@ export default function Home() {
       setScanning(false);
     }
   };
+
+  // Keep ref updated so keyboard shortcut always uses latest config
+  startScanRef.current = startScan;
 
   // --- refresh scan: re-run with the same config as active scan ---
   const refreshScan = async () => {
@@ -702,6 +708,11 @@ export default function Home() {
     }
   }, [activeScan?.reports, riskReports.length]);
 
+  // Reset riskReports when activeScan changes (prevents stale data from previous scan)
+  useEffect(() => {
+    setRiskReports([]);
+  }, [activeScan?.scan_id]);
+
   // auto-fetch when switching to analytics view
   useEffect(() => {
     if (viewMode === "analytics" && activeScan?.reports?.length) {
@@ -772,6 +783,10 @@ export default function Home() {
       `Verdict: ${report.executive_verdict}`,
       `Thesis: ${report.final_thesis}`,
     ].join("\n");
+    if (!navigator?.clipboard?.writeText) {
+      toast({ title: "❌ Copy failed", description: "Clipboard API not available", variant: "destructive" });
+      return;
+    }
     navigator.clipboard.writeText(summary).then(() => {
       toast({ title: "📋 Copied to clipboard", description: "Report summary ready to paste" });
     }).catch(() => {
@@ -2352,7 +2367,7 @@ function ReportDetail({
                         <div
                           className={cn(
                             "w-full rounded-t-md transition-all duration-500",
-                            isLast ? scoreBg(point.score) : "bg-muted-40",
+                            isLast ? scoreBg(point.score) : "bg-muted/40",
                           )}
                           style={{ height: `${heightPct}%`, opacity: isLast ? 1 : 0.5 }}
                         />

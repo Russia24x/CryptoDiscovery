@@ -1,12 +1,18 @@
 import { NextResponse } from "next/server";
-import { scannerFetch } from "@/lib/scanner-client";
+import { scannerJson } from "@/lib/scanner-client";
 
 export async function GET(
   _req: Request,
   { params }: { params: Promise<{ id: string }> },
 ) {
-  const { id } = await params;
-  const res = await scannerFetch(`/project/${id}`);
-  const data = await res.json();
-  return NextResponse.json(data, { status: res.status });
+  try {
+    const { id } = await params;
+    const data = await scannerJson(`/project/${id}`);
+    return NextResponse.json(data);
+  } catch (e) {
+    return NextResponse.json(
+      { error: "Failed to fetch project", detail: e instanceof Error ? e.message : "unknown" },
+      { status: 502 },
+    );
+  }
 }

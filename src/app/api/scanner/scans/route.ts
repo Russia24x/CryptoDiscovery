@@ -1,8 +1,14 @@
 import { NextResponse } from "next/server";
-import { scannerFetch } from "@/lib/scanner-client";
+import { scannerJson } from "@/lib/scanner-client";
 
 export async function GET() {
-  const res = await scannerFetch("/scans");
-  const data = await res.json();
-  return NextResponse.json(data, { status: res.status });
+  try {
+    const data = await scannerJson("/scans");
+    return NextResponse.json(data);
+  } catch (e) {
+    return NextResponse.json(
+      { error: "Failed to fetch scans", detail: e instanceof Error ? e.message : "unknown" },
+      { status: 502 },
+    );
+  }
 }
