@@ -1483,7 +1483,6 @@ async def fetch_top_markets_extended(per_page: int = 250) -> list[dict[str, Any]
 #   6. CryptoCompare API     — https://min-api.cryptocompare.com/data/v2/news/ (optional, free key)
 #
 # Each article is normalised to: {title, summary, url, source, published_at, image, categories}
-import urllib.parse as _urlparse
 import xml.etree.ElementTree as _ET
 from datetime import datetime as _datetime, timezone as _tz
 
