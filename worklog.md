@@ -1569,3 +1569,52 @@ Stage Summary:
 - Multi-source API strategy: 9 free sources always active + 3 optional API-key sources (CMC Pro, CryptoPanic, CryptoCompare) ready to activate if keys provided via env vars.
 - Telegram channel @Mastersharkcrypto fully integrated with no authentication required (public web preview).
 - All features verified working end-to-end with real data.
+
+---
+Task ID: 7
+Agent: main (orchestrator)
+Task: Add Persian news sources (ArzDigital + MihanBlockchain), fix Telegram media extraction, add Persian news UI tab, review multi-source data flow.
+
+Work Log:
+- Tested Persian RSS feeds: ArzDigital /breaking/feed (20 items), /feed (24 blog articles), MihanBlockchain /category/news/feed (10 items), /category/markets/feed (10 analysis items). All return Persian content with proper titles, links, dates.
+- Added NEWS_FEEDS_FA list to sources.py with 4 Persian RSS feeds: ArzDigital breaking + blog, MihanBlockchain news + markets.
+- Updated _fetch_rss_feed() to accept optional category parameter, added fallback image extraction from description HTML (<img src="...">), inject feed-level category into article categories.
+- Added fetch_crypto_news_fa() function: fetches all Persian RSS in parallel, tags articles with lang="fa", deduplicates by title, sorts by published_at, 5-min TTL cache.
+- Added /news/fa endpoint to main.py with category filter support (breaking/blog/news/analysis).
+- Fixed Telegram photo extraction: the regex was failing because Telegram uses single-quoted URLs url('...') with other CSS properties before background-image. Updated to handle single/double quotes and grouped media (albums). Now extracts media_all for album display.
+- Improved Telegram link extraction: fallback to all plain links when tgme_widget_message_link_hover class isn't present.
+- Added media_all field to TelegramMessage type for album photo grids.
+- Updated /sources endpoint: now 14 sources (11 free + 3 API-key), added ArzDigital and MihanBlockchain entries.
+- Created /api/scanner/news/fa Next.js proxy route.
+- Updated scanner-types.ts: added PersianNewsArticle, PersianNewsResponse types, media_all field to TelegramMessage.
+- Updated news-feed-view.tsx:
+  - Added Persian source styles (ArzDigital=cyan, MihanBlockchain=orange)
+  - Updated MessageBubble: now renders single photos AND album grids (2-column layout for multi-photo messages)
+  - Added PersianArticleCard component with dir="auto" for RTL text, category badge, source badge
+  - Added PersianNewsTabContent component with category filter chips (همه/مقاله/خبر فوری/خبر/تحلیل), search, loading/error/empty states
+  - Added 3rd sub-tab "news_fa" to the main tab bar
+  - Updated all derived state (activeFetchedAt, handleRefresh, isRefreshing, etc.) to handle 3 tabs
+  - Added BookOpen icon import
+- Added news_fa.* i18n keys to en.json and fa.json (7 keys each).
+- Updated RELEVANT_SOURCE_PATTERNS to include ArzDigital and MihanBlockchain for the data sources badge row.
+
+Multi-source data flow review:
+- Evidence pipeline (single-coin analysis): CoinGecko (tokenomics) + DeFiLlama (TVL/fees) + CMC Keyless (holder ratios, audit info, price ranges — always free) + CMC Pro (cross-verification when API key set). All 4 sources used for maximum accuracy.
+- Market overview: CoinGecko (global stats, trending, top 250) + DeFiLlama (protocols, fees) + Fear & Greed (sentiment). 3 free sources in parallel.
+- News: 4 English RSS + 4 Persian RSS + 2 optional API-key sources (CryptoPanic, CryptoCompare). All free, no key required.
+- Telegram: t.me/s/ public web preview (no bot token needed).
+
+Browser QA via agent-browser:
+- 4 main tabs visible: دیسکاوری / کاوش ارز / هوش بازار / اخبار و سیگنال ✓
+- News sub-tabs: اخبار کریپتو (40) | اخبار فارسی (40) | کانال تلگرام (12) ✓
+- Persian News tab: 40 articles from ArzDigital + MihanBlockchain, category chips (همه 40, مقاله 9, خبر فوری 20, خبر 10, تحلیل 1), search box, RTL text rendering correct ✓
+- Telegram media: 8/12 messages have photos, album grids (2 photos side-by-side) rendering correctly, VLM confirmed "photo grid consisting of two images side-by-side: a candlestick financial chart on the left and a portrait photo of a man on the right" ✓
+- Data sources badge row: now shows 9 sources including ArzDigital and MihanBlockchain ✓
+- Dev log + scanner log: zero errors ✓
+- Lint: 0 errors, 0 warnings ✓
+
+Stage Summary:
+- Persian news from ArzDigital (breaking + blog) and MihanBlockchain (news + markets) fully integrated with category filtering and RTL rendering.
+- Telegram media extraction fixed: now shows photos and album grids (previously 0 photos, now 8/12 messages have media).
+- Multi-source data flow verified: CoinGecko + DeFiLlama + CMC Keyless (all free) + CMC Pro (optional) used throughout evidence pipeline and market overview for maximum truth and stability.
+- Total data sources: 14 (11 free + 3 optional API-key).

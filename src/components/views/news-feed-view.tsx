@@ -37,6 +37,7 @@
 import * as React from "react";
 import {
   AlertCircle,
+  BookOpen,
   Clock,
   Eye,
   ExternalLink,
@@ -55,6 +56,8 @@ import { useLanguage } from "@/lib/i18n/LanguageProvider";
 import {
   NewsArticle,
   NewsResponse,
+  PersianNewsArticle,
+  PersianNewsResponse,
   TelegramMessage,
   TelegramResponse,
   DataSourceInfo,
@@ -85,8 +88,8 @@ import {
 // --------------------------------------------------------------------------- //
 
 interface NewsFeedViewProps {
-  /** Optional: pre-selected sub-tab ("news" | "telegram") */
-  initialTab?: "news" | "telegram";
+  /** Optional: pre-selected sub-tab */
+  initialTab?: "news" | "news_fa" | "telegram";
 }
 
 // --------------------------------------------------------------------------- //
@@ -123,6 +126,15 @@ const SOURCE_STYLES: Record<string, SourceStyle> = {
     badge: "border-teal-500/30 bg-teal-500/15 text-teal-600 dark:text-teal-400",
     dot: "bg-teal-500",
   },
+  // Persian sources
+  ArzDigital: {
+    badge: "border-cyan-500/30 bg-cyan-500/15 text-cyan-600 dark:text-cyan-400",
+    dot: "bg-cyan-500",
+  },
+  MihanBlockchain: {
+    badge: "border-orange-500/30 bg-orange-500/15 text-orange-600 dark:text-orange-400",
+    dot: "bg-orange-500",
+  },
 };
 
 const DEFAULT_SOURCE_STYLE: SourceStyle = {
@@ -149,6 +161,8 @@ const RELEVANT_SOURCE_PATTERNS = [
   /^CryptoPanic/i,
   /^CryptoCompare/i,
   /^Telegram/i,
+  /^ArzDigital/i,
+  /^MihanBlockchain/i,
 ];
 
 function isNewsOrTelegramSource(s: DataSourceInfo): boolean {
@@ -372,6 +386,7 @@ function MessageBubble({ msg }: { msg: TelegramMessage }) {
   const deepLink =
     msg.channel_url && msgNum ? `${msg.channel_url}/${msgNum}` : msg.channel_url;
   const hasPhoto = msg.media_type === "photo" && msg.media_url;
+  const album = msg.media_all && msg.media_all.length > 1 ? msg.media_all : null;
 
   return (
     <article className="rounded-xl border border-border/60 bg-card/40 p-4 backdrop-blur-sm transition-colors hover:border-border">
@@ -410,8 +425,8 @@ function MessageBubble({ msg }: { msg: TelegramMessage }) {
         </Tooltip>
       </div>
 
-      {/* Optional photo media */}
-      {hasPhoto && (
+      {/* Optional photo media — single photo or album grid */}
+      {hasPhoto && !album && (
         <a
           href={deepLink}
           target="_blank"
@@ -425,6 +440,26 @@ function MessageBubble({ msg }: { msg: TelegramMessage }) {
             className="max-h-80 w-full rounded-lg object-cover"
           />
         </a>
+      )}
+      {album && (
+        <div className="mb-3 grid gap-1" style={{ gridTemplateColumns: `repeat(${Math.min(album.length, 2)}, 1fr)` }}>
+          {album.slice(0, 4).map((url, i) => (
+            <a
+              key={`${url}-${i}`}
+              href={deepLink}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="block overflow-hidden rounded-lg focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+            >
+              <img
+                src={url}
+                alt={`Telegram media ${i + 1}`}
+                loading="lazy"
+                className="h-32 w-full object-cover transition-transform hover:scale-105 sm:h-40"
+              />
+            </a>
+          ))}
+        </div>
       )}
 
       {/* Message text — dir="auto" handles bidi (Persian RTL + English LTR mix) */}
@@ -682,8 +717,189 @@ function NewsTabContent({
 }
 
 // --------------------------------------------------------------------------- //
-//  Telegram tab content
+//  Persian news tab content
 // --------------------------------------------------------------------------- //
+
+const PERSIAN_CATEGORY_STYLES: Record<string, { label: string; badge: string }> = {
+  breaking: { label: "خبر فوری", badge: "border-rose-500/30 bg-rose-500/15 text-rose-400" },
+  blog: { label: "مقاله", badge: "border-cyan-500/30 bg-cyan-500/15 text-cyan-400" },
+  news: { label: "خبر", badge: "border-orange-500/30 bg-orange-500/15 text-orange-400" },
+  analysis: { label: "تحلیل", badge: "border-amber-500/30 bg-amber-500/15 text-amber-400" },
+};
+
+function PersianArticleCard({ article }: { article: PersianNewsArticle }) {
+  const st = sourceStyle(article.source);
+  const cat = article.category ? PERSIAN_CATEGORY_STYLES[article.category] : null;
+  return (
+    <a
+      href={article.url}
+      target="_blank"
+      rel="noopener noreferrer"
+      className="group flex flex-col overflow-hidden rounded-xl border border-border/60 bg-card/40 backdrop-blur-sm transition-all hover:-translate-y-0.5 hover:border-primary/40 hover:shadow-lg"
+    >
+      <ArticleImage src={article.image} alt={article.title} />
+      <div className="flex flex-1 flex-col gap-2 p-4">
+        <div className="flex items-center gap-1.5 flex-wrap">
+          <span className={`inline-flex items-center gap-1 rounded-md border px-1.5 py-0.5 text-[10px] font-medium ${st.badge}`}>
+            <span className={`size-1.5 rounded-full ${st.dot}`} />
+            {article.source}
+          </span>
+          {cat && (
+            <span className={`inline-flex items-center rounded-md border px-1.5 py-0.5 text-[10px] font-medium ${cat.badge}`}>
+              {cat.label}
+            </span>
+          )}
+          <span className="ml-auto text-[10px] text-muted-foreground">
+            {timeAgo(article.published_at)}
+          </span>
+        </div>
+        <h3 dir="auto" className="line-clamp-2 text-sm font-semibold leading-snug text-foreground">
+          {article.title}
+        </h3>
+        <p dir="auto" className="line-clamp-3 text-xs leading-relaxed text-muted-foreground">
+          {article.summary}
+        </p>
+        <div className="mt-auto flex items-center gap-1 pt-1 text-[11px] text-muted-foreground transition-colors group-hover:text-primary">
+          <ExternalLink className="size-3" />
+          {article.source === "ArzDigital" ? "arzdigital.com" : "mihanblockchain.com"}
+        </div>
+      </div>
+    </a>
+  );
+}
+
+interface PersianNewsTabContentProps {
+  loading: boolean;
+  error: string | null;
+  newsFa: PersianNewsResponse | null;
+  categoryFilter: string;
+  setCategoryFilter: (v: string) => void;
+  search: string;
+  setSearch: (v: string) => void;
+  filteredArticles: PersianNewsArticle[];
+  onRetry: () => void;
+  tt: (key: string, fallback: string) => string;
+}
+
+function PersianNewsTabContent({
+  loading,
+  error,
+  newsFa,
+  categoryFilter,
+  setCategoryFilter,
+  search,
+  setSearch,
+  filteredArticles,
+  onRetry,
+  tt,
+}: PersianNewsTabContentProps) {
+  // Build category chips from the articles present
+  const categories = React.useMemo(() => {
+    const set = new Set<string>();
+    newsFa?.articles.forEach((a) => { if (a.category) set.add(a.category); });
+    return Array.from(set);
+  }, [newsFa]);
+
+  return (
+    <div className="space-y-4">
+      {/* Filter bar */}
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex flex-wrap items-center gap-1.5">
+          <SourceChip
+            active={categoryFilter === "all"}
+            onClick={() => setCategoryFilter("all")}
+            label={tt("news_fa.allCategories", "همه دسته‌ها")}
+            count={newsFa?.articles.length ?? 0}
+          />
+          {categories.map((cat) => {
+            const count = newsFa?.articles.filter((a) => a.category === cat).length ?? 0;
+            const style = PERSIAN_CATEGORY_STYLES[cat];
+            return (
+              <SourceChip
+                key={cat}
+                active={categoryFilter === cat}
+                onClick={() => setCategoryFilter(cat)}
+                label={style?.label ?? cat}
+                count={count}
+              />
+            );
+          })}
+        </div>
+        <div className="relative w-full sm:w-64">
+          <Search className="absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
+          <Input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder={tt("news_fa.searchPlaceholder", "جستجوی مقالات...")}
+            className="h-8 pl-8 pr-8 text-xs"
+          />
+          {search && (
+            <button
+              onClick={() => setSearch("")}
+              className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+            >
+              <X className="size-3.5" />
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* Loading skeleton */}
+      {loading && (
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          {Array.from({ length: 6 }).map((_, i) => (
+            <ArticleCardSkeleton key={i} />
+          ))}
+        </div>
+      )}
+
+      {/* Error */}
+      {error && !loading && (
+        <Alert variant="destructive">
+          <AlertCircle className="size-4" />
+          <AlertTitle>{tt("news_fa.errorTitle", "خطا")}</AlertTitle>
+          <AlertDescription className="flex items-center justify-between">
+            <span>{error}</span>
+            <Button size="sm" variant="outline" onClick={onRetry} className="h-7 text-xs">
+              {tt("news_fa.retry", "تلاش مجدد")}
+            </Button>
+          </AlertDescription>
+        </Alert>
+      )}
+
+      {/* Empty state */}
+      {!loading && !error && filteredArticles.length === 0 && (
+        <Card className="border-dashed">
+          <CardContent className="flex flex-col items-center gap-2 py-12 text-center">
+            <Newspaper className="size-8 text-muted-foreground/50" />
+            <p className="text-sm text-muted-foreground">
+              {tt("news_fa.noArticles", "مقاله‌ای یافت نشد")}
+            </p>
+            {(categoryFilter !== "all" || search) && (
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => { setCategoryFilter("all"); setSearch(""); }}
+                className="h-7 text-xs"
+              >
+                {tt("news_fa.clearFilters", "پاک کردن فیلترها")}
+              </Button>
+            )}
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Articles grid */}
+      {!loading && !error && filteredArticles.length > 0 && (
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          {filteredArticles.map((a, i) => (
+            <PersianArticleCard key={`${a.url}-${i}`} article={a} />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
 
 interface TelegramTabContentProps {
   loading: boolean;
@@ -850,15 +1066,23 @@ export function NewsFeedView({ initialTab = "news" }: NewsFeedViewProps) {
   );
 
   // ----- Tab state -----
-  const [tab, setTab] = React.useState<"news" | "telegram">(initialTab);
+  const [tab, setTab] = React.useState<"news" | "news_fa" | "telegram">(initialTab);
 
-  // ----- News state -----
+  // ----- News state (English) -----
   const [news, setNews] = React.useState<NewsResponse | null>(null);
   const [newsLoading, setNewsLoading] = React.useState(false);
   const [newsRefreshing, setNewsRefreshing] = React.useState(false);
   const [newsError, setNewsError] = React.useState<string | null>(null);
   const [sourceFilter, setSourceFilter] = React.useState<string>("all");
   const [search, setSearch] = React.useState("");
+
+  // ----- Persian news state -----
+  const [newsFa, setNewsFa] = React.useState<PersianNewsResponse | null>(null);
+  const [newsFaLoading, setNewsFaLoading] = React.useState(false);
+  const [newsFaRefreshing, setNewsFaRefreshing] = React.useState(false);
+  const [newsFaError, setNewsFaError] = React.useState<string | null>(null);
+  const [categoryFilter, setCategoryFilter] = React.useState<string>("all");
+  const [searchFa, setSearchFa] = React.useState("");
 
   // ----- Telegram state -----
   const [telegram, setTelegram] = React.useState<TelegramResponse | null>(null);
@@ -895,6 +1119,26 @@ export function NewsFeedView({ initialTab = "news" }: NewsFeedViewProps) {
     } finally {
       setNewsLoading(false);
       setNewsRefreshing(false);
+    }
+  }, []);
+
+  const fetchNewsFa = React.useCallback(async (refresh: boolean) => {
+    if (refresh) setNewsFaRefreshing(true);
+    else setNewsFaLoading(true);
+    setNewsFaError(null);
+    try {
+      const res = await fetch("/api/scanner/news/fa?limit=40");
+      if (!res.ok) throw new Error(`HTTP ${res.status} ${res.statusText}`);
+      const data = (await res.json()) as PersianNewsResponse;
+      if (!data || !Array.isArray(data.articles)) {
+        throw new Error("Invalid response shape");
+      }
+      setNewsFa(data);
+    } catch (e) {
+      setNewsFaError(e instanceof Error ? e.message : "Failed to load Persian news");
+    } finally {
+      setNewsFaLoading(false);
+      setNewsFaRefreshing(false);
     }
   }, []);
 
@@ -939,8 +1183,9 @@ export function NewsFeedView({ initialTab = "news" }: NewsFeedViewProps) {
 
   React.useEffect(() => {
     if (tab === "news" && !news && !newsLoading) fetchNews(false);
+    else if (tab === "news_fa" && !newsFa && !newsFaLoading) fetchNewsFa(false);
     else if (tab === "telegram" && !telegram && !tgLoading) fetchTelegram(false);
-  }, [tab, news, telegram, newsLoading, tgLoading, fetchNews, fetchTelegram]);
+  }, [tab, news, newsFa, telegram, newsLoading, newsFaLoading, tgLoading, fetchNews, fetchNewsFa, fetchTelegram]);
 
   // ----- Auto-refresh telegram every 60s when toggle is on -----
   React.useEffect(() => {
@@ -956,7 +1201,7 @@ export function NewsFeedView({ initialTab = "news" }: NewsFeedViewProps) {
     return Array.from(set);
   }, [news]);
 
-  // ----- Derived: filtered news articles -----
+  // ----- Derived: filtered news articles (English) -----
   const filteredArticles = React.useMemo(() => {
     if (!news) return [];
     const q = search.trim().toLowerCase();
@@ -970,22 +1215,51 @@ export function NewsFeedView({ initialTab = "news" }: NewsFeedViewProps) {
     });
   }, [news, sourceFilter, search]);
 
+  // ----- Derived: filtered Persian news articles -----
+  const filteredFaArticles = React.useMemo(() => {
+    if (!newsFa) return [];
+    const q = searchFa.trim().toLowerCase();
+    return newsFa.articles.filter((a) => {
+      if (categoryFilter !== "all" && a.category !== categoryFilter) return false;
+      if (q) {
+        const hay = `${a.title} ${a.summary}`.toLowerCase();
+        if (!hay.includes(q)) return false;
+      }
+      return true;
+    });
+  }, [newsFa, categoryFilter, searchFa]);
+
   // ----- Derived: cache age for the active tab -----
-  const activeFetchedAt = tab === "news" ? news?.fetched_at : telegram?.fetched_at;
+  const activeFetchedAt =
+    tab === "news" ? news?.fetched_at
+    : tab === "news_fa" ? newsFa?.fetched_at
+    : telegram?.fetched_at;
   // secondsSince recomputes on every render (tick state forces re-render every 1s).
   void secondsSince(activeFetchedAt ?? null);
 
   // ----- Refresh handler for the current tab -----
   const handleRefresh = React.useCallback(() => {
     if (tab === "news") fetchNews(true);
+    else if (tab === "news_fa") fetchNewsFa(true);
     else fetchTelegram(true);
-  }, [tab, fetchNews, fetchTelegram]);
+  }, [tab, fetchNews, fetchNewsFa, fetchTelegram]);
 
-  const isRefreshing = tab === "news" ? newsRefreshing : tgRefreshing;
-  const isLoading = tab === "news" ? newsLoading : tgLoading;
-  const activeError = tab === "news" ? newsError : tgError;
+  const isRefreshing =
+    tab === "news" ? newsRefreshing
+    : tab === "news_fa" ? newsFaRefreshing
+    : tgRefreshing;
+  const isLoading =
+    tab === "news" ? newsLoading
+    : tab === "news_fa" ? newsFaLoading
+    : tgLoading;
+  const activeError =
+    tab === "news" ? newsError
+    : tab === "news_fa" ? newsFaError
+    : tgError;
   const onRetry =
-    tab === "news" ? () => fetchNews(false) : () => fetchTelegram(false);
+    tab === "news" ? () => fetchNews(false)
+    : tab === "news_fa" ? () => fetchNewsFa(false)
+    : () => fetchTelegram(false);
 
   // ----------------------------------------------------------------------- //
   //  Render
@@ -1036,7 +1310,7 @@ export function NewsFeedView({ initialTab = "news" }: NewsFeedViewProps) {
         {/* ===== Tabs ===== */}
         <Tabs
           value={tab}
-          onValueChange={(v) => setTab(v as "news" | "telegram")}
+          onValueChange={(v) => setTab(v as "news" | "news_fa" | "telegram")}
           className="w-full"
         >
           <TabsList className="w-full sm:w-auto">
@@ -1046,6 +1320,15 @@ export function NewsFeedView({ initialTab = "news" }: NewsFeedViewProps) {
               {news && news.articles.length > 0 && (
                 <Badge variant="secondary" className="ml-1 px-1.5 py-0 text-[10px]">
                   {news.articles.length}
+                </Badge>
+              )}
+            </TabsTrigger>
+            <TabsTrigger value="news_fa" className="flex-1 sm:flex-initial">
+              <BookOpen className="size-4" />
+              {tt("news_fa.tab", "اخبار فارسی")}
+              {newsFa && newsFa.articles.length > 0 && (
+                <Badge variant="secondary" className="ml-1 px-1.5 py-0 text-[10px]">
+                  {newsFa.articles.length}
                 </Badge>
               )}
             </TabsTrigger>
@@ -1060,7 +1343,7 @@ export function NewsFeedView({ initialTab = "news" }: NewsFeedViewProps) {
             </TabsTrigger>
           </TabsList>
 
-          {/* ----- News tab ----- */}
+          {/* ----- English news tab ----- */}
           <TabsContent value="news" className="space-y-4">
             <NewsTabContent
               loading={newsLoading}
@@ -1072,6 +1355,22 @@ export function NewsFeedView({ initialTab = "news" }: NewsFeedViewProps) {
               search={search}
               setSearch={setSearch}
               filteredArticles={filteredArticles}
+              onRetry={onRetry}
+              tt={tt}
+            />
+          </TabsContent>
+
+          {/* ----- Persian news tab ----- */}
+          <TabsContent value="news_fa" className="space-y-4">
+            <PersianNewsTabContent
+              loading={newsFaLoading}
+              error={newsFaError}
+              newsFa={newsFa}
+              categoryFilter={categoryFilter}
+              setCategoryFilter={setCategoryFilter}
+              search={searchFa}
+              setSearch={setSearchFa}
+              filteredArticles={filteredFaArticles}
               onRetry={onRetry}
               tt={tt}
             />

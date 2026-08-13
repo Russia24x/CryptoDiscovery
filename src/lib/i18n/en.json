@@ -500,6 +500,15 @@
     "noArticlesDesc": "Try a different source or search term.",
     "clearFilters": "Clear filters"
   },
+  "news_fa": {
+    "tab": "Persian News",
+    "allCategories": "All",
+    "searchPlaceholder": "Search articles...",
+    "errorTitle": "Error",
+    "retry": "Retry",
+    "noArticles": "No articles found",
+    "clearFilters": "Clear filters"
+  },
   "telegram": {
     "tab": "Telegram Channel",
     "live": "Live",

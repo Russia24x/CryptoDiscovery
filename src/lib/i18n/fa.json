@@ -500,6 +500,15 @@
     "noArticlesDesc": "منبع یا عبارت جستجوی دیگری را امتحان کنید.",
     "clearFilters": "پاک کردن فیلترها"
   },
+  "news_fa": {
+    "tab": "اخبار فارسی",
+    "allCategories": "همه",
+    "searchPlaceholder": "جستجوی مقالات...",
+    "errorTitle": "خطا",
+    "retry": "تلاش مجدد",
+    "noArticles": "مقاله‌ای یافت نشد",
+    "clearFilters": "پاک کردن فیلترها"
+  },
   "telegram": {
     "tab": "کانال تلگرام",
     "live": "زنده",

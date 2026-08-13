@@ -643,6 +643,17 @@ NEWS_FEEDS: list[tuple[str, str]] = [
     ("Bitcoinist", "https://bitcoinist.com/feed/"),
 ]
 
+# Persian (Farsi) crypto news sources — all free RSS, no key required
+# ArzDigital: breaking news + blog articles (analysis/ideas via /feed which contains /blog/ posts)
+# MihanBlockchain: news + market analysis
+NEWS_FEEDS_FA: list[tuple[str, str, str]] = [
+    # (source_name, rss_url, category)  — category used for sub-tab filtering
+    ("ArzDigital", "https://arzdigital.com/breaking/feed/", "breaking"),
+    ("ArzDigital", "https://arzdigital.com/feed/", "blog"),
+    ("MihanBlockchain", "https://mihanblockchain.com/category/news/feed/", "news"),
+    ("MihanBlockchain", "https://mihanblockchain.com/category/markets/feed/", "analysis"),
+]
+
 # Optional API-key sources (read from env)
 CRYPTOPANIC_TOKEN = os.environ.get("CRYPTOPANIC_TOKEN", "")
 CRYPTOCOMPARE_KEY = os.environ.get("CRYPTOCOMPARE_KEY", "")
@@ -673,8 +684,12 @@ def _parse_rss_date(raw: str | None) -> str | None:
     return None
 
 
-async def _fetch_rss_feed(client: httpx.AsyncClient, name: str, url: str) -> list[dict[str, Any]]:
-    """Fetch and parse a single RSS feed into normalised article dicts."""
+async def _fetch_rss_feed(client: httpx.AsyncClient, name: str, url: str, category: str = "") -> list[dict[str, Any]]:
+    """Fetch and parse a single RSS feed into normalised article dicts.
+
+    The optional ``category`` tags every article from this feed (e.g. "breaking",
+    "blog", "analysis") so the frontend can filter by content type.
+    """
     try:
         r = await client.get(url, timeout=TIMEOUT, headers={"User-Agent": "Mozilla/5.0 (crypto-scanner)"})
         if r.status_code != 200:
@@ -705,8 +720,17 @@ async def _fetch_rss_feed(client: httpx.AsyncClient, name: str, url: str) -> lis
             mt = it.find("{http://search.yahoo.com/mrss/}thumbnail")
             if mt is not None:
                 image = mt.get("url")
-        # categories
+        # Fallback: try to extract an <img src="..."> from the description HTML
+        if not image and desc_raw:
+            import re as _re
+            img_match = _re.search(r'<img[^>]+src=["\']([^"\']+)["\']', desc_raw)
+            if img_match:
+                image = img_match.group(1)
+        # categories from the feed
         cats = [c.text.strip() for c in it.findall("category") if c.text]
+        # Inject the feed-level category if provided
+        if category and category not in cats:
+            cats.insert(0, category)
 
         out.append({
             "title": title,
@@ -716,6 +740,7 @@ async def _fetch_rss_feed(client: httpx.AsyncClient, name: str, url: str) -> lis
             "published_at": _parse_rss_date(pub),
             "image": image,
             "categories": cats[:5],
+            "category": category,
         })
     return out
 
@@ -806,6 +831,55 @@ async def fetch_crypto_news(limit: int = 40) -> list[dict[str, Any]]:
     return out
 
 
+async def fetch_crypto_news_fa(limit: int = 40, category: str = "") -> list[dict[str, Any]]:
+    """Aggregate Persian (Farsi) crypto news from ArzDigital + MihanBlockchain.
+
+    All sources are free RSS — no API key required.
+    Categories: breaking, blog, news, analysis (empty = all).
+
+    Each article includes a ``category`` field and ``lang="fa"``.
+    """
+    cache_key = f"news_fa:{limit}:{category}"
+    cached = cache_get(cache_key, ttl=300.0)  # 5-min cache
+    if cached is not None:
+        return cached
+
+    all_articles: list[dict[str, Any]] = []
+
+    # Fetch all Persian RSS feeds in parallel
+    async with httpx.AsyncClient() as c:
+        tasks = [
+            _fetch_rss_feed(c, name, url, cat)
+            for name, url, cat in NEWS_FEEDS_FA
+            if not category or cat == category
+        ]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        for res in results:
+            if isinstance(res, list):
+                all_articles.extend(res)
+
+    # Tag each article with lang=fa
+    for a in all_articles:
+        a["lang"] = "fa"
+
+    # Deduplicate by normalised title (some articles may appear in multiple feeds)
+    seen: set[str] = set()
+    unique: list[dict[str, Any]] = []
+    for a in all_articles:
+        key = (a.get("title") or "").lower().strip()[:80]
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        unique.append(a)
+
+    # Sort by published_at descending
+    unique.sort(key=lambda x: x.get("published_at") or "", reverse=True)
+    out = unique[:limit]
+    cache_set(cache_key, out)
+    log.info("News (fa): aggregated %d Persian articles (category=%s)", len(out), category or "all")
+    return out
+
+
 # ========================================================================== #
 #  TELEGRAM CHANNEL FEED — public web preview (no API key, no bot needed)
 # ========================================================================== #
@@ -872,20 +946,43 @@ def _parse_telegram_html(html: str, channel: str) -> list[dict[str, Any]]:
         author_match = _re.search(r'<span class="tgme_widget_message_owner_name[^"]*">(.*?)</span>', block, _re.DOTALL)
         author = _strip_html(author_match.group(1)) if author_match else channel
 
-        # Media detection
+        # Media detection — Telegram uses background-image:url('...') with single quotes
+        # The style attribute may contain other CSS properties before background-image
         media_type = None
         media_url = None
-        photo_match = _re.search(r'<a class="tgme_widget_message_photo_wrap[^"]*"[^>]*style="background-image:url\(([^)]+)\)"', block)
+        # Try single-quoted URL: background-image:url('https://...')
+        photo_match = _re.search(
+            r'tgme_widget_message_photo_wrap[^>]*style="[^"]*background-image:url\([\'"]([^\'"\)]+)[\'"]\)',
+            block,
+        )
         if photo_match:
             media_type = "photo"
-            media_url = photo_match.group(1).strip("'\"")
+            media_url = photo_match.group(1)
+        # Also collect additional photos in grouped media (albums)
+        all_photos = _re.findall(
+            r'tgme_widget_message_photo_wrap[^>]*style="[^"]*background-image:url\([\'"]([^\'"\)]+)[\'"]\)',
+            block,
+        )
+        if len(all_photos) > 1:
+            # Store all photos for album display
+            media_url = all_photos[0]  # primary
+        # Video player
         video_match = _re.search(r'<i class="tgme_widget_message_video_player[^"]*"[^>]*data-src="([^"]+)"', block)
         if video_match:
             media_type = "video"
             media_url = video_match.group(1)
+        # GIF / round video
+        gif_match = _re.search(r'<i class="tgme_widget_message_roundvideo[^"]*"[^>]*data-src="([^"]+)"', block)
+        if gif_match and not media_url:
+            media_type = "gif"
+            media_url = gif_match.group(1)
 
         # Extract links mentioned in the message (often news sources)
         links = _re.findall(r'href="(https?://[^"]+)"[^>]*class="tgme_widget_message_link_hover', block)
+        # Also grab any other plain links in the text
+        if not links:
+            links = _re.findall(r'href="(https?://[^"]+)"', block)
+            links = [l for l in links if "t.me" not in l][:5]
 
         messages.append({
             "id": post_id,
@@ -897,6 +994,7 @@ def _parse_telegram_html(html: str, channel: str) -> list[dict[str, Any]]:
             "author": author,
             "media_type": media_type,
             "media_url": media_url,
+            "media_all": all_photos if len(all_photos) > 1 else None,
             "links": links[:5],
         })
 

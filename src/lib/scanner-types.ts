@@ -293,6 +293,7 @@ export interface TelegramMessage {
   author: string;
   media_type: string | null;
   media_url: string | null;
+  media_all: string[] | null;
   links: string[];
 }
 
@@ -303,6 +304,24 @@ export interface TelegramResponse {
   message_count: number;
   fetched_at: string;
   error?: string;
+}
+
+// --------------------------------------------------------------------------- //
+//  Persian (Farsi) crypto news (from /api/scanner/news/fa)
+// --------------------------------------------------------------------------- //
+export interface PersianNewsArticle extends NewsArticle {
+  category: string;
+  lang: string;
+}
+
+export interface PersianNewsResponse {
+  count: number;
+  lang: string;
+  sources_configured: {
+    rss_fa: { source: string; category: string; url: string }[];
+  };
+  articles: PersianNewsArticle[];
+  fetched_at: string;
 }
 
 // --------------------------------------------------------------------------- //

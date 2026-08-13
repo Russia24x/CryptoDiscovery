@@ -115,13 +115,17 @@ async def data_sources_status():
             {"name": "CoinMarketCap (Keyless)", "type": "free", "available": True,
              "description": "Holder ratios, audit info, price ranges"},
             {"name": "CoinDesk RSS", "type": "free", "available": True,
-             "description": "Crypto news feed"},
+             "description": "Crypto news feed (English)"},
             {"name": "Cointelegraph RSS", "type": "free", "available": True,
-             "description": "Crypto news feed"},
+             "description": "Crypto news feed (English)"},
             {"name": "Decrypt RSS", "type": "free", "available": True,
-             "description": "Crypto news feed"},
+             "description": "Crypto news feed (English)"},
             {"name": "Bitcoinist RSS", "type": "free", "available": True,
-             "description": "Crypto news feed"},
+             "description": "Crypto news feed (English)"},
+            {"name": "ArzDigital (خبر فوری)", "type": "free", "available": True,
+             "description": "Persian breaking news + blog articles"},
+            {"name": "MihanBlockchain", "type": "free", "available": True,
+             "description": "Persian crypto news + market analysis"},
             {"name": "CryptoPanic API", "type": "api_key", "available": bool(sources.CRYPTOPANIC_TOKEN),
              "description": "Curated crypto news (optional, free token)"},
             {"name": "CryptoCompare API", "type": "api_key", "available": bool(sources.CRYPTOCOMPARE_KEY),
@@ -131,9 +135,9 @@ async def data_sources_status():
             {"name": "Telegram (t.me/s/)", "type": "free", "available": True,
              "description": "Public channel web preview (no bot token needed)"},
         ],
-        "free_count": 9,
+        "free_count": 11,
         "keyed_count": 3,
-        "total_count": 12,
+        "total_count": 14,
     }
 
 
@@ -569,6 +573,29 @@ async def get_news(limit: int = 40, source: str = ""):
             "rss": [n for n, _ in sources.NEWS_FEEDS],
             "cryptopanic": bool(sources.CRYPTOPANIC_TOKEN),
             "cryptocompare": bool(sources.CRYPTOCOMPARE_KEY),
+        },
+        "articles": articles,
+        "fetched_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+
+@app.get("/news/fa")
+async def get_news_fa(limit: int = 40, category: str = ""):
+    """Aggregate Persian (Farsi) crypto news from ArzDigital + MihanBlockchain.
+
+    Query params:
+      limit    — max articles (default 40)
+      category — "breaking", "blog", "news", "analysis" (empty = all)
+    """
+    articles = await sources.fetch_crypto_news_fa(limit=limit, category=category)
+    return {
+        "count": len(articles),
+        "lang": "fa",
+        "sources_configured": {
+            "rss_fa": [
+                {"source": n, "category": c, "url": u}
+                for n, u, c in sources.NEWS_FEEDS_FA
+            ],
         },
         "articles": articles,
         "fetched_at": datetime.now(timezone.utc).isoformat(),
