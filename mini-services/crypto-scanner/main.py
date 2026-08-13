@@ -184,6 +184,13 @@ async def start_scan(req: ScanRequest):
     )
     SCANS[scan_id] = progress
     SCAN_REPORT_IDS[scan_id] = []
+    # Persist scan to SQLite
+    db.save_scan(
+        scan_id=scan_id, status="queued", phase=progress.current_phase.value,
+        progress=0.0, total=0, processed=0, persona=config.persona.value,
+        config_json=config.model_dump_json(),
+        started_at=progress.started_at.isoformat(),
+    )
     # fire and forget — with done callback to surface any crash
     task = asyncio.create_task(_run_scan(scan_id))
     task.add_done_callback(_scan_done_callback)
@@ -220,6 +227,7 @@ async def get_scan(scan_id: str):
             "website": r.candidate.website,
             "twitter": r.candidate.twitter,
             "github": r.candidate.github,
+            "gecko_id": r.candidate.gecko_id,
         }
         for rid in SCAN_REPORT_IDS.get(scan_id, [])
         for r in [REPORTS.get(rid)]
@@ -387,12 +395,31 @@ async def _run_scan(scan_id: str):
         progress.finished_at = datetime.now(timezone.utc)
         progress.phase_log.append("Scan complete.")
         log.info("Scan %s complete: %d reports", scan_id, len(SCAN_REPORT_IDS[scan_id]))
+        # Persist final scan status to SQLite
+        db.save_scan(
+            scan_id=scan_id, status="completed", phase=ScanPhase.DONE.value,
+            progress=100.0, total=progress.total_candidates, processed=progress.processed,
+            persona=config.persona.value, config_json=config.model_dump_json(),
+            started_at=progress.started_at.isoformat(),
+            finished_at=progress.finished_at.isoformat(),
+            phase_log=progress.phase_log,
+        )
 
     except Exception as exc:  # noqa: BLE001
         log.exception("Scan %s failed: %s", scan_id, exc)
         progress.status = ScanStatus.FAILED
         progress.error = str(exc)
         progress.finished_at = datetime.now(timezone.utc)
+        # Persist failed status to SQLite
+        db.save_scan(
+            scan_id=scan_id, status="failed", phase=progress.current_phase.value,
+            progress=progress.progress_pct, total=progress.total_candidates,
+            processed=progress.processed, persona=config.persona.value,
+            config_json=config.model_dump_json(),
+            started_at=progress.started_at.isoformat(),
+            finished_at=progress.finished_at.isoformat(),
+            error=str(exc), phase_log=progress.phase_log,
+        )
 
 
 # --------------------------------------------------------------------------- #

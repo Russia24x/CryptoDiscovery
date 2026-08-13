@@ -116,6 +116,7 @@ interface ScanSummaryItem {
   website?: string | null;
   twitter?: string | null;
   github?: string | null;
+  gecko_id?: string | null;
 }
 
 interface ScanStatus {
@@ -2259,6 +2260,64 @@ function ScanProgressCard({ scan, onRefresh, scanning }: { scan: ScanStatus; onR
   );
 }
 
+// --- Sparkline: fetches 7d price chart and renders a mini SVG ---
+function Sparkline({ symbol, geckoId }: { symbol: string; geckoId?: string }) {
+  const [points, setPoints] = useState<number[] | null>(null);
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!geckoId) {
+      return;
+    }
+    const ctrl = new AbortController();
+    fetch(`/api/scanner/coingecko/chart/${encodeURIComponent(geckoId)}?days=7`, { signal: ctrl.signal })
+      .then((r) => r.ok ? r.json() : null)
+      .then((data) => {
+        if (cancelled) return;
+        if (data?.prices && Array.isArray(data.prices)) {
+          const prices = data.prices.map((p: [number, number]) => p[1]);
+          setPoints(prices.length > 20 ? prices : null);
+        } else {
+          setPoints(null);
+        }
+      })
+      .catch(() => { if (!cancelled) setPoints(null); });
+    return () => { cancelled = true; ctrl.abort(); };
+  }, [geckoId]);
+
+  if (!geckoId || !points || points.length < 2) return (
+    <span className="text-muted-foreground group-hover:text-emerald-400 transition-colors flex items-center gap-0.5">
+      Details <ArrowRight className="h-2.5 w-2.5" />
+    </span>
+  );
+
+  const min = Math.min(...points);
+  const max = Math.max(...points);
+  const range = max - min || 1;
+  const w = 60, h = 20;
+  const step = w / (points.length - 1);
+  const path = points.map((p, i) => {
+    const x = i * step;
+    const y = h - ((p - min) / range) * h;
+    return `${i === 0 ? "M" : "L"}${x.toFixed(1)},${y.toFixed(1)}`;
+  }).join(" ");
+  const isUp = points[points.length - 1] >= points[0];
+  const color = isUp ? "text-emerald-500" : "text-rose-500";
+  const change = ((points[points.length - 1] - points[0]) / points[0]) * 100;
+
+  return (
+    <div className="flex flex-col items-end gap-0.5">
+      <svg width={w} height={h} className={color}>
+        <path d={path} fill="none" stroke="currentColor" strokeWidth={1.2} strokeLinejoin="round" strokeLinecap="round" />
+      </svg>
+      <span className={cn("text-[9px] font-mono", color)}>
+        {isUp ? "+" : ""}{change.toFixed(1)}%
+      </span>
+    </div>
+  );
+}
+
 function ProjectCard({
   report,
   onSelect,
@@ -2450,9 +2509,7 @@ function ProjectCard({
             </div>
           </div>
           <div className="flex flex-col items-end justify-end">
-            <span className="text-muted-foreground group-hover:text-emerald-400 transition-colors flex items-center gap-0.5">
-              Details <ArrowRight className="h-2.5 w-2.5" />
-            </span>
+            <Sparkline symbol={report.symbol} geckoId={report.gecko_id || undefined} />
           </div>
         </div>
       </button>
