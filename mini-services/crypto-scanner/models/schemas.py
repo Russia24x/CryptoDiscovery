@@ -313,6 +313,8 @@ class ProjectReport(BaseModel):
     cross_verifications: list[CrossVerification] = Field(default_factory=list)
     fee_stability: Optional[str] = None  # "stable" / "volatile" / "unknown"
     bias_checks: list[str] = Field(default_factory=list)  # Self-correction
+    # Market overview data (from CMC/CG — eliminates need to visit external sites)
+    market_overview: Optional[dict] = None
     scan_id: str
     created_at: datetime
 

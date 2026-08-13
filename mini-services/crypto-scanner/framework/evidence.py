@@ -115,6 +115,18 @@ class EvidenceBundle:
         self.cmc_platform_count: int | None = None
         self.cmc_ath: float | None = None
         self.cmc_atl: float | None = None
+        # Additional CMC keyless fields for market overview
+        self.cmc_description: str | None = None
+        self.cmc_pct_24h: float | None = None
+        self.cmc_pct_7d: float | None = None
+        self.cmc_pct_30d: float | None = None
+        self.cmc_low_24h: float | None = None
+        self.cmc_high_24h: float | None = None
+        self.cmc_low_30d: float | None = None
+        self.cmc_high_30d: float | None = None
+        self.cmc_low_52w: float | None = None
+        self.cmc_high_52w: float | None = None
+        self.cmc_market_cap_dominance: float | None = None
 
 
 async def collect(
@@ -287,6 +299,30 @@ async def collect(
             # Customer count proxy
             if not b.economic.customer_count and cmc_kl.get("holder_count"):
                 b.economic.customer_count = cmc_kl["holder_count"]
+
+            # Store additional market overview data
+            if cmc_kl.get("description"):
+                b.cmc_description = cmc_kl["description"]
+            if cmc_kl.get("percent_change_24h") is not None:
+                b.cmc_pct_24h = cmc_kl["percent_change_24h"]
+            if cmc_kl.get("percent_change_7d") is not None:
+                b.cmc_pct_7d = cmc_kl["percent_change_7d"]
+            if cmc_kl.get("percent_change_30d") is not None:
+                b.cmc_pct_30d = cmc_kl["percent_change_30d"]
+            if cmc_kl.get("low_24h"):
+                b.cmc_low_24h = cmc_kl["low_24h"]
+            if cmc_kl.get("high_24h"):
+                b.cmc_high_24h = cmc_kl["high_24h"]
+            if cmc_kl.get("low_30d"):
+                b.cmc_low_30d = cmc_kl["low_30d"]
+            if cmc_kl.get("high_30d"):
+                b.cmc_high_30d = cmc_kl["high_30d"]
+            if cmc_kl.get("low_52w"):
+                b.cmc_low_52w = cmc_kl["low_52w"]
+            if cmc_kl.get("high_52w"):
+                b.cmc_high_52w = cmc_kl["high_52w"]
+            if cmc_kl.get("market_cap_dominance"):
+                b.cmc_market_cap_dominance = cmc_kl["market_cap_dominance"]
     except Exception:  # noqa: BLE001
         pass
 
@@ -558,3 +594,6 @@ def _apply_category_inferences(b: EvidenceBundle, category: str) -> None:
         b.upgrade_admin_decentralized = True
         b.has_legal_entity = True
         b.regulatory_uncertainty = False
+
+# Patch EvidenceBundle to store additional CMC keyless fields
+# (these are set during collect() but weren't declared as class attributes)

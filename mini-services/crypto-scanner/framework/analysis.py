@@ -245,6 +245,46 @@ def build_report(
     # final thesis one-liner
     final_thesis = thesis
 
+    # Market overview data (from CMC Keyless / CoinGecko — eliminates external site visits)
+    market_overview = {
+        "price": ev.cmc_price or ev.tokenomics.market_cap and ev.tokenomics.circulating_supply and
+            (ev.tokenomics.market_cap / ev.tokenomics.circulating_supply) or None,
+        "market_cap": ev.market_cap_usd,
+        "fdv": ev.fdv_usd,
+        "cmc_rank": ev.cmc_rank,
+        "market_cap_dominance": ev.cmc_market_cap_dominance,
+        "volume_24h": ev.market.daily_volume,
+        "circulating_supply": ev.tokenomics.circulating_supply,
+        "total_supply": ev.tokenomics.total_supply,
+        "max_supply": ev.tokenomics.max_supply,
+        "tvl": ev.economic.tvl,
+        "holder_count": ev.cmc_holder_count or ev.economic.customer_count,
+        "top_10_holder_ratio": ev.cmc_top10_holder_ratio,
+        "top_100_holder_ratio": ev.cmc_top100_holder_ratio,
+        "ath": ev.cmc_ath,
+        "atl": ev.cmc_atl,
+        "audited": ev.cmc_audited,
+        "audit_infos": ev.cmc_audit_infos,
+        "platform_count": ev.cmc_platform_count or ev.chain_count,
+        "description": ev.cmc_description,
+        "percent_change_24h": ev.cmc_pct_24h,
+        "percent_change_7d": ev.cmc_pct_7d,
+        "percent_change_30d": ev.cmc_pct_30d,
+        "price_low_24h": ev.cmc_low_24h,
+        "price_high_24h": ev.cmc_high_24h,
+        "price_low_30d": ev.cmc_low_30d,
+        "price_high_30d": ev.cmc_high_30d,
+        "price_low_52w": ev.cmc_low_52w,
+        "price_high_52w": ev.cmc_high_52w,
+        "social_links": {
+            "website": candidate.website or ev.homepage,
+            "twitter": candidate.twitter or ev.twitter_handle,
+            "github": candidate.github or ev.github_url,
+            "discord": candidate.discord or ev.discord_url,
+            "explorer": candidate.blockchain_explorer or ev.blockchain_explorer,
+        },
+    }
+
     # report id
     rid = hashlib.sha1(f"{candidate.symbol}:{scan_id}:{time.time()}".encode()).hexdigest()[:12]
 
@@ -279,6 +319,7 @@ def build_report(
         cross_verifications=cross_verifs,
         fee_stability=fee_stability,
         bias_checks=bias_checks,
+        market_overview=market_overview,
         scan_id=scan_id,
         created_at=now,
     )
