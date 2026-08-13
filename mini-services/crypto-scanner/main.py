@@ -495,6 +495,114 @@ async def get_alerts(threshold: float = 10.0):
     }
 
 
+@app.get("/backtest")
+async def backtest():
+    """Compare historical framework scores with actual price performance.
+
+    For each symbol in score_history, fetches the price at the time of scoring
+    and the current price, then calculates the correlation between score and
+    price change.
+
+    Returns: {results: [{symbol, score, price_then, price_now, change_pct, ...}],
+              summary: {correlation, avg_score_up, avg_score_down, ...}}
+    """
+    conn = db._get_conn()
+    # Get all unique symbols with score history
+    rows = conn.execute("""
+        SELECT symbol, MIN(timestamp) as first_ts, MAX(timestamp) as last_ts,
+               COUNT(*) as cnt
+        FROM score_history
+        GROUP BY symbol
+        HAVING cnt >= 1
+        ORDER BY last_ts DESC
+        LIMIT 30
+    """).fetchall()
+
+    results = []
+    for row in rows:
+        symbol = row["symbol"]
+        history = db.get_score_history(symbol, limit=1)
+        if not history:
+            continue
+        entry = history[0]
+        score = entry["project_quality"]
+        timestamp = entry["timestamp"]
+
+        # Try to find the gecko_id from reports
+        report_row = conn.execute(
+            "SELECT report_json FROM reports WHERE symbol = ? ORDER BY created_at DESC LIMIT 1",
+            (symbol,)
+        ).fetchone()
+        gecko_id = None
+        if report_row:
+            try:
+                report_data = json.loads(report_row["report_json"])
+                gecko_id = report_data.get("candidate", {}).get("gecko_id")
+            except Exception:  # noqa: BLE001
+                pass
+
+        # Fetch current price from CoinGecko
+        price_now = None
+        price_then = None
+        if gecko_id:
+            try:
+                detail = await sources.fetch_coin_detail(gecko_id)
+                if detail:
+                    md = detail.get("market_data", {})
+                    price_now = md.get("current_price", {}).get("usd")
+                    # Fetch historical price for comparison (30d ago)
+                    chart = await sources.fetch_price_chart(gecko_id, days=30)
+                    if chart and chart.get("prices"):
+                        prices = chart["prices"]
+                        if len(prices) >= 2:
+                            price_then = prices[0][1]  # oldest price in 30d range
+            except Exception:  # noqa: BLE001
+                pass
+
+        change_pct = None
+        if price_then and price_now and price_then > 0:
+            change_pct = round((price_now - price_then) / price_then * 100, 2)
+
+        results.append({
+            "symbol": symbol,
+            "score": score,
+            "action": entry.get("action"),
+            "timestamp": timestamp,
+            "gecko_id": gecko_id,
+            "price_then": price_then,
+            "price_now": price_now,
+            "change_pct": change_pct,
+            "correct": None if change_pct is None else (
+                (score >= 50 and change_pct > 0) or (score < 50 and change_pct < 0)
+            ),
+        })
+
+    # Calculate summary statistics
+    valid = [r for r in results if r["change_pct"] is not None]
+    if valid:
+        up_scores = [r["score"] for r in valid if r["change_pct"] > 0]
+        down_scores = [r["score"] for r in valid if r["change_pct"] < 0]
+        correct = sum(1 for r in valid if r["correct"])
+        avg_up = sum(up_scores) / len(up_scores) if up_scores else 0
+        avg_down = sum(down_scores) / len(down_scores) if down_scores else 0
+        accuracy = round(correct / len(valid) * 100, 1) if valid else 0
+    else:
+        avg_up = avg_down = accuracy = 0
+
+    return {
+        "results": results,
+        "count": len(results),
+        "valid_count": len(valid),
+        "summary": {
+            "accuracy_pct": accuracy,
+            "avg_score_price_up": round(avg_up, 1),
+            "avg_score_price_down": round(avg_down, 1),
+            "total_compared": len(valid),
+        },
+        "fetched_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+
 @app.post("/analyze")
 async def analyze_single_coin(req: AnalyzeRequest):
     """Run the full 8-phase framework on a single coin selected by gecko_id.
