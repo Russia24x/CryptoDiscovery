@@ -134,10 +134,13 @@ async def data_sources_status():
              "description": "Market sentiment index"},
             {"name": "Telegram (t.me/s/)", "type": "free", "available": True,
              "description": "Public channel web preview (no bot token needed)"},
+            {"name": "Dune Analytics", "type": "api_key", "available": sources.is_dune_available(),
+             "description": "EXCLUSIVE: On-chain data (Grade A) — real revenue vs fees, token concentration, active users, whale tracking. 100+ chains. Free key at dune.com/api-keys"},
         ],
         "free_count": 11,
-        "keyed_count": 3,
-        "total_count": 14,
+        "keyed_count": 4,
+        "total_count": 15,
+        "dune_config": sources.dune_config_info() if sources.is_dune_available() else None,
     }
 
 
@@ -699,6 +702,73 @@ async def get_cmc_global_metrics():
         return {"plan_not_supported": True, "metrics": None,
                 "message": "Your CMC API key plan doesn't support the global-metrics endpoint. Upgrade to a higher tier."}
     return {"metrics": metrics, "fetched_at": datetime.now(timezone.utc).isoformat()}
+
+
+# --------------------------------------------------------------------------- #
+#  Dune Analytics — On-Chain Data (Grade A Evidence)
+# --------------------------------------------------------------------------- #
+# Dune provides data directly from blockchain transactions — the most reliable
+# source in the pipeline. Requires DUNE_API_KEY (free at dune.com/api-keys).
+
+@app.get("/dune/query/{query_id}")
+async def get_dune_query(query_id: str, limit: int = 100):
+    """Fetch cached results from any Dune query by ID.
+
+    Browse https://dune.com/browse to find query IDs.
+    Returns dune_pro_required=True when no API key is set.
+    """
+    if not sources.is_dune_available():
+        return {"dune_pro_required": True, "rows": [], "row_count": 0,
+                "message": "Set DUNE_API_KEY env var (free at dune.com/api-keys) to unlock on-chain data"}
+    data = await sources.fetch_dune_query_results(query_id, limit=limit)
+    if data is None:
+        return {"rows": [], "row_count": 0, "message": "Query returned no data or failed"}
+    return data
+
+
+@app.post("/dune/execute/{query_id}")
+async def execute_dune_query(query_id: str, params: dict | None = None):
+    """Execute a Dune query with parameters and fetch fresh results.
+
+    Body: {"params": {"token_symbol": "ETH", ...}}
+    Returns dune_pro_required=True when no API key is set.
+    """
+    if not sources.is_dune_available():
+        return {"dune_pro_required": True, "rows": [], "row_count": 0,
+                "message": "Set DUNE_API_KEY env var (free at dune.com/api-keys)"}
+    data = await sources.fetch_dune_execute(query_id, params=params or {})
+    if data is None:
+        return {"rows": [], "row_count": 0, "message": "Execution failed or timed out"}
+    return data
+
+
+@app.get("/dune/insights/{symbol}")
+async def get_dune_insights(symbol: str):
+    """Fetch pre-configured on-chain insights for a token/protocol.
+
+    Returns token concentration, real revenue, and active users from Dune
+    (when the corresponding DUNE_QUERY_* env vars are configured).
+
+    This is the endpoint that upgrades the evidence pipeline to Grade A.
+    """
+    if not sources.is_dune_available():
+        return {"dune_pro_required": True, "message": "Set DUNE_API_KEY env var (free at dune.com/api-keys)"}
+    import asyncio as _aio
+    # Fetch all available insights in parallel
+    results = await _aio.gather(
+        sources.fetch_dune_token_concentration(symbol),
+        sources.fetch_dune_real_revenue(symbol),
+        sources.fetch_dune_active_users(symbol),
+        return_exceptions=True,
+    )
+    return {
+        "symbol": symbol,
+        "token_concentration": results[0] if isinstance(results[0], dict) else None,
+        "real_revenue": results[1] if isinstance(results[1], dict) else None,
+        "active_users": results[2] if isinstance(results[2], dict) else None,
+        "config": sources.dune_config_info(),
+        "fetched_at": datetime.now(timezone.utc).isoformat(),
+    }
 
 
 if __name__ == "__main__":

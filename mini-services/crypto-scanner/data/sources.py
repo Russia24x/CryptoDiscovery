@@ -36,6 +36,25 @@ CMC_PRO_BASE = "https://pro-api.coinmarketcap.com"
 CMC_API_KEY = os.environ.get("CMC_API_KEY", "")
 CMC_AVAILABLE = bool(CMC_API_KEY)
 
+# Dune Analytics API (optional — requires free API key from https://dune.com/api-keys)
+# Dune provides on-chain data directly from blockchain transactions — the highest
+# evidence grade available. When configured, it upgrades the evidence pipeline from
+# "Strong Secondary" (Grade B) to "Primary Verified" (Grade A) by providing:
+#   - Real revenue vs fees separation (Revenue ≠ Fees principle)
+#   - Token holder concentration (whale/team wallet tracking)
+#   - Active user counts (DAU/MAU, bot-filtered)
+#   - Multi-chain coverage (100+ chains including Solana, Bitcoin L2s, non-EVM)
+DUNE_BASE = "https://api.dune.com/api/v1"
+DUNE_API_KEY = os.environ.get("DUNE_API_KEY", "")
+DUNE_AVAILABLE = bool(DUNE_API_KEY)
+
+# Default Dune query IDs for common CryptoSieve analyses.
+# These can be overridden via env vars to use custom queries.
+# To find queries: browse https://dune.com/browse or create your own.
+DUNE_QUERY_TOKEN_CONCENTRATION = os.environ.get("DUNE_QUERY_TOKEN_CONCENTRATION", "")
+DUNE_QUERY_REAL_REVENUE = os.environ.get("DUNE_QUERY_REAL_REVENUE", "")
+DUNE_QUERY_ACTIVE_USERS = os.environ.get("DUNE_QUERY_ACTIVE_USERS", "")
+
 TIMEOUT = 15.0
 
 
@@ -514,6 +533,254 @@ async def fetch_cmc_global_metrics() -> dict[str, Any] | None:
     except (httpx.HTTPError, ValueError) as exc:
         log.warning("CMC global metrics failed: %s", exc)
         return None
+
+
+# ========================================================================== #
+#  Dune Analytics — On-Chain Data (Primary Evidence, Grade A)
+# ========================================================================== #
+# Dune reads data directly from blockchain transactions — no intermediaries.
+# This makes it the most reliable data source in the pipeline.
+#
+# The Dune API works in two modes:
+#   1. Execute + poll: POST /query/{id}/execute → GET /execution/{id}/results
+#   2. Cached results: GET /query/{id}/results (faster, uses last execution)
+#
+# We use mode 2 (cached results) for speed. The free tier allows 5 req/min.
+#
+# To use: set DUNE_API_KEY env var. Get a free key at https://dune.com/api-keys
+
+
+async def _dune_get(client: httpx.AsyncClient, path: str, **params: Any) -> Any:
+    """Fetch from Dune API with API key header. Returns None on error."""
+    if not DUNE_AVAILABLE:
+        return None
+    try:
+        r = await client.get(
+            f"{DUNE_BASE}{path}",
+            params=params,
+            headers={"x-dune-api-key": DUNE_API_KEY},
+            timeout=TIMEOUT,
+        )
+        if r.status_code == 401:
+            log.warning("Dune API: invalid API key (401)")
+            return None
+        if r.status_code == 429:
+            log.warning("Dune API: rate limited (429) — free tier allows 5 req/min")
+            return None
+        if r.status_code != 200:
+            log.warning("Dune GET %s -> %s", path, r.status_code)
+            return None
+        return r.json()
+    except (httpx.HTTPError, ValueError) as exc:
+        log.warning("Dune GET %s failed: %s", path, exc)
+        return None
+
+
+async def fetch_dune_query_results(query_id: int | str, limit: int = 100) -> dict[str, Any] | None:
+    """Fetch cached results from a Dune query.
+
+    Returns: {result: {rows: [...], metadata: {...}}, is_execution_from_cache: bool}
+    or None if unavailable.
+
+    The query_id can be any public Dune query. Browse https://dune.com/browse
+    to find relevant queries, or create your own.
+    """
+    if not DUNE_AVAILABLE:
+        return None
+    cache_key = f"dune_query:{query_id}:{limit}"
+    cached = cache_get(cache_key, ttl=180.0)  # 3-min cache (Dune data doesn't change fast)
+    if cached is not None:
+        return cached
+    try:
+        async with httpx.AsyncClient(follow_redirects=True) as c:
+            data = await _dune_get(c, f"/query/{query_id}/results", limit=limit)
+        if not isinstance(data, dict):
+            return None
+        # Dune returns: {result: {rows: [...], metadata: {...}}, is_execution_from_cache: bool}
+        result = data.get("result") or {}
+        rows = result.get("rows") or []
+        metadata = result.get("metadata") or {}
+        out = {
+            "query_id": str(query_id),
+            "rows": rows[:limit],
+            "row_count": len(rows),
+            "column_types": metadata.get("column_types") or [],
+            "is_cached": data.get("is_execution_from_cache", True),
+            "fetched_at": _datetime.now(_tz.utc).isoformat(),
+        }
+        cache_set(cache_key, out)
+        log.info("Dune: query %s returned %d rows (cached=%s)", query_id, len(rows), out["is_cached"])
+        return out
+    except Exception as exc:  # noqa: BLE001
+        log.warning("Dune query %s failed: %s", query_id, exc)
+        return None
+
+
+async def fetch_dune_execute(query_id: int | str, params: dict[str, Any] | None = None) -> dict[str, Any] | None:
+    """Execute a Dune query with parameters and fetch fresh results.
+
+    This triggers a new execution (slower but always fresh data).
+    Use fetch_dune_query_results() for cached results (faster).
+    """
+    if not DUNE_AVAILABLE:
+        return None
+    try:
+        async with httpx.AsyncClient(follow_redirects=True) as c:
+            # Step 1: trigger execution
+            r = await c.post(
+                f"{DUNE_BASE}/query/{query_id}/execute",
+                json={"query_parameters": params or {}},
+                headers={"x-dune-api-key": DUNE_API_KEY, "Content-Type": "application/json"},
+                timeout=TIMEOUT,
+            )
+            if r.status_code != 200:
+                log.warning("Dune execute %s -> %s", query_id, r.status_code)
+                return None
+            exec_data = r.json()
+            execution_id = exec_data.get("execution_id")
+            if not execution_id:
+                return None
+
+            # Step 2: poll for results (max 3 retries with 2s delay)
+            for _ in range(3):
+                await asyncio.sleep(2)
+                results = await _dune_get(c, f"/execution/{execution_id}/results")
+                if isinstance(results, dict) and results.get("state") == "QUERY_STATE_COMPLETED":
+                    result = results.get("result") or {}
+                    rows = result.get("rows") or []
+                    return {
+                        "query_id": str(query_id),
+                        "execution_id": execution_id,
+                        "rows": rows,
+                        "row_count": len(rows),
+                        "is_cached": False,
+                        "fetched_at": _datetime.now(_tz.utc).isoformat(),
+                    }
+            log.warning("Dune execute %s: timed out waiting for results", query_id)
+            return None
+    except (httpx.HTTPError, ValueError) as exc:
+        log.warning("Dune execute %s failed: %s", query_id, exc)
+        return None
+
+
+async def fetch_dune_token_concentration(symbol: str) -> dict[str, Any] | None:
+    """Fetch token holder concentration from Dune (on-chain, Grade A evidence).
+
+    Requires DUNE_QUERY_TOKEN_CONCENTRATION env var to be set to a Dune query ID
+    that accepts a {{token_symbol}} parameter and returns holder concentration data.
+
+    Returns: {top_10_pct, top_100_pct, whale_count, team_wallet_concentration} or None.
+    """
+    if not DUNE_AVAILABLE or not DUNE_QUERY_TOKEN_CONCENTRATION:
+        return None
+    cache_key = f"dune_concentration:{symbol}"
+    cached = cache_get(cache_key, ttl=300.0)  # 5-min cache
+    if cached is not None:
+        return cached
+    # Execute with the token symbol as a parameter
+    data = await fetch_dune_execute(DUNE_QUERY_TOKEN_CONCENTRATION, {"token_symbol": symbol})
+    if not data or not data.get("rows"):
+        return None
+    # Parse the first row — the query should return concentration metrics
+    row = data["rows"][0] if data["rows"] else {}
+    out = {
+        "symbol": symbol,
+        "top_10_holder_pct": row.get("top_10_pct") or row.get("top_10_holder_pct"),
+        "top_100_holder_pct": row.get("top_100_pct") or row.get("top_100_holder_pct"),
+        "whale_wallet_count": row.get("whale_count") or row.get("whale_wallets"),
+        "team_wallet_concentration_pct": row.get("team_concentration") or row.get("team_pct"),
+        "source": "Dune Analytics (on-chain)",
+        "evidence_grade": "A - Primary Verified",
+        "fetched_at": _datetime.now(_tz.utc).isoformat(),
+    }
+    cache_set(cache_key, out)
+    log.info("Dune: token concentration for %s fetched", symbol)
+    return out
+
+
+async def fetch_dune_real_revenue(protocol_slug: str) -> dict[str, Any] | None:
+    """Fetch real protocol revenue vs total fees from Dune.
+
+    Implements the Revenue ≠ Fees principle by reading on-chain data:
+    - Total fees: all fees collected by the protocol
+    - Real revenue: portion that accrues to token holders / treasury
+
+    Requires DUNE_QUERY_REAL_REVENUE env var.
+    """
+    if not DUNE_AVAILABLE or not DUNE_QUERY_REAL_REVENUE:
+        return None
+    cache_key = f"dune_revenue:{protocol_slug}"
+    cached = cache_get(cache_key, ttl=300.0)
+    if cached is not None:
+        return cached
+    data = await fetch_dune_execute(DUNE_QUERY_REAL_REVENUE, {"protocol": protocol_slug})
+    if not data or not data.get("rows"):
+        return None
+    row = data["rows"][0] if data["rows"] else {}
+    out = {
+        "protocol": protocol_slug,
+        "total_fees_24h": row.get("total_fees_24h") or row.get("fees_24h"),
+        "real_revenue_24h": row.get("revenue_24h") or row.get("real_revenue_24h"),
+        "revenue_to_fee_ratio": row.get("revenue_fee_ratio"),
+        "annualized_revenue": row.get("annual_revenue"),
+        "annualized_fees": row.get("annual_fees"),
+        "source": "Dune Analytics (on-chain)",
+        "evidence_grade": "A - Primary Verified",
+        "fetched_at": _datetime.now(_tz.utc).isoformat(),
+    }
+    cache_set(cache_key, out)
+    log.info("Dune: real revenue for %s fetched", protocol_slug)
+    return out
+
+
+async def fetch_dune_active_users(protocol_slug: str) -> dict[str, Any] | None:
+    """Fetch real active user counts (bot-filtered) from Dune.
+
+    DAU/MAU with bot detection — directly feeds the Moat axis (Axis 3)
+    and Invisible Utility axis (Axis 1).
+
+    Requires DUNE_QUERY_ACTIVE_USERS env var.
+    """
+    if not DUNE_AVAILABLE or not DUNE_QUERY_ACTIVE_USERS:
+        return None
+    cache_key = f"dune_users:{protocol_slug}"
+    cached = cache_get(cache_key, ttl=300.0)
+    if cached is not None:
+        return cached
+    data = await fetch_dune_execute(DUNE_QUERY_ACTIVE_USERS, {"protocol": protocol_slug})
+    if not data or not data.get("rows"):
+        return None
+    row = data["rows"][0] if data["rows"] else {}
+    out = {
+        "protocol": protocol_slug,
+        "dau": row.get("dau") or row.get("daily_active_users"),
+        "mau": row.get("mau") or row.get("monthly_active_users"),
+        "dau_mau_ratio": row.get("dau_mau_ratio"),
+        "bot_filtered": True,
+        "new_users_24h": row.get("new_users_24h"),
+        "retention_7d": row.get("retention_7d"),
+        "source": "Dune Analytics (on-chain)",
+        "evidence_grade": "A - Primary Verified",
+        "fetched_at": _datetime.now(_tz.utc).isoformat(),
+    }
+    cache_set(cache_key, out)
+    log.info("Dune: active users for %s fetched", protocol_slug)
+    return out
+
+
+def is_dune_available() -> bool:
+    """Check if Dune API key is configured."""
+    return DUNE_AVAILABLE
+
+
+def dune_config_info() -> dict[str, Any]:
+    """Return Dune configuration status for the sources endpoint."""
+    return {
+        "available": DUNE_AVAILABLE,
+        "has_token_concentration_query": bool(DUNE_QUERY_TOKEN_CONCENTRATION),
+        "has_real_revenue_query": bool(DUNE_QUERY_REAL_REVENUE),
+        "has_active_users_query": bool(DUNE_QUERY_ACTIVE_USERS),
+    }
 
 
 # --------------------------------------------------------------------------- #

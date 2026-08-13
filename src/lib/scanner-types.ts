@@ -436,6 +436,72 @@ export interface CmcGlobalMetricsResponse {
 }
 
 // --------------------------------------------------------------------------- //
+//  Dune Analytics — On-Chain Data (Grade A Evidence)
+//  When DUNE_API_KEY is configured, these provide the highest-quality data
+//  in the pipeline — read directly from blockchain transactions.
+// --------------------------------------------------------------------------- //
+export interface DuneQueryResults {
+  query_id: string;
+  rows: Record<string, unknown>[];
+  row_count: number;
+  column_types: string[];
+  is_cached: boolean;
+  fetched_at: string;
+}
+
+export interface DuneTokenConcentration {
+  symbol: string;
+  top_10_holder_pct: number | null;
+  top_100_holder_pct: number | null;
+  whale_wallet_count: number | null;
+  team_wallet_concentration_pct: number | null;
+  source: string;
+  evidence_grade: string;
+  fetched_at: string;
+}
+
+export interface DuneRealRevenue {
+  protocol: string;
+  total_fees_24h: number | null;
+  real_revenue_24h: number | null;
+  revenue_to_fee_ratio: number | null;
+  annualized_revenue: number | null;
+  annualized_fees: number | null;
+  source: string;
+  evidence_grade: string;
+  fetched_at: string;
+}
+
+export interface DuneActiveUsers {
+  protocol: string;
+  dau: number | null;
+  mau: number | null;
+  dau_mau_ratio: number | null;
+  bot_filtered: boolean;
+  new_users_24h: number | null;
+  retention_7d: number | null;
+  source: string;
+  evidence_grade: string;
+  fetched_at: string;
+}
+
+export interface DuneInsightsResponse {
+  symbol: string;
+  token_concentration: DuneTokenConcentration | null;
+  real_revenue: DuneRealRevenue | null;
+  active_users: DuneActiveUsers | null;
+  config: {
+    available: boolean;
+    has_token_concentration_query: boolean;
+    has_real_revenue_query: boolean;
+    has_active_users_query: boolean;
+  };
+  fetched_at: string;
+  dune_pro_required?: boolean;
+  message?: string;
+}
+
+// --------------------------------------------------------------------------- //
 //  Scan list item (from /api/scanner/scans)
 //  Lightweight scan record (without the heavy reports array).
 // --------------------------------------------------------------------------- //

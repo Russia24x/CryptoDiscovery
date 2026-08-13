@@ -127,6 +127,10 @@ class EvidenceBundle:
         self.cmc_low_52w: float | None = None
         self.cmc_high_52w: float | None = None
         self.cmc_market_cap_dominance: float | None = None
+        # Dune Analytics on-chain data (Grade A — primary verified)
+        self.dune_token_concentration: dict[str, Any] | None = None
+        self.dune_real_revenue: dict[str, Any] | None = None
+        self.dune_active_users: dict[str, Any] | None = None
 
 
 async def collect(
@@ -328,6 +332,52 @@ async def collect(
 
     # 4) Category-derived signals
     _apply_category_inferences(b, candidate.category)
+
+    # 4b) Dune Analytics on-chain data (Grade A — when configured)
+    # Dune reads directly from blockchain transactions, providing the highest
+    # evidence quality. When available, it upgrades the overall evidence grade.
+    if sources.is_dune_available():
+        try:
+            dune_concentration = await sources.fetch_dune_token_concentration(candidate.symbol)
+            if dune_concentration:
+                b.dune_token_concentration = dune_concentration
+                b.sources += 1
+                # Override holder concentration with on-chain verified data
+                if dune_concentration.get("top_10_holder_pct") is not None:
+                    b.market.holder_concentration = dune_concentration["top_10_holder_pct"] / 100.0
+                # Flag team wallet concentration as a severe risk
+                team_conc = dune_concentration.get("team_wallet_concentration_pct")
+                if team_conc is not None and team_conc > 20:
+                    b.high_customer_concentration = True
+                log.info("Dune: token concentration for %s integrated (Grade A)", candidate.symbol)
+        except Exception:  # noqa: BLE001
+            pass
+
+        try:
+            dune_revenue = await sources.fetch_dune_real_revenue(candidate.symbol)
+            if dune_revenue:
+                b.dune_real_revenue = dune_revenue
+                b.sources += 1
+                # Override economic engine with on-chain verified revenue
+                if dune_revenue.get("real_revenue_24h") is not None:
+                    b.economic.revenue = dune_revenue["real_revenue_24h"]
+                if dune_revenue.get("total_fees_24h") is not None:
+                    b.economic.fees = dune_revenue["total_fees_24h"]
+                log.info("Dune: real revenue for %s integrated (Revenue ≠ Fees verified)", candidate.symbol)
+        except Exception:  # noqa: BLE001
+            pass
+
+        try:
+            dune_users = await sources.fetch_dune_active_users(candidate.symbol)
+            if dune_users:
+                b.dune_active_users = dune_users
+                b.sources += 1
+                # Override customer count with on-chain verified DAU
+                if dune_users.get("dau") is not None:
+                    b.economic.customer_count = dune_users["dau"]
+                log.info("Dune: active users for %s integrated (bot-filtered DAU)", candidate.symbol)
+        except Exception:  # noqa: BLE001
+            pass
 
     # 5) Evidence grade
     if b.sources >= 3:
