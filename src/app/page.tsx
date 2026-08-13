@@ -566,6 +566,7 @@ export default function Home() {
           market_cap_max: Number(mcMax) || 1_000_000,
           sectors,
           max_projects: Number(maxProjects) || 12,
+          lang,
         }),
       });
       if (!r.ok) throw new Error(`scan start failed: ${r.status}`);

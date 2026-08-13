@@ -78,6 +78,7 @@ class ScanRequest(BaseModel):
     market_cap_max: float = 1_000_000.0
     sectors: list[str] = []
     max_projects: int = 15
+    lang: str = "en"  # "en" or "fa" — controls language of generated text
 
 
 # --------------------------------------------------------------------------- #
@@ -107,6 +108,7 @@ async def start_scan(req: ScanRequest):
         market_cap_max=req.market_cap_max,
         sectors=req.sectors,
         max_projects=req.max_projects,
+        lang=req.lang,
     )
     progress = ScanProgress(
         scan_id=scan_id,

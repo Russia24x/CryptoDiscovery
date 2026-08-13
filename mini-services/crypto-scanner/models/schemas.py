@@ -28,6 +28,7 @@ class ScanConfig(BaseModel):
     market_cap_max: float = 1_000_000.0  # effectively unbounded
     sectors: list[str] = Field(default_factory=list)  # empty = all
     max_projects: int = 20
+    lang: str = "en"  # "en" or "fa" — controls language of generated text
     data_cutoff: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 

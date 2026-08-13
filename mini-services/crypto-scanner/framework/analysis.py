@@ -22,9 +22,9 @@ from models.schemas import (
     InvestmentAnalysis,
     PeerBenchmark,
     ProjectReport,
-    ScanConfig,
-    ValuationVerdict,
 )
+from framework.i18n import t as _t
+from models.schemas import ScanConfig, ValuationVerdict
 from framework.core import (
     PERSONA_WEIGHTS,
     action_from_scores,
@@ -54,6 +54,10 @@ def build_report(
     scan_id: str,
 ) -> ProjectReport:
     now = datetime.now(timezone.utc)
+    lang = getattr(config, "lang", "en")
+
+    def tt(key: str, **kwargs) -> str:
+        return _t(key, lang=lang, **kwargs)
 
     # Enrich candidate with links/image from evidence (CoinGecko detail)
     if ev.image_url and not candidate.image:
@@ -199,32 +203,44 @@ def build_report(
         key_risks=[r.name for r in severe if r.present][:6],
     )
 
-    # executive verdict
+    # executive verdict (i18n)
     if veto.triggered:
-        verdict = f"HARD REJECT — {veto.reason}"
+        verdict = tt("verdict.veto", reason=veto.reason)
     elif high_risk:
-        verdict = (
-            f"{project_quality_band(project_quality)} but flagged HIGH RISK due to a critical "
-            f"sub-factor below 3. Action: {action_label}."
-        )
+        band = _quality_band_i18n(project_quality, lang)
+        verdict = tt("verdict.high_risk", band=band, action=action_label)
     else:
-        verdict = (
-            f"{project_quality_band(project_quality)} (score {project_quality:.0f}/100). "
-            f"Token quality {('N/A' if tq is None else f'{tq:.0f}')}. "
-            f"Valuation {inv.valuation.value}. Action: {action_label}."
-        )
+        band = _quality_band_i18n(project_quality, lang)
+        token_q_str = tt("token_q.na") if tq is None else f"{tq:.0f}"
+        verdict = tt("verdict.normal", band=band, score=project_quality,
+                     token_q=token_q_str, valuation=inv.valuation.value, action=action_label)
 
-    # five final answers
-    answers = _five_answers(candidate, ev, veto, thesis, kills)
+    # five final answers (i18n)
+    answers = _five_answers_i18n(candidate, ev, veto, thesis, kills, lang)
 
-    # data needing verification
-    needs_verify = _data_to_verify(ev)
+    # data needing verification (i18n)
+    needs_verify = _data_to_verify_i18n(ev, lang)
 
-    # Framework 3.0 additions
+    # Framework 3.0 additions (i18n)
     cross_verifs = _build_cross_verifications(ev)
-    bias_checks = _build_bias_checks(ev, project_quality, candidate)
+    bias_checks = _build_bias_checks_i18n(ev, project_quality, candidate, lang)
     val_multiples = _build_valuation_multiples(inv)
     fee_stability = "volatile" if inv.fee_volatility_pct and inv.fee_volatility_pct > 40 else "stable" if inv.fee_volatility_pct is not None else "unknown"
+
+    # thesis (i18n)
+    thesis = _build_thesis_i18n(candidate, ev, cycle, lang)
+
+    # institutional adoption (i18n)
+    inst_adoption = _institutional_adoption_i18n(ev, lang)
+
+    # competitive moat (i18n)
+    comp_moat = _competitive_moat_i18n(ev, a3, lang)
+
+    # catalysts (i18n)
+    catalysts = _build_catalysts_i18n(ev, cycle, lang)
+
+    # kill conditions (i18n)
+    kills = _build_kill_conditions_i18n(ev, lang)
 
     # final thesis one-liner
     final_thesis = thesis
@@ -248,8 +264,8 @@ def build_report(
         economic_engine=ev.economic,
         tokenomics=ev.tokenomics,
         market_structure=ev.market,
-        institutional_adoption=_institutional_adoption(ev),
-        competitive_moat=_competitive_moat(ev, a3),
+        institutional_adoption=inst_adoption,
+        competitive_moat=comp_moat,
         cycle_phase=cycle,
         peer_benchmark=peer,
         catalysts=catalysts,
@@ -721,3 +737,144 @@ def _build_valuation_multiples(inv: InvestmentAnalysis) -> dict:
         "fee_volatility_pct": inv.fee_volatility_pct,
         "note": "P/R uses real revenue. P/F uses fees (≠ revenue). P/T uses TVL.",
     }
+
+
+# --------------------------------------------------------------------------- #
+#  i18n helper functions for dynamic text generation
+# --------------------------------------------------------------------------- #
+
+def _quality_band_i18n(score: float, lang: str) -> str:
+    if score >= 90: return _t("band.elite", lang)
+    if score >= 80: return _t("band.strong", lang)
+    if score >= 70: return _t("band.promising", lang)
+    if score >= 60: return _t("band.watchlist", lang)
+    if score >= 50: return _t("band.weak", lang)
+    return _t("band.story", lang)
+
+
+def _build_thesis_i18n(c: CandidateInfo, ev: EvidenceBundle, cycle: CyclePhase, lang: str) -> str:
+    rail = _t("thesis.rail.infra", lang) if ev.is_infrastructure else _t("thesis.rail.app", lang)
+    rev_part = _t("thesis.rev.real", lang) if (ev.economic.revenue or 0) > 0 else _t("thesis.rev.pre", lang)
+    sector_lower = (c.sector or "").lower()
+    position = _t("thesis.position.inside", lang) if ev.is_infrastructure else _t("thesis.position.adjacent", lang)
+    return _t("thesis.template", lang, sector=sector_lower, name=c.name, symbol=c.symbol,
+              rail=rail, position=position, rev_part=rev_part)
+
+
+def _build_catalysts_i18n(ev: EvidenceBundle, cycle: CyclePhase, lang: str) -> list[Catalyst]:
+    out: list[Catalyst] = []
+    if ev.has_regulatory_license:
+        out.append(Catalyst(description=_t("catalyst.reg_license", lang), positive=True, eta="ongoing"))
+    if (ev.economic.revenue_growth_pct or 0) > 20:
+        out.append(Catalyst(description=_t("catalyst.rev_growing", lang, growth=ev.economic.revenue_growth_pct), positive=True, eta="current"))
+    if ev.chain_count >= 3:
+        out.append(Catalyst(description=_t("catalyst.multichain", lang, chains=ev.chain_count), positive=True, eta="ongoing"))
+    if ev.tokenomics.buyback:
+        out.append(Catalyst(description=_t("catalyst.buyback", lang), positive=True))
+    if ev.tokenomics.burn:
+        out.append(Catalyst(description=_t("catalyst.burn", lang), positive=True))
+    if ev.near_unlock_cliff:
+        out.append(Catalyst(description=_t("catalyst.unlock", lang), positive=False, eta="<90d"))
+    if ev.bridge_dependency:
+        out.append(Catalyst(description=_t("catalyst.bridge_risk", lang), positive=False))
+    if ev.regulatory_uncertainty:
+        out.append(Catalyst(description=_t("catalyst.reg_uncertain", lang), positive=False))
+    if not out:
+        out.append(Catalyst(description=_t("catalyst.none", lang), positive=False))
+    return out[:6]
+
+
+def _build_kill_conditions_i18n(ev: EvidenceBundle, lang: str) -> list[str]:
+    out = [
+        _t("kill.revenue_decline", lang),
+        _t("kill.security_exploit", lang),
+        _t("kill.customer_loss", lang),
+    ]
+    if ev.tokenomics.market_cap:
+        out.append(_t("kill.unlock_pressure", lang))
+    if ev.regulatory_uncertainty:
+        out.append(_t("kill.regulatory", lang))
+    if ev.bridge_dependency:
+        out.append(_t("kill.bridge_failure", lang))
+    return out[:5]
+
+
+def _institutional_adoption_i18n(ev: EvidenceBundle, lang: str) -> str:
+    bits = []
+    if ev.has_regulatory_license:
+        bits.append(_t("catalyst.reg_license", lang))
+    if ev.chain_count >= 3:
+        bits.append(_t("inst.deployed", lang, chains=ev.chain_count))
+    if (ev.economic.tvl or 0) > 1_000_000_000:
+        bits.append(_t("inst.tvl_high", lang))
+    elif (ev.economic.tvl or 0) > 100_000_000:
+        bits.append(_t("inst.tvl_mid", lang))
+    if (ev.economic.revenue or 0) * 365 > 50_000_000:
+        bits.append(_t("inst.revenue", lang))
+    if not bits:
+        bits.append(_t("inst.limited", lang))
+    return " ".join(bits)
+
+
+def _competitive_moat_i18n(ev: EvidenceBundle, a3, lang: str) -> str:
+    switching = _t("moat.switching.high", lang) if ev.switching_cost_signal else _t("moat.switching.moderate", lang)
+    network = _t("moat.network.strong", lang) if (ev.liquidity_tvl or 0) > 1e9 else _t("moat.network.developing", lang)
+    factors = ", ".join(list(a3.sub_factors.keys())[:3])
+    return _t("moat.template", lang, score=a3.score, conf=a3.confidence,
+              factors=factors, switching=switching, network=network)
+
+
+def _five_answers_i18n(c: CandidateInfo, ev: EvidenceBundle, veto, thesis: str, kills: list[str], lang: str) -> list[str]:
+    a1 = (
+        _t("answer1.yes", lang) if ev.is_infrastructure and (ev.economic.revenue or 0) > 0
+        else _t("answer1.partial", lang) if ev.is_infrastructure
+        else _t("answer1.no", lang)
+    )
+    a2 = (
+        _t("answer2.yes", lang) if (ev.economic.revenue or 0) > 0
+        else _t("answer2.unclear", lang)
+    )
+    a3 = _t("answer3.template", lang, name=c.name,
+            value_capture=ev.tokenomics.value_capture or _t("answer4.limited", lang))
+    a4 = (
+        _t("answer4.template", lang, level=ev.tokenomics.utility_level,
+           capture_desc=_t("answer4.captures", lang) if ev.tokenomics.utility_level >= 3 else _t("answer4.limited", lang))
+        if ev.has_token
+        else "N/A — No token."
+    )
+    a5 = " · ".join(kills[:3]) if kills else "Not specified."
+    return [a1, a2, a3, a4, a5]
+
+
+def _data_to_verify_i18n(ev: EvidenceBundle, lang: str) -> list[str]:
+    out = []
+    if ev.economic.revenue is None:
+        out.append(_t("verify.revenue", lang))
+    if ev.tokenomics.insider_allocation_pct is None:
+        out.append(_t("verify.allocation", lang))
+    if ev.audit_status == "none":
+        out.append(_t("verify.audit", lang))
+    if ev.team_transparent is False:
+        out.append(_t("verify.team", lang))
+    if ev.tokenomics.value_capture == "moderate":
+        out.append(_t("verify.value_capture", lang))
+    if ev.regulatory_uncertainty:
+        out.append(_t("verify.regulatory", lang))
+    return out or [_t("verify.all_good", lang)]
+
+
+def _build_bias_checks_i18n(ev: EvidenceBundle, project_quality: float, candidate, lang: str) -> list[str]:
+    checks = []
+    popular_names = {"aave", "uniswap", "bitcoin", "ethereum", "solana", "chainlink"}
+    if candidate.name.lower() in popular_names:
+        checks.append(_t("bias.popular", lang))
+    checks.append(_t("bias.source", lang))
+    if ev.economic.fees and not ev.economic.revenue_growth_pct:
+        checks.append(_t("bias.snapshot", lang))
+    if project_quality > 0 and ev.grade.value.startswith("D"):
+        checks.append(_t("bias.precision", lang))
+    if ev.is_infrastructure and project_quality < 30:
+        checks.append(_t("bias.narrative", lang))
+    checks.append(_t("bias.confirmation", lang))
+    checks.append(_t("bias.anti_promise", lang))
+    return checks
