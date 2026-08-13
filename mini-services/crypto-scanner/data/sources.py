@@ -101,6 +101,92 @@ async def fetch_defillama_protocols() -> list[dict[str, Any]]:
     return slim
 
 
+# Mapping of blockchain symbols/names to DeFiLlama chain slugs.
+# When a token IS a blockchain (SOL, ETH, AVAX, etc.), its "TVL" is the
+# sum of all protocols deployed on that chain — not a single protocol's TVL.
+_BLOCKCHAIN_TO_CHAIN: dict[str, str] = {
+    "SOL": "Solana", "ETH": "Ethereum", "BTC": "Bitcoin",
+    "BNB": "BSC", "AVAX": "Avalanche", "MATIC": "Polygon",
+    "DOT": "Polkadot", "ATOM": "Cosmos", "NEAR": "Near",
+    "FTM": "Fantom", "OP": "Optimism", "ARB": "Arbitrum",
+    "APT": "Aptos", "SUI": "Sui", "SEI": "Sei",
+    "TIA": "Celestia", "STX": "Stacks", "RUNE": "THORChain",
+    "ICP": "Internet Computer", "ALGO": "Algorand",
+    "XRP": "Ripple", "ADA": "Cardano", "EGLD": "Elrond",
+    "KAVA": "Kava", "TERRA": "Terra", "LUNA": "Terra",
+}
+
+# Mapping of coin names to chain names (for fuzzy matching)
+_BLOCKCHAIN_NAMES = {
+    "solana": "Solana", "ethereum": "Ethereum", "bitcoin": "Bitcoin",
+    "binance": "BSC", "avalanche": "Avalanche", "polygon": "Polygon",
+    "polkadot": "Polkadot", "cosmos": "Cosmos", "fantom": "Fantom",
+    "optimism": "Optimism", "arbitrum": "Arbitrum", "aptos": "Aptos",
+    "near": "Near", "sui": "Sui", "sei": "Sei",
+}
+
+
+def is_blockchain_token(symbol: str, name: str = "") -> str | None:
+    """Check if a token is a blockchain (L1/L2). Returns the chain name or None.
+
+    If the token IS a blockchain, its TVL should be fetched as the aggregate
+    of all protocols on that chain, not from a single protocol entry.
+    """
+    sym = symbol.upper().strip()
+    if sym in _BLOCKCHAIN_TO_CHAIN:
+        return _BLOCKCHAIN_TO_CHAIN[sym]
+    nm = name.lower().strip()
+    for key, chain in _BLOCKCHAIN_NAMES.items():
+        if key in nm:
+            return chain
+    return None
+
+
+async def fetch_defillama_chain_tvl(chain: str, protocols: list[dict[str, Any]] | None = None) -> dict[str, Any] | None:
+    """Fetch aggregate TVL for a blockchain (sum of all protocols on that chain).
+
+    This is used for L1/L2 tokens (SOL, ETH, AVAX, ...) where the token's "TVL"
+    is the total value locked across all DeFi protocols deployed on that chain.
+
+    Args:
+        chain: The chain name as DeFiLlama uses it (e.g. "Solana", "Ethereum")
+        protocols: Optional pre-fetched protocol list (avoids re-fetching)
+
+    Returns: {chain, tvl, protocol_count, top_protocols: [...]} or None
+    """
+    cache_key = f"chain_tvl:{chain}"
+    cached = cache_get(cache_key, ttl=90.0)
+    if cached is not None:
+        return cached
+
+    if protocols is None:
+        protocols = await fetch_defillama_protocols()
+
+    # Filter protocols that list this chain
+    chain_protos = []
+    for p in protocols:
+        p_chain = p.get("chain") or ""
+        if p_chain == chain or (isinstance(p_chain, str) and chain.lower() in p_chain.lower()):
+            chain_protos.append(p)
+
+    total_tvl = sum(p.get("tvl") or 0 for p in chain_protos)
+    # Sort by TVL for top protocols
+    chain_protos.sort(key=lambda x: x.get("tvl") or 0, reverse=True)
+
+    out = {
+        "chain": chain,
+        "tvl": total_tvl,
+        "protocol_count": len(chain_protos),
+        "top_protocols": [
+            {"name": p.get("name"), "tvl": p.get("tvl") or 0, "category": p.get("category")}
+            for p in chain_protos[:5]
+        ],
+    }
+    cache_set(cache_key, out)
+    log.info("DeFiLlama chain TVL: %s = $%.2fB across %d protocols", chain, total_tvl / 1e9, len(chain_protos))
+    return out
+
+
 async def fetch_fees_overview() -> list[dict[str, Any]]:
     """Protocols with fees/revenue (24h, 7d, 30d, cumulative) — slimmed.
 

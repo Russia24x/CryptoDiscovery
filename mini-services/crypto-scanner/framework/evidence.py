@@ -146,9 +146,38 @@ async def collect(
     """
     b = EvidenceBundle()
 
+    # 0) Blockchain TVL check — if this token IS a blockchain (SOL, ETH, AVAX),
+    #    its TVL is the aggregate of all protocols on that chain, not a single
+    #    protocol's TVL. This is critical for accurate P/T valuation.
+    chain_name = sources.is_blockchain_token(candidate.symbol, candidate.name)
+    if chain_name:
+        try:
+            chain_data = await sources.fetch_defillama_chain_tvl(chain_name)
+            if chain_data and chain_data.get("tvl"):
+                b.economic.tvl = chain_data["tvl"]
+                b.liquidity_tvl = chain_data["tvl"]
+                b.chain_count = max(b.chain_count, 1)
+                # Blockchain tokens have strong moat (network effect)
+                b.switching_cost_signal = True
+                b.is_infrastructure = True
+                b.team_transparent = True  # public blockchains
+                b.has_legal_entity = True
+                b.centralized_governance = False
+                b.centralized_upgrade = False
+                b.upgrade_admin_decentralized = True
+                b.regulatory_uncertainty = False
+                log.info("Blockchain TVL: %s (%s) = $%.2fB across %d protocols",
+                         candidate.symbol, chain_name,
+                         chain_data["tvl"] / 1e9, chain_data["protocol_count"])
+        except Exception:  # noqa: BLE001
+            pass
+
     # 1) DeFiLlama protocol overview (from cache — no network)
     if llama_overview:
-        _apply_llama_detail(b, llama_overview)
+        # Only apply if this isn't a blockchain token (blockchains don't have
+        # a single protocol entry — their TVL comes from the chain aggregate above)
+        if not chain_name:
+            _apply_llama_detail(b, llama_overview)
         b.sources += 1
 
     # 2) DeFiLlama fees overview (from cache — no network)
