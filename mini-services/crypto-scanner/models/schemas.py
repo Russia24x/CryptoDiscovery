@@ -158,7 +158,15 @@ class InvestmentAnalysis(BaseModel):
     fdv_revenue: Optional[float] = None
     mc_revenue: Optional[float] = None
     fdv_fees: Optional[float] = None
+    mc_fees: Optional[float] = None
     mc_tvl: Optional[float] = None
+    # Framework 3.0: P/R (MC/Revenue), P/F (FDV/Fees), P/T (MC/TVL)
+    p_r: Optional[float] = None  # Price-to-Revenue
+    p_f: Optional[float] = None  # Price-to-Fees
+    p_t: Optional[float] = None  # Price-to-TVL
+    annualized_fees: Optional[float] = None  # Fees × 12 (NOT real revenue)
+    annualized_revenue: Optional[float] = None  # Real annualized revenue
+    fee_volatility_pct: Optional[float] = None  # Fee stability check
     valuation: ValuationVerdict = ValuationVerdict.UNABLE
     project_quality: Optional[float] = None
     token_quality: Optional[float] = None
@@ -169,6 +177,61 @@ class InvestmentAnalysis(BaseModel):
     catalysts: list[Catalyst] = Field(default_factory=list)
     thesis: str = ""
     kill_conditions: list[str] = Field(default_factory=list)
+
+
+# --------------------------------------------------------------------------- #
+#  PHASE 1-2 — Market Temperature & Macro Engine (Framework 3.0)
+# --------------------------------------------------------------------------- #
+class MarketRegime(str, Enum):
+    RISK_ON = "RISK-ON"
+    RISK_OFF = "RISK-OFF"
+    NEUTRAL = "NEUTRAL"
+    TRANSITION = "TRANSITION"
+
+
+class MarketMetric(BaseModel):
+    name: str
+    value: str
+    direction: str = "—"  # up/down/flat
+    source: str = ""
+    confidence: float = 50.0
+
+
+class MarketTemperature(BaseModel):
+    total_market_cap: Optional[float] = None
+    btc_dominance: Optional[float] = None
+    defi_tvl: Optional[float] = None
+    stablecoin_mcap: Optional[float] = None
+    fear_greed: Optional[int] = None
+    dxy: Optional[float] = None
+    etf_flow_7d: Optional[float] = None
+    dev_activity: Optional[str] = None
+    regime: MarketRegime = MarketRegime.NEUTRAL
+    regime_confidence: float = 50.0
+    metrics: list[MarketMetric] = Field(default_factory=list)
+    timestamp: Optional[datetime] = None
+
+
+# --------------------------------------------------------------------------- #
+#  PHASE 8 — Top Protocol Engine & Cross-Verification (Framework 3.0)
+# --------------------------------------------------------------------------- #
+class TopProtocol(BaseModel):
+    name: str
+    category: str = ""
+    fees_30d: Optional[float] = None
+    tvl: Optional[float] = None
+    market_cap: Optional[float] = None
+    fdv: Optional[float] = None
+
+
+class CrossVerification(BaseModel):
+    metric: str
+    source_a: str = ""
+    value_a: Optional[float] = None
+    source_b: str = ""
+    value_b: Optional[float] = None
+    discrepancy_pct: Optional[float] = None
+    status: str = "unverified"  # verified / discrepancy / unverified
 
 
 # --------------------------------------------------------------------------- #
@@ -237,6 +300,11 @@ class ProjectReport(BaseModel):
     data_needing_verification: list[str]
     final_thesis: str
     five_final_answers: list[str]
+    # Framework 3.0 additions
+    valuation_multiples: Optional[dict] = None  # P/R, P/F, P/T
+    cross_verifications: list[CrossVerification] = Field(default_factory=list)
+    fee_stability: Optional[str] = None  # "stable" / "volatile" / "unknown"
+    bias_checks: list[str] = Field(default_factory=list)  # Self-correction
     scan_id: str
     created_at: datetime
 

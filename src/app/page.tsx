@@ -216,6 +216,27 @@ interface FullReport {
   data_needing_verification: string[];
   final_thesis: string;
   five_final_answers: string[];
+  // Framework 3.0 additions
+  valuation_multiples?: {
+    p_r: number | null;
+    p_f: number | null;
+    p_t: number | null;
+    annualized_revenue: number | null;
+    annualized_fees: number | null;
+    fee_volatility_pct: number | null;
+    note: string;
+  } | null;
+  cross_verifications?: {
+    metric: string;
+    source_a: string;
+    value_a: number | null;
+    source_b: string;
+    value_b: number | null;
+    discrepancy_pct: number | null;
+    status: string;
+  }[];
+  fee_stability?: string | null;
+  bias_checks?: string[];
 }
 
 // --------------------------------------------------------------------------- //
@@ -2432,6 +2453,81 @@ function ReportDetail({
             <Metric label="Recurrence" value={report.economic_engine.recurrence || "—"} />
             <Metric label="Cust. Concentration" value={report.economic_engine.customer_concentration || "—"} />
           </div>
+
+          {/* Framework 3.0: Valuation Multiples (P/R, P/F, P/T) */}
+          {report.valuation_multiples && (
+            <div className="mt-3 p-3 rounded-lg border border-border/40 bg-card/20">
+              <div className="text-[10px] text-muted-foreground uppercase tracking-wide mb-2 flex items-center gap-1.5">
+                <Target className="h-3 w-3 text-amber-400" />
+                Valuation Multiples (Framework 3.0)
+              </div>
+              <div className="grid grid-cols-3 gap-2 text-center">
+                <div className="p-2 rounded-md bg-muted/20">
+                  <div className="text-[9px] text-muted-foreground">P/R</div>
+                  <div className="text-sm font-mono font-bold">
+                    {report.valuation_multiples.p_r != null ? report.valuation_multiples.p_r.toFixed(1) : "N/A"}
+                  </div>
+                  <div className="text-[8px] text-muted-foreground">MC/Revenue</div>
+                </div>
+                <div className="p-2 rounded-md bg-muted/20">
+                  <div className="text-[9px] text-muted-foreground">P/F</div>
+                  <div className="text-sm font-mono font-bold">
+                    {report.valuation_multiples.p_f != null ? report.valuation_multiples.p_f.toFixed(1) : "N/A"}
+                  </div>
+                  <div className="text-[8px] text-muted-foreground">FDV/Fees</div>
+                </div>
+                <div className="p-2 rounded-md bg-muted/20">
+                  <div className="text-[9px] text-muted-foreground">P/T</div>
+                  <div className="text-sm font-mono font-bold">
+                    {report.valuation_multiples.p_t != null ? report.valuation_multiples.p_t.toFixed(2) : "N/A"}
+                  </div>
+                  <div className="text-[8px] text-muted-foreground">MC/TVL</div>
+                </div>
+              </div>
+              <div className="mt-2 grid grid-cols-2 gap-2 text-[10px]">
+                <div>
+                  <span className="text-muted-foreground">Annualized Revenue: </span>
+                  <span className="font-mono font-semibold">
+                    {report.valuation_multiples.annualized_revenue != null
+                      ? fmtUsd(report.valuation_multiples.annualized_revenue)
+                      : "N/A"}
+                  </span>
+                </div>
+                <div>
+                  <span className="text-muted-foreground">Annualized Fees: </span>
+                  <span className="font-mono font-semibold">
+                    {report.valuation_multiples.annualized_fees != null
+                      ? fmtUsd(report.valuation_multiples.annualized_fees)
+                      : "N/A"}
+                  </span>
+                </div>
+              </div>
+              {report.valuation_multiples.note && (
+                <p className="text-[9px] text-amber-400/70 mt-2 italic">{report.valuation_multiples.note}</p>
+              )}
+            </div>
+          )}
+
+          {/* Fee Stability */}
+          {report.fee_stability && (
+            <div className="mt-2 flex items-center gap-2">
+              <Badge variant="outline" className={cn(
+                "text-[10px] gap-1",
+                report.fee_stability === "stable" && "bg-emerald-500/10 text-emerald-400 border-emerald-500/30",
+                report.fee_stability === "volatile" && "bg-rose-500/10 text-rose-400 border-rose-500/30",
+                report.fee_stability === "unknown" && "bg-muted/20 text-muted-foreground border-border/40",
+              )}>
+                {report.fee_stability === "stable" && <BadgeCheck className="h-3 w-3" />}
+                {report.fee_stability === "volatile" && <AlertTriangle className="h-3 w-3" />}
+                Fee Stability: {report.fee_stability}
+              </Badge>
+              {report.valuation_multiples?.fee_volatility_pct != null && (
+                <span className="text-[10px] text-muted-foreground">
+                  Volatility: {report.valuation_multiples.fee_volatility_pct.toFixed(1)}%
+                </span>
+              )}
+            </div>
+          )}
         </section>
 
         {/* Tokenomics & Market */}
@@ -2585,6 +2681,46 @@ function ReportDetail({
                 <div key={i} className="flex items-start gap-2 text-[11px] text-muted-foreground">
                   <span className="text-amber-500">›</span>
                   <span>{d}</span>
+                </div>
+              ))}
+            </div>
+          </section>
+        )}
+
+        {/* Framework 3.0: Cross-Verification */}
+        {report.cross_verifications && report.cross_verifications.length > 0 && (
+          <section>
+            <SectionTitle icon={BadgeCheck} title="Cross-Verification (Framework 3.0)" />
+            <div className="space-y-1.5">
+              {report.cross_verifications.map((cv, i) => (
+                <div key={i} className="flex items-center gap-2 p-2 rounded-lg border border-border/40 bg-card/20 text-[11px]">
+                  <span className="font-semibold min-w-[80px]">{cv.metric}</span>
+                  <div className="flex-1 flex items-center gap-2">
+                    <span className="text-muted-foreground">{cv.source_a}:</span>
+                    <span className="font-mono">{cv.value_a != null ? fmtUsd(cv.value_a) : "N/A"}</span>
+                  </div>
+                  <Badge variant="outline" className={cn(
+                    "text-[9px]",
+                    cv.status === "verified" && "bg-emerald-500/10 text-emerald-400 border-emerald-500/30",
+                    cv.status === "discrepancy" && "bg-rose-500/10 text-rose-400 border-rose-500/30",
+                    cv.status === "single-source" && "bg-amber-500/10 text-amber-400 border-amber-500/30",
+                  )}>
+                    {cv.status}
+                  </Badge>
+                </div>
+              ))}
+            </div>
+          </section>
+        )}
+
+        {/* Framework 3.0: Self-Correction / Bias Checks */}
+        {report.bias_checks && report.bias_checks.length > 0 && (
+          <section>
+            <SectionTitle icon={Brain} title="Self-Correction Engine (Framework 3.0)" />
+            <div className="space-y-1">
+              {report.bias_checks.map((bc, i) => (
+                <div key={i} className="flex items-start gap-2 text-[11px] text-muted-foreground p-1.5 rounded-md bg-muted/10">
+                  <span>{bc}</span>
                 </div>
               ))}
             </div>

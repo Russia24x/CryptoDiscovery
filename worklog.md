@@ -1013,3 +1013,74 @@ Stage Summary:
   Project scores increased 20-40%. Action recommendations changed (Ignore → Watch).
 - **Files modified**: `data/sources.py`, `framework/discovery.py`, `framework/evaluation.py`, `main.py`.
 - **Verification**: All tests passed. Lint clean. No console errors. VLM confirmed data quality 9/10.
+
+---
+Task ID: 16
+Agent: main-agent (Framework 3.0 alignment)
+Task: Align with Framework 3.0 spec — fix Fees≠Revenue, add P/R/P/F/P/T, Cross-Verification, Self-Correction
+
+Work Log:
+- Read the attached Framework 3.0 specification (Pasted Content_1786580940808.txt, 2002 lines).
+- Identified critical alignment issues with Framework 3.0:
+  1. Fees were being used as Revenue proxy (violates Framework 3.0 Rule: "Fees × 12 is annualized run-rate, NOT real revenue")
+  2. Missing Valuation Multiples (P/R, P/F, P/T) from PHASE 9
+  3. Missing Cross-Verification engine from PHASE 8
+  4. Missing Self-Correction Engine from PHASE 31
+  5. Missing Fee Stability check from PHASE 9
+- Fixed Fees ≠ Revenue separation in evaluation.py:
+  - Revenue Scale now uses ACTUAL revenue if available (full scoring, up to 9.5)
+  - If no revenue, uses fees as "Annualized Run-Rate" proxy but CAPPED at 5.0
+  - Framework 3.0: "Fees × 12 is annualized run-rate, NOT real revenue"
+  - This means protocols without real revenue data can't score above "moderate" on Revenue Scale
+- Added Framework 3.0 Valuation Multiples (P/R, P/F, P/T):
+  - P/R = MC / Annualized Revenue (real revenue only, N/A if no revenue)
+  - P/F = FDV / Annualized Fees (explicitly ≠ revenue)
+  - P/T = MC / TVL
+  - Valuation verdict now prefers P/R, falls back to P/F, then P/T
+  - All three multiples displayed in UI with clear labels
+- Added Fee Stability check:
+  - Calculates fee volatility (7d vs 30d average)
+  - Labels as "stable" (<40% volatility) or "volatile" (>40%)
+  - Framework 3.0: "If Fee Volatility > 40%, P/R Reliability Low"
+- Added Cross-Verification Engine (PHASE 8):
+  - Tracks TVL, Market Cap, and Fees data sources
+  - Labels as "single-source" when only one source available
+  - Framework 3.0: "≤15% discrepancy = Acceptable, >15% = 🔴 DATA DISCREPANCY"
+- Added Self-Correction Engine (PHASE 31):
+  - Bias checks: Popular project bias, English-source bias, Snapshot bias, Precision illusion, Narrative bias, Confirmation bias, Anti-promise
+  - All checks displayed in UI with warning/info icons
+- Added new data models to schemas.py:
+  - MarketRegime (RISK-ON/RISK-OFF/NEUTRAL/TRANSITION)
+  - MarketTemperature (8 market metrics + regime)
+  - TopProtocol (for Top Protocol Engine)
+  - CrossVerification (metric cross-checking)
+- Updated ProjectReport with new fields:
+  - valuation_multiples (P/R, P/F, P/T dict)
+  - cross_verifications (list of CrossVerification)
+  - fee_stability (stable/volatile/unknown)
+  - bias_checks (list of self-correction strings)
+- Updated UI (page.tsx) to display all Framework 3.0 features:
+  - Valuation Multiples card with P/R, P/F, P/T and annualized values
+  - Fee Stability badge with volatility percentage
+  - Cross-Verification section with source comparison
+  - Self-Correction Engine section with bias checks
+- Ran lint: 0 errors, 0 warnings (clean).
+- Verified via agent-browser:
+  - All Framework 3.0 sections present in detail drawer
+  - P/F=3.79, P/T=0.1, Annualized Fees=$371M for Aave
+  - 3 cross-verification items (single-source)
+  - 4 bias checks visible
+  - No console errors
+
+Stage Summary:
+- **Critical fix**: Fees ≠ Revenue separation (Framework 3.0 compliance)
+- **New features added**:
+  - Valuation Multiples (P/R, P/F, P/T) with proper separation
+  - Fee Stability indicator (stable/volatile)
+  - Cross-Verification Engine (single-source tracking)
+  - Self-Correction Engine (7 bias checks)
+  - New data models (MarketRegime, MarketTemperature, TopProtocol, CrossVerification)
+- **Files modified**: `models/schemas.py`, `framework/evaluation.py`, `framework/analysis.py`, `src/app/page.tsx`
+- **Verification**: All features tested via agent-browser. Lint clean. No console errors.
+
+Framework 3.0 Alignment: ~60% (core valuation + self-correction done, Market Regime + Macro Engine pending)

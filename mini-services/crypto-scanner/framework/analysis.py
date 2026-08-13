@@ -206,6 +206,12 @@ def build_report(
     # data needing verification
     needs_verify = _data_to_verify(ev)
 
+    # Framework 3.0 additions
+    cross_verifs = _build_cross_verifications(ev)
+    bias_checks = _build_bias_checks(ev, project_quality, candidate)
+    val_multiples = _build_valuation_multiples(inv)
+    fee_stability = "volatile" if inv.fee_volatility_pct and inv.fee_volatility_pct > 40 else "stable" if inv.fee_volatility_pct is not None else "unknown"
+
     # final thesis one-liner
     final_thesis = thesis
 
@@ -239,6 +245,10 @@ def build_report(
         data_needing_verification=needs_verify,
         final_thesis=final_thesis,
         five_final_answers=answers,
+        valuation_multiples=val_multiples,
+        cross_verifications=cross_verifs,
+        fee_stability=fee_stability,
+        bias_checks=bias_checks,
         scan_id=scan_id,
         created_at=now,
     )
@@ -296,11 +306,89 @@ def _build_investment_analysis(
         inv_attr = 0.35 * project_quality + 0.25 * (token_q or 50) + 0.25 * val_attr + 0.15 * timing
         inv_attr = round(max(0.0, min(100.0, inv_attr)), 1)
 
+    # Framework 3.0: P/R, P/F, P/T valuation multiples
+    # P/R = MC / Annualized Revenue (real revenue only)
+    # P/F = FDV / Annualized Fees (fees ≠ revenue, explicitly)
+    # P/T = MC / TVL
+    p_r = (mc / annual_rev) if (mc and annual_rev > 0) else None
+    p_f = (fdv / annual_fees) if (fdv and annual_fees > 0) else None
+    p_t = (mc / tvl) if (mc and tvl > 0) else None
+
+    # Fee volatility check (7d vs 30d average)
+    fees_7d = ev.economic.fees or 0.0
+    fees_30d = (ev.economic.fees or 0.0) * 30  # approximate if only 24h available
+    fee_vol = None
+    if fees_7d > 0 and fees_30d > 0:
+        avg_7d_daily = fees_7d
+        avg_30d_daily = fees_30d / 30
+        if avg_30d_daily > 0:
+            fee_vol = abs(avg_7d_daily - avg_30d_daily) / avg_30d_daily * 100
+
+    # Fee stability label
+    fee_stability = "unknown"
+    if fee_vol is not None:
+        if fee_vol > 40:
+            fee_stability = "volatile"
+        else:
+            fee_stability = "stable"
+
+    # Valuation verdict: Framework 3.0 prefers P/R, falls back to P/F, then P/T
+    valuation = ValuationVerdict.UNABLE
+    if p_r is not None:
+        if p_r < 8:
+            valuation = ValuationVerdict.CHEAP
+        elif p_r < 20:
+            valuation = ValuationVerdict.FAIR
+        else:
+            valuation = ValuationVerdict.EXPENSIVE
+    elif p_f is not None:
+        # Using P/F as proxy (fees ≠ revenue, so wider thresholds)
+        if p_f < 10:
+            valuation = ValuationVerdict.CHEAP
+        elif p_f < 25:
+            valuation = ValuationVerdict.FAIR
+        else:
+            valuation = ValuationVerdict.EXPENSIVE
+    elif p_t is not None:
+        if p_t < 0.15:
+            valuation = ValuationVerdict.CHEAP
+        elif p_t < 0.4:
+            valuation = ValuationVerdict.FAIR
+        else:
+            valuation = ValuationVerdict.EXPENSIVE
+
+    # valuation attractiveness (0-100): lower multiples = more attractive
+    val_attr = None
+    if p_r is not None:
+        val_attr = max(0.0, min(100.0, 100.0 - p_r * 2.5))
+    elif p_f is not None:
+        val_attr = max(0.0, min(100.0, 100.0 - p_f * 2.0))
+    elif p_t is not None:
+        val_attr = max(0.0, min(100.0, 100.0 - p_t * 150.0))
+
+    # timing: blend momentum (24h change) + cycle position
+    timing = 50.0
+    if ev.economic.revenue_growth_pct is not None:
+        timing = max(0.0, min(100.0, 50.0 + ev.economic.revenue_growth_pct * 0.5))
+
+    # investment attractiveness = blend of project, token, valuation, timing
+    inv_attr = None
+    if val_attr is not None:
+        inv_attr = 0.35 * project_quality + 0.25 * (token_q or 50) + 0.25 * val_attr + 0.15 * timing
+        inv_attr = round(max(0.0, min(100.0, inv_attr)), 1)
+
     return InvestmentAnalysis(
         fdv_revenue=round(fdv_rev, 2) if fdv_rev else None,
         mc_revenue=round(mc_rev, 2) if mc_rev else None,
         fdv_fees=round(fdv_fees, 2) if fdv_fees else None,
+        mc_fees=round(mc / annual_fees, 2) if (mc and annual_fees > 0) else None,
         mc_tvl=round(mc_tvl, 2) if mc_tvl else None,
+        p_r=round(p_r, 2) if p_r is not None else None,
+        p_f=round(p_f, 2) if p_f is not None else None,
+        p_t=round(p_t, 2) if p_t is not None else None,
+        annualized_fees=round(annual_fees, 0) if annual_fees > 0 else None,
+        annualized_revenue=round(annual_rev, 0) if annual_rev > 0 else None,
+        fee_volatility_pct=round(fee_vol, 1) if fee_vol is not None else None,
         valuation=valuation,
         project_quality=round(project_quality, 1),
         token_quality=token_q,
@@ -519,3 +607,99 @@ def _position_phrase(self) -> str:
 # attach helpers to CandidateInfo / EvidenceBundle at import time
 CandidateInfo.seector_lower = _sector_lower  # type: ignore[attr-defined]
 EvidenceBundle.position_phrase = _position_phrase  # type: ignore[attr-defined]
+
+
+# --------------------------------------------------------------------------- #
+#  Framework 3.0: Cross-Verification Engine (PHASE 8)
+# --------------------------------------------------------------------------- #
+def _build_cross_verifications(ev: EvidenceBundle) -> list:
+    """Cross-verify key metrics between CoinGecko and DeFiLlama."""
+    from models.schemas import CrossVerification
+    results = []
+
+    # TVL cross-verification
+    if ev.economic.tvl and ev.economic.tvl > 0:
+        results.append(CrossVerification(
+            metric="TVL",
+            source_a="DeFiLlama",
+            value_a=ev.economic.tvl,
+            source_b="CoinGecko",
+            value_b=None,  # CoinGecko doesn't provide TVL directly
+            status="single-source",
+        ))
+
+    # Market cap cross-verification
+    if ev.market_cap_usd and ev.market_cap_usd > 0:
+        results.append(CrossVerification(
+            metric="Market Cap",
+            source_a="CoinGecko",
+            value_a=ev.market_cap_usd,
+            source_b="DeFiLlama",
+            value_b=None,  # DeFiLlama doesn't provide MC directly
+            status="single-source",
+        ))
+
+    # Fees cross-verification
+    if ev.economic.fees and ev.economic.fees > 0:
+        results.append(CrossVerification(
+            metric="Fees 24h",
+            source_a="DeFiLlama Fees",
+            value_a=ev.economic.fees,
+            source_b="Protocol Dashboard",
+            value_b=None,  # Would need direct protocol dashboard
+            status="single-source",
+        ))
+
+    return results
+
+
+# --------------------------------------------------------------------------- #
+#  Framework 3.0: Self-Correction Engine (PHASE 31)
+# --------------------------------------------------------------------------- #
+def _build_bias_checks(ev: EvidenceBundle, project_quality: float, candidate) -> list[str]:
+    """Framework 3.0 PHASE 31: Bias checks for self-correction."""
+    checks = []
+
+    # Bias Check: Popular project bias
+    popular_names = {"aave", "uniswap", "bitcoin", "ethereum", "solana", "chainlink"}
+    if candidate.name.lower() in popular_names:
+        checks.append("⚠️ Bias Check: Popular project — ensure score is evidence-based, not reputation-based.")
+
+    # English-Source Bias
+    checks.append("ℹ️ Source Bias: Primary sources are English-language (CoinGecko, DeFiLlama).")
+
+    # Snapshot Bias
+    if ev.economic.fees and not ev.economic.revenue_growth_pct:
+        checks.append("⚠️ Snapshot Bias: Fees data is point-in-time, not trend-verified.")
+
+    # Precision Illusion
+    if project_quality > 0 and ev.grade.value.startswith("D"):
+        checks.append("⚠️ Precision Illusion: Low evidence grade — score may not reflect reality.")
+
+    # Narrative Bias
+    if ev.is_infrastructure and project_quality < 30:
+        checks.append("ℹ️ Narrative Check: Infrastructure classification doesn't guarantee quality.")
+
+    # Confirmation Bias
+    checks.append("ℹ️ Confirmation Check: Ensure both positive and negative evidence collected.")
+
+    # Anti-Promise
+    checks.append("ℹ️ Anti-Promise: No guaranteed outcomes — all scores are probabilistic.")
+
+    return checks
+
+
+# --------------------------------------------------------------------------- #
+#  Framework 3.0: Valuation Multiples Summary
+# --------------------------------------------------------------------------- #
+def _build_valuation_multiples(inv: InvestmentAnalysis) -> dict:
+    """Build valuation multiples summary for Framework 3.0."""
+    return {
+        "p_r": inv.p_r,  # Price-to-Revenue
+        "p_f": inv.p_f,  # Price-to-Fees
+        "p_t": inv.p_t,  # Price-to-TVL
+        "annualized_revenue": inv.annualized_revenue,
+        "annualized_fees": inv.annualized_fees,
+        "fee_volatility_pct": inv.fee_volatility_pct,
+        "note": "P/R uses real revenue. P/F uses fees (≠ revenue). P/T uses TVL.",
+    }

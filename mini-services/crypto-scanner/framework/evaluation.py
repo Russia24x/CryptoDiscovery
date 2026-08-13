@@ -91,28 +91,47 @@ def score_economic_engine(
 ) -> AxisScore:
     subs: dict[str, float] = {}
 
-    # Revenue scale — use revenue if available, otherwise use fees as proxy
-    # (many DeFi protocols don't separate revenue from fees in DeFiLlama)
-    daily_rev = (econ.revenue or econ.fees or 0.0)
+    # Revenue scale — Framework 3.0: Fees ≠ Revenue.
+    # If revenue is available, use it. If not, use fees as "Annualized Run-Rate"
+    # but explicitly flag it (lower confidence, capped score).
+    daily_rev = econ.revenue or 0.0
+    daily_fees = econ.fees or 0.0
     annual_rev = daily_rev * 365.0
-    if annual_rev >= 500_000_000:
-        subs["Revenue Scale"] = 9.5
-    elif annual_rev >= 100_000_000:
-        subs["Revenue Scale"] = 8.0
-    elif annual_rev >= 30_000_000:
-        subs["Revenue Scale"] = 6.5
-    elif annual_rev >= 10_000_000:
-        subs["Revenue Scale"] = 5.0
-    elif annual_rev >= 1_000_000:
-        subs["Revenue Scale"] = 3.5
-    elif annual_rev > 0:
-        subs["Revenue Scale"] = 2.0
+    annual_fees = daily_fees * 365.0
+
+    # Revenue Scale: use actual revenue if available, otherwise capped fees-based proxy
+    if daily_rev > 0:
+        # Real revenue exists — full scoring
+        if annual_rev >= 500_000_000:
+            subs["Revenue Scale"] = 9.5
+        elif annual_rev >= 100_000_000:
+            subs["Revenue Scale"] = 8.0
+        elif annual_rev >= 30_000_000:
+            subs["Revenue Scale"] = 6.5
+        elif annual_rev >= 10_000_000:
+            subs["Revenue Scale"] = 5.0
+        elif annual_rev >= 1_000_000:
+            subs["Revenue Scale"] = 3.5
+        else:
+            subs["Revenue Scale"] = 2.0
+    elif daily_fees > 0:
+        # No revenue data — use fees as "Annualized Run-Rate" proxy (capped)
+        # Framework 3.0: "Fees × 12 is annualized run-rate, NOT real revenue"
+        # Cap at 5.0 (can't score higher than "moderate" without real revenue)
+        if annual_fees >= 100_000_000:
+            subs["Revenue Scale"] = 5.0  # Capped — fees ≠ revenue
+        elif annual_fees >= 30_000_000:
+            subs["Revenue Scale"] = 4.0
+        elif annual_fees >= 10_000_000:
+            subs["Revenue Scale"] = 3.0
+        elif annual_fees >= 1_000_000:
+            subs["Revenue Scale"] = 2.0
+        else:
+            subs["Revenue Scale"] = 1.5
     else:
         subs["Revenue Scale"] = 0.5
 
-    # Fees scale
-    daily_fees = (econ.fees or 0.0)
-    annual_fees = daily_fees * 365.0
+    # Fees scale (separate from revenue — captures economic activity)
     if annual_fees >= 1_000_000_000:
         subs["Fee Generation"] = 9.5
     elif annual_fees >= 300_000_000:
