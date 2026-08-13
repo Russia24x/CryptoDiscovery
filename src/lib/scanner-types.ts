@@ -409,3 +409,44 @@ export interface CmcExchangesResponse {
   fetched_at?: string;
   message?: string;
 }
+
+// --------------------------------------------------------------------------- //
+//  CMC global metrics (from /api/scanner/cmc/global-metrics)
+//  Used by the Hub for cross-verification of CoinGecko's global market data.
+//  `metrics` is null when no CMC API key is configured.
+// --------------------------------------------------------------------------- //
+export interface CmcGlobalMetrics {
+  total_market_cap_usd: number | null;
+  total_volume_24h_usd: number | null;
+  total_market_cap_yesterday_usd: number | null;
+  total_volume_24h_yesterday_usd: number | null;
+  total_market_cap_percentage_change_24h: number | null;
+  btc_dominance: number | null;
+  eth_dominance: number | null;
+  active_cryptocurrencies: number | null;
+  active_market_pairs: number | null;
+  last_updated: string | null;
+}
+
+export interface CmcGlobalMetricsResponse {
+  metrics: CmcGlobalMetrics | null;
+  fetched_at?: string;
+  cmc_pro_required?: boolean;
+  message?: string;
+}
+
+// --------------------------------------------------------------------------- //
+//  Scan list item (from /api/scanner/scans)
+//  Lightweight scan record (without the heavy reports array).
+// --------------------------------------------------------------------------- //
+export interface ScanListItem {
+  scan_id: string;
+  status: string;
+  phase: string;
+  progress: number;
+  total: number;
+  processed: number;
+  started_at: string;
+  finished_at: string | null;
+  persona: string;
+}

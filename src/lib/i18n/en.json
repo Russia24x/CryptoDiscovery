@@ -1,5 +1,6 @@
 {
   "nav": {
+    "hub": "Hub",
     "discovery": "Discovery",
     "explorer": "Coin Explorer",
     "market": "Market Intelligence",
@@ -657,5 +658,85 @@
     "empty": "No projects in watchlist yet",
     "emptyDesc": "Click the star icon on any project card to add it to your watchlist. Watchlisted projects are saved across scans.",
     "srDescription": "Your saved watchlist of tracked projects"
+  },
+  "hub": {
+    "title": "Crypto Discovery Hub",
+    "subtitle": "Your command center for crypto market intelligence",
+    "live": "Live",
+    "updated": "Updated",
+    "justNow": "just now",
+    "hero": {
+      "totalMarketCap": "Total Market Cap",
+      "btcDominance": "BTC Dominance",
+      "ethDominance": "ETH Dominance",
+      "fearGreed": "Fear & Greed",
+      "activeCryptos": "Active Cryptocurrencies",
+      "totalVolume": "24h Volume"
+    },
+    "quickActions": {
+      "title": "Quick Actions",
+      "discoveryTitle": "Discovery",
+      "discoverySubtitle": "8-phase framework analysis",
+      "discoveryAction": "Scan Market",
+      "explorerTitle": "Coin Explorer",
+      "explorerSubtitle": "Search → persona → report",
+      "explorerAction": "Analyze Any Coin",
+      "marketTitle": "Market Intelligence",
+      "marketSubtitle": "CMC + DeFiLlama unified",
+      "marketAction": "Market Overview",
+      "newsTitle": "News & Signals",
+      "newsSubtitle": "EN + FA + Telegram",
+      "newsAction": "Latest News",
+      "scanCount": "{count} scans run"
+    },
+    "snapshot": {
+      "title": "Market Snapshot",
+      "trending": "Trending",
+      "topDefi": "Top DeFi",
+      "defiTvl": "DeFi TVL Total",
+      "activeCoins": "Active Coins",
+      "fearGreedMini": "Sentiment",
+      "loadingData": "Market data loading…",
+      "rateLimited": "Some live feeds are temporarily rate-limited."
+    },
+    "news": {
+      "title": "Latest News",
+      "tabEn": "English",
+      "tabFa": "فارسی",
+      "viewAll": "View all",
+      "telegramTitle": "Telegram Latest",
+      "viewChannel": "View channel",
+      "noArticles": "No recent articles",
+      "noMessages": "No recent messages"
+    },
+    "status": {
+      "frameworkStats": "Framework Stats",
+      "totalScans": "Total Scans",
+      "projectsAnalyzed": "Projects Analyzed",
+      "dataSources": "Data Sources Active",
+      "sourcesLive": "{live}/{total} sources live",
+      "cmcPro": "CMC Pro",
+      "cmcProActive": "Active",
+      "cmcProInactive": "Inactive",
+      "lastScan": "Last Scan",
+      "noScans": "No scans yet",
+      "crossVerification": "Cross-Verification",
+      "btcDom": "BTC Dominance",
+      "totalMcap": "Total Market Cap",
+      "verified": "Verified",
+      "discrepancy": "Discrepancy",
+      "cgLabel": "CoinGecko",
+      "cmcLabel": "CMC",
+      "topMovers": "Top Movers",
+      "gainers": "Gainers",
+      "losers": "Losers",
+      "noMovers": "No mover data right now"
+    },
+    "sources": {
+      "title": "Data Sources",
+      "allOperational": "All systems operational",
+      "sourcesOffline": "{count} source(s) offline",
+      "total": "{count} sources"
+    }
   }
 }

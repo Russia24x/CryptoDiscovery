@@ -1851,3 +1851,171 @@ Stage Summary:
 - Airdrops endpoint gracefully handles 403 with accurate "upgrade plan" message in Persian.
 - Complete bilingual i18n: ~85 new keys added, all view components now fully translatable, 553 key parity between en/fa.
 - Documentation updated with accurate CMC Pro capabilities and all new endpoints.
+
+---
+
+## Task ID: 1
+## Agent: full-stack-developer (Hub)
+
+### Task
+Build the **Hub** — the main landing page of the crypto analysis dashboard. A
+standalone `"use client"` React component at `src/components/views/hub-view.tsx`
+that aggregates summaries from all 4 existing views (Discovery, Coin Explorer,
+Market Intelligence, News & Signals) into one premium, glassmorphic command
+center inspired by CoinMarketCap / CoinGecko / DeFiLlama.
+
+### Work Log
+
+**1. Read prior worklog & existing codebase**
+- Read `/home/z/my-project/worklog.md` — confirmed 4 existing views are built &
+  working (Discovery in page.tsx, Coin Explorer, Market Intelligence, News &
+  Signals). The Python scanner (port 3003) + 14 data sources are all live.
+- Inspected `scanner-types.ts`, the 3 sibling view components, `LanguageProvider`,
+  `page.tsx` (ScanListItem definition), the 7 API proxy routes, and the Python
+  backend (`/sources`, `/scans`, `/cmc/global-metrics`) to learn exact response
+  shapes and the project's i18n / styling conventions.
+
+**2. Additive type additions to `src/lib/scanner-types.ts`**
+- The task spec required importing `ScanListItem` from scanner-types, but it was
+  only defined locally inside `page.tsx`. Added it as a new exported interface
+  (additive — no existing types touched).
+- Added `CmcGlobalMetrics` + `CmcGlobalMetricsResponse` interfaces to match the
+  real `/api/scanner/cmc/global-metrics` payload (`{metrics: {...}|null,
+  fetched_at, cmc_pro_required?}`), so the Hub's cross-verification card is
+  fully typed (no `any`).
+
+**3. i18n keys — `hub.*` namespace**
+- Added ~70 new keys under `hub.*` to both `src/lib/i18n/en.json` and
+  `src/lib/i18n/fa.json` (full Persian translations): `hub.hero.*`,
+  `hub.quickActions.*`, `hub.snapshot.*`, `hub.news.*`, `hub.status.*`,
+  `hub.sources.*`. Verified both files are valid JSON with `python3 json.load`.
+  Maintains the project's en/fa key parity convention.
+
+**4. Wrote `src/components/views/hub-view.tsx` (1520 lines, "use client")**
+- Exports both `HubView` (named) and `default HubView`.
+- Props: `{ onNavigate, onQuickScan? }` exactly as specified.
+- **7 independent data hooks** via a generic `useApi<T>(url, {timeoutMs})`:
+  market/overview (60s), cmc/global-metrics (20s), news?limit=5 (30s),
+  news/fa?limit=5 (30s), telegram (20s), scans (15s), sources (15s). Each hook
+  aborts on unmount, never throws — a failure sets only its own `error`, so one
+  broken endpoint can never take down the whole Hub.
+
+- **Section 1 — Hero Banner**: glassmorphic gradient card with an animated
+  SVG `feTurbulence` grain overlay (keyframe `hub-grain` shifts background-
+  position) + mix-blend-overlay. Left = Total Market Cap (fmtUsd → $2.27T) with
+  24h Δ (emerald/rose, arrow icon) + 24h volume sub-line. Center = BTC + ETH
+  dominance pills (prefer CMC, fall back to CoinGecko). Right = custom SVG
+  semicircle Fear & Greed gauge (track + colored value arc via strokeDasharray +
+  needle + center readout). Pulsing emerald "Live" dot + "Updated Xm ago".
+
+- **Section 2 — Quick Actions Grid**: 4 clickable cards, 2×2 on mobile → 4-col
+  on `lg`. Per-view accent system (emerald=Discovery, amber=Explorer, sky=Market,
+  rose=News): gradient icon chip, hover lift (`-translate-y-1`), border-glow +
+  colored shadow on hover, arrow that slides on hover. Discovery card shows a
+  "{count} scans run" badge when scanCount>0; clicking Discovery calls
+  `onQuickScan` (if provided) else `onNavigate("discovery")`.
+
+- **Section 3 — Market Snapshot Strip**: horizontally scrollable row inside a
+  card. Renders (when data present): trending coins as rounded pills (logo +
+  symbol + #rank), top-3 DeFi protocols (logo + name + TVL), DeFi TVL total
+  stat, active coins count, and a compact conic-gradient Fear & Greed mini.
+  Skeleton row while loading; "Market data loading… / Some live feeds are
+  temporarily rate-limited." note when CoinGecko rate-limited (empty
+  trending+top_defi).
+
+- **Section 4 — Two-Column Layout** (`lg:grid-cols-[1.5fr_1fr]`, stacks mobile):
+  - *Left (60%)*: Latest News card with EN/فارسی Tabs (5 compact rows each:
+    thumbnail + title + source badge + time-ago, whole row links out, dir="auto"
+    + rtl for FA) + "View all" → onNavigate("news"); Telegram Latest card with
+    3 chat-style bubbles (@channel + views + time + 2-line text, dir="auto",
+    deep-link to t.me) + "View channel" → onNavigate("news").
+  - *Right (40%)*: Framework Stats card (Total Scans, Projects Analyzed, Data
+    Sources Active as live/total, CMC Pro Active/Inactive badge, last scan
+    time-ago); Cross-Verification card (only renders when CMC metrics present —
+    CoinGecko vs CMC for BTC dominance + total mcap, with Δ% per row and a
+    "Verified"/"Discrepancy" badge); Top Movers card (top-3 gainers green +
+    top-3 losers red, or graceful "No mover data right now" when CoinGecko
+    rate-limited).
+
+- **Section 5 — Data Sources Footer**: card with status badge ("All systems
+  operational" emerald / "{n} source(s) offline" amber) + a wrap row of 14 dots
+  (emerald=online, muted=offline), each with a Tooltip showing source name,
+  online/offline, and description.
+
+- **Helpers**: `fmtUsd` ($2.27T/$340M/$0.034), `fmtPct` (+1.2%), `fmtNum`
+  (18,404), `timeAgo` (5m ago), `pctColor`, `fearGreedTier`, `useTt` (translate-
+  with-fallback), `useNowTick` (re-renders every 30s so timeAgo stays fresh),
+  `ImgWithFallback` (graceful image error → icon), `discrepancyPct`.
+- All styling uses shadcn/ui (Card, Button, Badge, Tabs, Skeleton, Tooltip,
+  Separator), Tailwind 4, `border-border/60 bg-card/40 backdrop-blur-sm`
+  glassmorphism. NO indigo/blue primaries. Mobile-first responsive throughout.
+  TypeScript strict — zero `any`.
+
+**5. Lint + typecheck**
+- `bun run lint` → **0 errors, 0 warnings** (after fixing one JSX parse error
+  caused by escaped quotes inside a Tailwind arbitrary-value class — moved the
+  grain overlay's `background-image`/`animation` to an inline `style` object
+  instead).
+- `npx tsc --noEmit` → zero errors in project source (only pre-existing
+  unrelated errors in examples/ and skills/ dirs).
+- Verified no unused imports (removed `TrendingDown`), no duplicated functions.
+
+**6. Dev server log**: confirmed healthy (`GET /api/scanner/health 200`
+continuous, no compile errors).
+
+### Stage Summary
+- **Deliverable**: `src/components/views/hub-view.tsx` (1520 lines, "use client",
+  named + default export) — a production-ready, fully-typed, bilingual landing
+  page that aggregates all 7 Hub data sources into 5 independently-resilient
+  sections.
+- **Supporting changes** (all additive, non-breaking): `ScanListItem` +
+  `CmcGlobalMetrics[Response]` types added to `scanner-types.ts`; ~70 `hub.*`
+  i18n keys added to en.json & fa.json.
+- **Resilience**: every section handles loading (skeleton), error (graceful hide
+  / muted note), and empty (CoinGecko rate-limit) states independently — one
+  failing API never breaks the Hub.
+- **Premium feel**: animated grain texture, pulsing live indicator, hover-lift
+  quick-action cards with colored glows, custom SVG Fear & Greed gauge,
+  glassmorphism throughout, smooth transitions.
+- **Integration note**: the component is ready to be wired into `page.tsx` as
+  the default `mainView` (e.g. add a `"hub"` option to the mainView union and
+  render `<HubView onNavigate={setMainView} onQuickScan={startScan} />` when
+  selected). This wiring is intentionally left to the orchestrator to avoid
+  disrupting the 4 existing views.
+- **Lint**: 0 errors, 0 warnings. **TypeScript**: 0 errors in project source.
+
+---
+Task ID: 2
+Agent: main (orchestrator)
+Task: Integrate Hub view into page.tsx as the default landing page, add Hub tab to navigation, wire up navigation callbacks, test full flow.
+
+Work Log:
+- Added HubView import to page.tsx.
+- Added LayoutGrid icon import (for the Hub tab icon).
+- Updated mainView state type to include "hub" as the first option: useState<"hub" | "discovery" | "explorer" | "market" | "news">("hub") — Hub is now the DEFAULT landing view.
+- Added Hub tab button (first position, violet accent) with pulse indicator when active.
+- Added Hub view rendering block: {mainView === "hub" && <HubView onNavigate={setMainView} onQuickScan={...} />}. The onQuickScan callback switches to Discovery view and triggers a scan after 200ms.
+- Added nav.hub i18n key: en.json "Hub", fa.json "هاب".
+- The Hub's onNavigate prop allows it to switch to any of the 4 views (discovery/explorer/market/news) via the quick action cards.
+
+Browser QA via agent-browser:
+- Page loads with Hub as default view ✓
+- 5 tabs visible: هاب (Hub, violet) | دیسکاوری | کاوش ارز | هوش بازار | اخبار و سیگنال ✓
+- Hero banner: "هاب کشف کریپتو", Live indicator, Total Market Cap $2.27T, BTC dom 58.55% (CMC), ETH 10.45%, Fear&Greed 29 (Fear gauge) ✓
+- Quick Actions: 4 cards (Discovery "1 اسکن اجرا شده", Coin Explorer, Market Intelligence, News & Signals) — all Persian ✓
+- Market Snapshot: trending coins (Cash Cat, Acurast, aPriori, Solana, Pudgy Penguins, Lighter), top-3 DeFi (Binance $139B, OKX $26B, Lido $18B), DeFi TVL $494B, 18,404 active coins ✓
+- Latest News: English tab with 5 Cointelegraph articles (20m-6h ago), فارسی tab available ✓
+- Telegram Latest: 3 messages from @Mastersharkcrypto with view counts (4, 23, 25) and full Persian text ✓
+- Framework Stats: 1 scan, 12 projects, 12/14 sources live, CMC PRO active, last scan 26m ago ✓
+- Cross-Verification: CoinGecko BTC dom 56.29% vs CMC 58.55% (Δ 4.02% discrepancy) ✓
+- Navigation: clicked Coin Explorer quick action → switched to Coin Explorer view ✓; clicked Hub tab → returned to Hub ✓
+- VLM: "high level of visual quality, sleek dark-themed design, professional layout" ✓
+- Dev log: zero errors, all 7 Hub endpoints returning 200 (market/overview, telegram, scans, sources, news, news/fa) ✓
+- Lint: 0 errors, 0 warnings ✓
+
+Stage Summary:
+- The Hub is now the default landing page. When users enter the app, they see a comprehensive dashboard aggregating all 4 views + market data + news + Telegram + framework stats + cross-verification.
+- 5 main views: Hub (landing) → Discovery → Coin Explorer → Market Intelligence → News & Signals.
+- All navigation works bidirectionally (Hub → any view → back to Hub).
+- Full Persian i18n for all Hub content.
+- The app now has a professional, CMC-inspired landing experience.

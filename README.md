@@ -28,7 +28,16 @@ Project Quality ≠ Token Quality ≠ Investment Attractiveness
 
 ## Key Features
 
-### User Interface — 4 Main Views
+### User Interface — 5 Main Views (Hub + 4 specialized views)
+
+#### 0. Hub (Landing Page — Default)
+- **Market Pulse Hero**: Total market cap, BTC/ETH dominance (CMC cross-verified), Fear & Greed gauge, live indicator with animated grain texture
+- **Quick Actions Grid**: 4 clickable cards navigating to Discovery, Coin Explorer, Market Intelligence, News — each with scan count badges
+- **Market Snapshot Strip**: Trending coins, top-3 DeFi protocols, DeFi TVL total, active coins count, compact Fear & Greed
+- **Two-Column Layout**: Latest news (EN/FA tabs) + Telegram feed (left) · Framework stats + cross-verification + top movers (right)
+- **Data Sources Health Footer**: 14 sources with live status dots
+- **Cross-Verification Card**: CoinGecko ↔ CMC BTC dominance comparison with discrepancy % (when CMC key active)
+- Aggregates 7 data sources in parallel with independent resilience (one failing endpoint doesn't break the Hub)
 
 #### 1. Discovery (Scan-Based)
 - **8-Phase Pipeline**: Discovery → Screening → Evidence → Evaluation → Scoring → Investment → Decision → Output

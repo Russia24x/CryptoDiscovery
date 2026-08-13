@@ -1,5 +1,6 @@
 {
   "nav": {
+    "hub": "هاب",
     "discovery": "دیسکاوری",
     "explorer": "کاوش ارز",
     "market": "هوش بازار",
@@ -657,5 +658,85 @@
     "empty": "هنوز پروژه‌ای در واچ‌لیست نیست",
     "emptyDesc": "روی آیکون ستاره در هر کارت پروژه کلیک کنید تا به واچ‌لیست اضافه شود. پروژه‌های واچ‌لیست در تمام اسکن‌ها ذخیره می‌شوند.",
     "srDescription": "واچ‌لیست ذخیره‌شده پروژه‌های تحت پیگیری شما"
+  },
+  "hub": {
+    "title": "هاب کشف کریپتو",
+    "subtitle": "مرکز فرماندهی شما برای هوش بازار کریپتو",
+    "live": "زنده",
+    "updated": "به‌روزرسانی",
+    "justNow": "هم‌اکنون",
+    "hero": {
+      "totalMarketCap": "کل ارزش بازار",
+      "btcDominance": "سلطه بیت‌کوین",
+      "ethDominance": "سلطه اتریوم",
+      "fearGreed": "ترس و طمع",
+      "activeCryptos": "ارزهای فعال",
+      "totalVolume": "حجم ۲۴ ساعته"
+    },
+    "quickActions": {
+      "title": "اقدامات سریع",
+      "discoveryTitle": "کشف",
+      "discoverySubtitle": "تحلیل چارچوب ۸ فازی",
+      "discoveryAction": "اسکن بازار",
+      "explorerTitle": "کاوشگر کوین",
+      "explorerSubtitle": "جستجو ← پرسونا ← گزارش",
+      "explorerAction": "تحلیل هر کوین",
+      "marketTitle": "هوش بازار",
+      "marketSubtitle": "CMC + DeFiLlama یکپارچه",
+      "marketAction": "نمای کلی بازار",
+      "newsTitle": "اخبار و سیگنال‌ها",
+      "newsSubtitle": "انگلیسی + فارسی + تلگرام",
+      "newsAction": "آخرین اخبار",
+      "scanCount": "{count} اسکن اجرا شده"
+    },
+    "snapshot": {
+      "title": "نمای بازار",
+      "trending": "پرطرفدار",
+      "topDefi": "برترین DeFi",
+      "defiTvl": "کل TVL دی‌فای",
+      "activeCoins": "کوین‌های فعال",
+      "fearGreedMini": "احساس بازار",
+      "loadingData": "در حال بارگذاری داده بازار…",
+      "rateLimited": "برخی فیدهای زنده موقتاً محدود شده‌اند."
+    },
+    "news": {
+      "title": "آخرین اخبار",
+      "tabEn": "English",
+      "tabFa": "فارسی",
+      "viewAll": "مشاهده همه",
+      "telegramTitle": "آخرین تلگرام",
+      "viewChannel": "مشاهده کانال",
+      "noArticles": "مقاله جدیدی نیست",
+      "noMessages": "پیام جدیدی نیست"
+    },
+    "status": {
+      "frameworkStats": "آمار چارچوب",
+      "totalScans": "کل اسکن‌ها",
+      "projectsAnalyzed": "پروژه‌های تحلیل‌شده",
+      "dataSources": "منابع داده فعال",
+      "sourcesLive": "{live}/{total} منبع فعال",
+      "cmcPro": "CMC Pro",
+      "cmcProActive": "فعال",
+      "cmcProInactive": "غیرفعال",
+      "lastScan": "آخرین اسکن",
+      "noScans": "هنوز اسکنی نیست",
+      "crossVerification": "تأیید متقابل",
+      "btcDom": "سلطه بیت‌کوین",
+      "totalMcap": "کل ارزش بازار",
+      "verified": "تأیید شد",
+      "discrepancy": "اختلاف",
+      "cgLabel": "CoinGecko",
+      "cmcLabel": "CMC",
+      "topMovers": "برترین تحرک‌ها",
+      "gainers": "صعودی‌ها",
+      "losers": "نزولی‌ها",
+      "noMovers": "الان داده تحرکی نیست"
+    },
+    "sources": {
+      "title": "منابع داده",
+      "allOperational": "تمام سیستم‌ها عملیاتی هستند",
+      "sourcesOffline": "{count} منبع غیرفعال",
+      "total": "{count} منبع"
+    }
   }
 }

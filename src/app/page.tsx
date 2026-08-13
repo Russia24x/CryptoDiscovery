@@ -24,6 +24,7 @@ import {
   Grid3x3,
   History,
   Layers,
+  LayoutGrid,
   ListFilter,
   Loader2,
   MessageCircle,
@@ -80,6 +81,7 @@ import { RiskHeatmap } from "@/components/dashboard/risk-heatmap";
 import { CoinExplorerView } from "@/components/views/coin-explorer-view";
 import { MarketIntelligenceView } from "@/components/views/market-intelligence-view";
 import { NewsFeedView } from "@/components/views/news-feed-view";
+import { HubView } from "@/components/views/hub-view";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { LanguageToggle } from "@/components/language-toggle";
 import { useLanguage } from "@/lib/i18n/LanguageProvider";
@@ -445,8 +447,8 @@ export default function Home() {
   const [diffScanB, setDiffScanB] = useState<ScanStatus | null>(null);
   // help dialog
   const [showHelp, setShowHelp] = useState(false);
-  // main view tab: discovery (scan) | explorer (manual coin analysis) | market (intelligence) | news (feed)
-  const [mainView, setMainView] = useState<"discovery" | "explorer" | "market" | "news">("discovery");
+  // main view tab: hub (landing) | discovery (scan) | explorer (manual coin analysis) | market (intelligence) | news (feed)
+  const [mainView, setMainView] = useState<"hub" | "discovery" | "explorer" | "market" | "news">("hub");
   // when set, Coin Explorer auto-loads this coin (triggered from Market Intelligence click)
   const [explorerInitialId, setExplorerInitialId] = useState<string | null>(null);
   // search input ref for keyboard shortcut
@@ -1085,6 +1087,21 @@ export default function Home() {
         {/* ============ Main view tab navigation ============ */}
         <div className="mb-6 flex items-center gap-1.5 rounded-xl border border-border/60 bg-card/40 backdrop-blur-sm p-1.5 overflow-x-auto">
           <button
+            onClick={() => setMainView("hub")}
+            className={cn(
+              "flex items-center gap-2 px-3.5 py-2 rounded-lg text-xs font-medium transition-all whitespace-nowrap",
+              mainView === "hub"
+                ? "bg-violet-500/15 text-violet-400 shadow-sm"
+                : "text-muted-foreground hover:text-foreground hover:bg-muted/40",
+            )}
+          >
+            <LayoutGrid className="h-4 w-4" />
+            <span>{t("nav.hub")}</span>
+            {mainView === "hub" && (
+              <span className="ml-1 h-1.5 w-1.5 rounded-full bg-violet-400 animate-pulse" />
+            )}
+          </button>
+          <button
             onClick={() => setMainView("discovery")}
             className={cn(
               "flex items-center gap-2 px-3.5 py-2 rounded-lg text-xs font-medium transition-all whitespace-nowrap",
@@ -1136,6 +1153,18 @@ export default function Home() {
             <span>{t("nav.news")}</span>
           </button>
         </div>
+
+        {/* ============ Hub view (default landing) ============ */}
+        {mainView === "hub" && (
+          <HubView
+            onNavigate={(view) => setMainView(view)}
+            onQuickScan={() => {
+              setMainView("discovery");
+              // Trigger scan after a brief delay to let the Discovery view mount
+              setTimeout(() => startScanRef.current(), 200);
+            }}
+          />
+        )}
 
         {/* ============ Coin Explorer view ============ */}
         {mainView === "explorer" && (
