@@ -99,12 +99,22 @@ class EvidenceBundle:
         self.github_url: str | None = None
         self.discord_url: str | None = None
         self.blockchain_explorer: str | None = None
-        # CoinMarketCap cross-verification data
+        # CoinMarketCap cross-verification data (from Pro or Keyless)
         self.cmc_market_cap: float | None = None
         self.cmc_price: float | None = None
         self.cmc_rank: int | None = None
         self.cmc_volume_24h: float | None = None
         self.cmc_circulating_supply: float | None = None
+        # CMC Keyless unique data
+        self.cmc_tvl: float | None = None
+        self.cmc_holder_count: int | None = None
+        self.cmc_top10_holder_ratio: float | None = None
+        self.cmc_top100_holder_ratio: float | None = None
+        self.cmc_audited: bool | None = None
+        self.cmc_audit_infos: list | None = None
+        self.cmc_platform_count: int | None = None
+        self.cmc_ath: float | None = None
+        self.cmc_atl: float | None = None
 
 
 async def collect(
@@ -189,6 +199,96 @@ async def collect(
                             b.github_url = cmc_meta["source_code"]
         except Exception:  # noqa: BLE001
             pass
+
+    # 3c) CoinMarketCap Keyless API (always available — no key needed)
+    # Provides: TVL, holder ratios, audit info, price ranges, social links
+    try:
+        cmc_kl = await sources.fetch_cmc_keyless_by_symbol(candidate.symbol)
+        if cmc_kl:
+            b.sources += 1
+            log.info("CMC Keyless: %s — rank #%s, holders=%s, TVL=%s",
+                     candidate.symbol, cmc_kl.get("cmc_rank"),
+                     cmc_kl.get("holder_count"), cmc_kl.get("tvl"))
+
+            # Cross-verification data (works without Pro key)
+            if not b.cmc_market_cap and cmc_kl.get("market_cap"):
+                b.cmc_market_cap = cmc_kl["market_cap"]
+            if not b.cmc_price and cmc_kl.get("price"):
+                b.cmc_price = cmc_kl["price"]
+            if not b.cmc_rank and cmc_kl.get("cmc_rank"):
+                b.cmc_rank = cmc_kl["cmc_rank"]
+            if not b.cmc_volume_24h and cmc_kl.get("volume_24h"):
+                b.cmc_volume_24h = cmc_kl["volume_24h"]
+            if not b.cmc_circulating_supply and cmc_kl.get("circulating_supply"):
+                b.cmc_circulating_supply = cmc_kl["circulating_supply"]
+
+            # Keyless-unique data (not available from other sources)
+            if cmc_kl.get("tvl"):
+                b.cmc_tvl = cmc_kl["tvl"]
+                # Use as fallback TVL if DeFiLlama didn't provide
+                if not b.economic.tvl:
+                    b.economic.tvl = b.cmc_tvl
+            if cmc_kl.get("holder_count"):
+                b.cmc_holder_count = cmc_kl["holder_count"]
+            if cmc_kl.get("top_10_holder_ratio"):
+                b.cmc_top10_holder_ratio = cmc_kl["top_10_holder_ratio"]
+            if cmc_kl.get("top_100_holder_ratio"):
+                b.cmc_top100_holder_ratio = cmc_kl["top_100_holder_ratio"]
+                # Use for holder concentration if not set
+                if not b.market.holder_concentration:
+                    b.market.holder_concentration = b.cmc_top10_holder_ratio / 100
+            if cmc_kl.get("audited") is not None:
+                b.cmc_audited = cmc_kl["audited"]
+                if b.cmc_audited and b.audit_status == "none":
+                    b.audit_status = "recent"
+            if cmc_kl.get("audit_infos"):
+                b.cmc_audit_infos = cmc_kl["audit_infos"]
+            if cmc_kl.get("platform_count"):
+                b.cmc_platform_count = cmc_kl["platform_count"]
+                if b.chain_count < b.cmc_platform_count:
+                    b.chain_count = b.cmc_platform_count
+            if cmc_kl.get("ath"):
+                b.cmc_ath = cmc_kl["ath"]
+            if cmc_kl.get("atl"):
+                b.cmc_atl = cmc_kl["atl"]
+
+            # Fill missing market data
+            if not b.market_cap_usd and cmc_kl.get("market_cap"):
+                b.market_cap_usd = cmc_kl["market_cap"]
+            if not b.fdv_usd and cmc_kl.get("fdv"):
+                b.fdv_usd = cmc_kl["fdv"]
+            if not b.tokenomics.market_cap and cmc_kl.get("market_cap"):
+                b.tokenomics.market_cap = cmc_kl["market_cap"]
+            if not b.tokenomics.fdv and cmc_kl.get("fdv"):
+                b.tokenomics.fdv = cmc_kl["fdv"]
+            if not b.tokenomics.circulating_supply and cmc_kl.get("circulating_supply"):
+                b.tokenomics.circulating_supply = cmc_kl["circulating_supply"]
+            if not b.tokenomics.total_supply and cmc_kl.get("total_supply"):
+                b.tokenomics.total_supply = cmc_kl["total_supply"]
+            if not b.tokenomics.max_supply and cmc_kl.get("max_supply"):
+                b.tokenomics.max_supply = cmc_kl["max_supply"]
+            if not b.market.daily_volume and cmc_kl.get("volume_24h"):
+                b.market.daily_volume = cmc_kl["volume_24h"]
+
+            # Fill missing links
+            if not b.image_url and cmc_kl.get("logo"):
+                b.image_url = cmc_kl["logo"]
+            if not b.homepage and cmc_kl.get("website"):
+                b.homepage = cmc_kl["website"]
+            if not b.twitter_handle and cmc_kl.get("twitter"):
+                b.twitter_handle = cmc_kl["twitter"].rstrip("/").split("/")[-1]
+            if not b.github_url and cmc_kl.get("source_code"):
+                b.github_url = cmc_kl["source_code"]
+            if not b.discord_url and cmc_kl.get("chat"):
+                b.discord_url = cmc_kl["chat"]
+            if not b.blockchain_explorer and cmc_kl.get("explorer"):
+                b.blockchain_explorer = cmc_kl["explorer"]
+
+            # Customer count proxy
+            if not b.economic.customer_count and cmc_kl.get("holder_count"):
+                b.economic.customer_count = cmc_kl["holder_count"]
+    except Exception:  # noqa: BLE001
+        pass
 
     # 4) Category-derived signals
     _apply_category_inferences(b, candidate.category)

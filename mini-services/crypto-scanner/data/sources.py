@@ -304,3 +304,119 @@ async def fetch_cmc_listings(limit: int = 100) -> list[dict[str, Any]] | None:
 def is_cmc_available() -> bool:
     """Check if CMC API key is configured."""
     return CMC_AVAILABLE
+
+
+# --------------------------------------------------------------------------- #
+#  CoinMarketCap Keyless Public API (always available, no key needed)
+# --------------------------------------------------------------------------- #
+CMC_KEYLESS_BASE = "https://api.coinmarketcap.com/data-api/v3"
+
+async def fetch_cmc_keyless_detail(slug: str) -> dict[str, Any] | None:
+    """Fetch cryptocurrency detail from CMC keyless API (no key required).
+
+    Returns rich data including: price, market_cap, FDV, supply, volume,
+    holder ratios, audit info, platform contracts, social links, TVL.
+    """
+    async with httpx.AsyncClient() as c:
+        data = await _get_json(c, f"{CMC_KEYLESS_BASE}/cryptocurrency/detail", slug=slug)
+    if not isinstance(data, dict) or "data" not in data:
+        return None
+    d = data.get("data") or {}
+    stats = d.get("statistics") or {}
+    supply = d.get("supplyDetails") or {}
+    urls = d.get("urls") or {}
+    holders = d.get("holders") or {}
+    audits = d.get("auditInfos") or []
+    platforms = d.get("platforms") or []
+
+    circ_supply = None
+    if isinstance(supply.get("circulatingSupply"), dict):
+        circ_supply = supply["circulatingSupply"].get("value")
+    total_supply = None
+    if isinstance(supply.get("totalSupply"), dict):
+        total_supply = supply["totalSupply"].get("value")
+    max_supply = None
+    if isinstance(supply.get("maxSupply"), dict):
+        max_supply = supply["maxSupply"].get("value")
+
+    return {
+        "name": d.get("name"),
+        "symbol": d.get("symbol"),
+        "slug": d.get("slug"),
+        "category": d.get("category"),
+        "description": d.get("description"),
+        "logo": d.get("logo") or f"https://s2.coinmarketcap.com/static/img/coins/64x64/{d.get('id')}.png",
+        # Market data
+        "price": stats.get("price"),
+        "market_cap": stats.get("marketCap"),
+        "fdv": stats.get("fullyDilutedMarketCap"),
+        "volume_24h": stats.get("volume24h"),
+        "volume_7d": stats.get("volume7d"),
+        "volume_30d": stats.get("volume30d"),
+        "cmc_rank": stats.get("rank"),
+        "market_cap_dominance": stats.get("marketCapDominance"),
+        # Price changes
+        "percent_change_1h": stats.get("priceChangePercentage1h"),
+        "percent_change_24h": stats.get("priceChangePercentage24h"),
+        "percent_change_7d": stats.get("priceChangePercentage7d"),
+        "percent_change_30d": stats.get("priceChangePercentage30d"),
+        "percent_change_60d": stats.get("priceChangePercentage60d"),
+        "percent_change_90d": stats.get("priceChangePercentage90d"),
+        "percent_change_1y": stats.get("priceChangePercentage1y"),
+        # Supply
+        "circulating_supply": circ_supply,
+        "total_supply": total_supply,
+        "max_supply": max_supply if max_supply and max_supply > 0 else None,
+        # TVL
+        "tvl": stats.get("tvl"),
+        "tvl_ratio": stats.get("tvlRatio"),
+        # Holder data (keyless unique feature)
+        "holder_count": holders.get("holderCount"),
+        "daily_active": holders.get("dailyActive"),
+        "top_10_holder_ratio": holders.get("topTenHolderRatio"),
+        "top_20_holder_ratio": holders.get("topTwentyHolderRatio"),
+        "top_50_holder_ratio": holders.get("topFiftyHolderRatio"),
+        "top_100_holder_ratio": holders.get("topHundredHolderRatio"),
+        # Price ranges
+        "low_24h": stats.get("low24h"),
+        "high_24h": stats.get("high24h"),
+        "low_7d": stats.get("low7d"),
+        "high_7d": stats.get("high7d"),
+        "low_30d": stats.get("low30d"),
+        "high_30d": stats.get("high30d"),
+        "low_52w": stats.get("low52w"),
+        "high_52w": stats.get("high52w"),
+        "ath": stats.get("highAllTime"),
+        "atl": stats.get("lowAllTime"),
+        # Audit info
+        "audited": d.get("isAudited"),
+        "audit_infos": [
+            {"auditor": a.get("auditor"), "status": a.get("auditStatus"),
+             "time": a.get("auditTime"), "url": a.get("reportUrl")}
+            for a in audits if isinstance(a, dict)
+        ],
+        # Social links
+        "website": (urls.get("website") or [None])[0] if isinstance(urls, dict) else None,
+        "twitter": (urls.get("twitter") or [None])[0] if isinstance(urls, dict) else None,
+        "source_code": (urls.get("source_code") or [None])[0] if isinstance(urls, dict) else None,
+        "reddit": (urls.get("reddit") or [None])[0] if isinstance(urls, dict) else None,
+        "chat": (urls.get("chat") or [None])[0] if isinstance(urls, dict) else None,
+        "technical_doc": (urls.get("technical_doc") or [None])[0] if isinstance(urls, dict) else None,
+        "explorer": (urls.get("explorer") or [None])[0] if isinstance(urls, dict) else None,
+        # Platform contracts
+        "platforms": [
+            {"chain": p.get("contractPlatform"), "address": p.get("contractAddress")}
+            for p in platforms if isinstance(p, dict) and p.get("contractAddress")
+        ],
+        "platform_count": len(platforms),
+    }
+
+
+async def fetch_cmc_keyless_by_symbol(symbol: str) -> dict[str, Any] | None:
+    """Try to fetch CMC keyless detail by trying the slug = symbol.lower().
+
+    CMC keyless API uses slug (e.g. 'aave', 'bitcoin') not symbol.
+    We try the lowercase symbol as slug, which works for most projects.
+    """
+    slug = symbol.lower().replace(" ", "-")
+    return await fetch_cmc_keyless_detail(slug)
