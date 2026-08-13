@@ -149,6 +149,9 @@ async def collect(
     # 0) Blockchain TVL check — if this token IS a blockchain (SOL, ETH, AVAX),
     #    its TVL is the aggregate of all protocols on that chain, not a single
     #    protocol's TVL. This is critical for accurate P/T valuation.
+    #    Auto-sync the chain mapping from DeFiLlama (461+ chains) to ensure
+    #    we never miss a blockchain token due to a stale manual table.
+    await sources._sync_chain_mapping()
     chain_name = sources.is_blockchain_token(candidate.symbol, candidate.name)
     if chain_name:
         try:

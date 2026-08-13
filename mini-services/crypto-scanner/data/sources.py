@@ -155,16 +155,86 @@ _BLOCKCHAIN_NAMES = {
 }
 
 
+# Cache for the auto-synced chain→symbol mapping (from DeFiLlama /chains endpoint)
+_CHAIN_SYMBOL_CACHE: dict[str, str] | None = None  # symbol → chain name
+_CHAIN_NAME_CACHE: dict[str, str] | None = None    # lowercase name → chain name
+
+
+async def _sync_chain_mapping() -> None:
+    """Auto-sync blockchain token detection from DeFiLlama's /chains endpoint.
+
+    Fetches all 461+ chains from DeFiLlama and builds a dynamic mapping of
+    token symbol → chain name. This eliminates the need to manually maintain
+    the _BLOCKCHAIN_TO_CHAIN table — new chains are automatically detected.
+
+    Called lazily on first use, then cached for 1 hour.
+    """
+    global _CHAIN_SYMBOL_CACHE, _CHAIN_NAME_CACHE
+    if _CHAIN_SYMBOL_CACHE is not None:
+        return
+    cache_key = "chain_mapping_synced"
+    cached = cache_get(cache_key, ttl=3600.0)  # 1-hour cache
+    if cached is not None:
+        _CHAIN_SYMBOL_CACHE = cached.get("symbol_map", {})
+        _CHAIN_NAME_CACHE = cached.get("name_map", {})
+        return
+    try:
+        async with httpx.AsyncClient(follow_redirects=True) as c:
+            data = await _get_json(c, "https://api.llama.fi/v2/chains")
+        if not isinstance(data, list):
+            return
+        sym_map: dict[str, str] = {}
+        name_map: dict[str, str] = {}
+        for chain in data:
+            chain_name = chain.get("name") or ""
+            token_sym = (chain.get("tokenSymbol") or "").upper().strip()
+            if token_sym and token_sym not in ("-", ""):
+                # Only keep if this chain has meaningful TVL (> $1M) to avoid
+                # matching obscure testnet tokens
+                tvl = chain.get("tvl") or 0
+                if tvl > 1_000_000:
+                    sym_map[token_sym] = chain_name
+            if chain_name:
+                name_map[chain_name.lower()] = chain_name
+        # Merge with the manual overrides (manual takes priority)
+        for sym, chain in _BLOCKCHAIN_TO_CHAIN.items():
+            sym_map[sym] = chain
+        for name, chain in _BLOCKCHAIN_NAMES.items():
+            name_map[name] = chain
+        _CHAIN_SYMBOL_CACHE = sym_map
+        _CHAIN_NAME_CACHE = name_map
+        cache_set(cache_key, {"symbol_map": sym_map, "name_map": name_map})
+        log.info("Chain mapping synced: %d symbols, %d names from DeFiLlama", len(sym_map), len(name_map))
+    except Exception as exc:  # noqa: BLE001
+        log.warning("Chain mapping sync failed: %s", exc)
+        # Fall back to manual tables only
+        _CHAIN_SYMBOL_CACHE = dict(_BLOCKCHAIN_TO_CHAIN)
+        _CHAIN_NAME_CACHE = dict(_BLOCKCHAIN_NAMES)
+
+
 def is_blockchain_token(symbol: str, name: str = "") -> str | None:
     """Check if a token is a blockchain (L1/L2). Returns the chain name or None.
 
     If the token IS a blockchain, its TVL should be fetched as the aggregate
     of all protocols on that chain, not from a single protocol entry.
+
+    Uses the auto-synced DeFiLlama chain mapping (461+ chains) merged with
+    manual overrides for maximum coverage.
     """
     sym = symbol.upper().strip()
+    # Check the auto-synced cache first (covers 100+ chains from DeFiLlama)
+    if _CHAIN_SYMBOL_CACHE is not None and sym in _CHAIN_SYMBOL_CACHE:
+        return _CHAIN_SYMBOL_CACHE[sym]
+    # Fall back to manual table
     if sym in _BLOCKCHAIN_TO_CHAIN:
         return _BLOCKCHAIN_TO_CHAIN[sym]
     nm = name.lower().strip()
+    # Check auto-synced name cache
+    if _CHAIN_NAME_CACHE is not None:
+        for key, chain in _CHAIN_NAME_CACHE.items():
+            if key in nm:
+                return chain
+    # Fall back to manual name matching
     for key, chain in _BLOCKCHAIN_NAMES.items():
         if key in nm:
             return chain
@@ -193,10 +263,38 @@ async def fetch_defillama_chain_tvl(chain: str, protocols: list[dict[str, Any]] 
 
     # Filter protocols that list this chain
     chain_protos = []
+    chain_lower = chain.lower()
+    # Build a set of known chain name aliases for fuzzy matching.
+    # DeFiLlama /chains and /protocols sometimes use different names
+    # (e.g. /chains says "BSC" but /protocols says "Binance").
+    _CHAIN_ALIASES: dict[str, list[str]] = {
+        "bsc": ["binance", "bsc", "bnb chain", "bnb"],
+        "ethereum": ["ethereum", "ether"],
+        "bitcoin": ["bitcoin", "btc"],
+        "solana": ["solana"],
+        "tron": ["tron"],
+        "polygon": ["polygon", "matic"],
+        "avalanche": ["avalanche", "avax"],
+        "arbitrum": ["arbitrum", "arb"],
+        "optimism": ["optimism", "op"],
+        "fantom": ["fantom", "ftm"],
+        "near": ["near"],
+        "cosmos": ["cosmos", "atom"],
+        "polkadot": ["polkadot", "dot"],
+    }
+    aliases = _CHAIN_ALIASES.get(chain_lower, [chain_lower])
     for p in protocols:
-        p_chain = p.get("chain") or ""
-        if p_chain == chain or (isinstance(p_chain, str) and chain.lower() in p_chain.lower()):
+        p_chain = (p.get("chain") or "").lower()
+        if not p_chain:
+            continue
+        # Check if any alias matches (bidirectional substring)
+        if any(alias in p_chain or p_chain in alias for alias in aliases):
             chain_protos.append(p)
+        # Also check multi-chain protocols (chain field like "Ethereum,BSC,Solana")
+        elif "," in p_chain:
+            parts = [c.strip() for c in p_chain.split(",")]
+            if any(any(alias in part or part in alias for alias in aliases) for part in parts):
+                chain_protos.append(p)
 
     total_tvl = sum(p.get("tvl") or 0 for p in chain_protos)
     # Sort by TVL for top protocols

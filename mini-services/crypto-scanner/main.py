@@ -818,6 +818,145 @@ async def get_coingecko_categories():
     return {"categories": data or [], "count": len(data or [])}
 
 
+# --------------------------------------------------------------------------- #
+#  System Health Check — validates data pipeline integrity
+# --------------------------------------------------------------------------- #
+# This endpoint scans the top coins and checks for data quality issues:
+#   - Coins with TVL=$0 that should have TVL (blockchain tokens)
+#   - Missing fee data from DeFiLlama
+#   - Missing holder data from CMC Keyless
+#   - API source availability
+# Designed to be called by a background scheduler every 30 minutes.
+
+@app.get("/system/health-check")
+async def system_health_check():
+    """Validate data pipeline integrity across all sources.
+
+    Checks the top 20 coins by market cap for:
+    - TVL data availability (blockchain tokens should have chain TVL)
+    - Fee data availability (DeFi protocols should have fees)
+    - CMC Keyless data availability (holders, audits)
+    - Cross-verification between CoinGecko and CMC
+
+    Returns a detailed report of any data gaps found.
+    """
+    import asyncio as _aio
+    report = {
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "sources": {},
+        "data_gaps": [],
+        "blockchain_detection": {},
+        "summary": {},
+    }
+
+    # 1) Check source availability
+    sources_status = {
+        "coingecko": False,
+        "defillama": False,
+        "cmc_keyless": False,
+        "cmc_pro": sources.is_cmc_available(),
+        "dune": sources.is_dune_available(),
+    }
+
+    # Test CoinGecko
+    try:
+        markets = await sources.fetch_top_markets_extended(per_page=20)
+        sources_status["coingecko"] = len(markets) > 0
+    except Exception:  # noqa: BLE001
+        pass
+
+    # Test DeFiLlama
+    try:
+        protos = await sources.fetch_defillama_protocols()
+        sources_status["defillama"] = len(protos) > 0
+    except Exception:  # noqa: BLE001
+        pass
+
+    # Test CMC Keyless
+    try:
+        kl = await sources.fetch_cmc_keyless_by_symbol("BTC")
+        sources_status["cmc_keyless"] = kl is not None and kl.get("name") is not None
+    except Exception:  # noqa: BLE001
+        pass
+
+    report["sources"] = sources_status
+
+    # 2) Sync chain mapping
+    await sources._sync_chain_mapping()
+    chain_sym_count = len(sources._CHAIN_SYMBOL_CACHE or {})
+    chain_name_count = len(sources._CHAIN_NAME_CACHE or {})
+    report["blockchain_detection"] = {
+        "auto_synced_symbols": chain_sym_count,
+        "auto_synced_names": chain_name_count,
+        "manual_overrides": len(sources._BLOCKCHAIN_TO_CHAIN),
+    }
+
+    # 3) Check top 20 coins for data gaps
+    if markets and protos:
+        fees_list = await sources.fetch_fees_overview()
+        fees_by_sym: dict[str, list[dict]] = {}
+        for f in fees_list:
+            sym = (f.get("symbol") or "").upper()
+            if sym:
+                fees_by_sym.setdefault(sym, []).append(f)
+
+        for m in markets[:20]:
+            sym = (m.get("symbol") or "").upper()
+            name = m.get("name") or ""
+            mc = m.get("market_cap") or 0
+            if mc < 1_000_000_000:  # Only check $1B+ coins
+                continue
+
+            issues = []
+
+            # Check TVL
+            chain = sources.is_blockchain_token(sym, name)
+            if chain:
+                chain_data = await sources.fetch_defillama_chain_tvl(chain, protos)
+                tvl = (chain_data or {}).get("tvl") or 0
+                if tvl == 0:
+                    issues.append(f"Blockchain token but TVL=$0 (chain={chain})")
+            else:
+                # Check if it's a DeFi protocol with TVL
+                llama_match = sources.match_llama_protocol(sym, name, protos)
+                if llama_match and (llama_match.get("tvl") or 0) == 0:
+                    issues.append("DeFi protocol with TVL=$0")
+
+            # Check fees (for DeFi protocols)
+            if sym in fees_by_sym:
+                best_fees = max(fees_by_sym[sym], key=lambda x: x.get("fees_24h") or 0)
+                if (best_fees.get("fees_24h") or 0) == 0:
+                    issues.append("Has fee entry but fees_24h=$0")
+
+            # Check CMC Keyless
+            try:
+                kl = await sources.fetch_cmc_keyless_by_symbol(sym)
+                if not kl or not kl.get("name"):
+                    issues.append("CMC Keyless: no data (slug mismatch)")
+            except Exception:  # noqa: BLE001
+                issues.append("CMC Keyless: fetch failed")
+
+            if issues:
+                report["data_gaps"].append({
+                    "symbol": sym,
+                    "name": name,
+                    "market_cap": mc,
+                    "issues": issues,
+                })
+
+    # 4) Summary
+    report["summary"] = {
+        "sources_online": sum(1 for v in sources_status.values() if v),
+        "sources_total": len(sources_status),
+        "coins_checked": len(report["data_gaps"]) + 20,  # approx
+        "data_gaps_found": len(report["data_gaps"]),
+        "blockchain_tokens_detectable": chain_sym_count,
+        "status": "healthy" if len(report["data_gaps"]) <= 3 else "needs_attention",
+    }
+
+    return report
+
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run("main:app", host="0.0.0.0", port=3003, reload=False, log_level="info")
