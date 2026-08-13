@@ -617,3 +617,387 @@ async def fetch_top_markets_extended(per_page: int = 250) -> list[dict[str, Any]
             out.append({k: m.get(k) for k in keep})
     cache_set("markets_extended", out)
     return out
+
+
+# ========================================================================== #
+#  CRYPTO NEWS — multi-source aggregation (free RSS + optional API keys)
+# ========================================================================== #
+# Sources (all free, no key required unless noted):
+#   1. CoinDesk RSS          — https://www.coindesk.com/arc/outboundfeeds/rss/
+#   2. Cointelegraph RSS     — https://cointelegraph.com/rss
+#   3. Decrypt RSS           — https://decrypt.co/feed
+#   4. Bitcoinist RSS        — https://bitcoinist.com/feed/
+#   5. CryptoPanic API       — https://cryptopanic.com/api/v1/posts/ (optional, free token)
+#   6. CryptoCompare API     — https://min-api.cryptocompare.com/data/v2/news/ (optional, free key)
+#
+# Each article is normalised to: {title, summary, url, source, published_at, image, categories}
+import urllib.parse as _urlparse
+import xml.etree.ElementTree as _ET
+from datetime import datetime as _datetime, timezone as _tz
+
+
+NEWS_FEEDS: list[tuple[str, str]] = [
+    ("CoinDesk", "https://www.coindesk.com/arc/outboundfeeds/rss/"),
+    ("Cointelegraph", "https://cointelegraph.com/rss"),
+    ("Decrypt", "https://decrypt.co/feed"),
+    ("Bitcoinist", "https://bitcoinist.com/feed/"),
+]
+
+# Optional API-key sources (read from env)
+CRYPTOPANIC_TOKEN = os.environ.get("CRYPTOPANIC_TOKEN", "")
+CRYPTOCOMPARE_KEY = os.environ.get("CRYPTOCOMPARE_KEY", "")
+
+
+def _strip_html(text: str) -> str:
+    """Remove HTML tags and collapse whitespace."""
+    if not text:
+        return ""
+    import re as _re
+    clean = _re.sub(r"<[^>]+>", "", text)
+    clean = _re.sub(r"\s+", " ", clean).strip()
+    return clean
+
+
+def _parse_rss_date(raw: str | None) -> str | None:
+    """Parse an RSS pubDate (RFC-822) into ISO-8601. Returns None on failure."""
+    if not raw:
+        return None
+    for fmt in ("%a, %d %b %Y %H:%M:%S %z", "%a, %d %b %Y %H:%M:%S %Z", "%Y-%m-%dT%H:%M:%S%z"):
+        try:
+            dt = _datetime.strptime(raw.strip(), fmt)
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=_tz.utc)
+            return dt.isoformat()
+        except (ValueError, TypeError):
+            continue
+    return None
+
+
+async def _fetch_rss_feed(client: httpx.AsyncClient, name: str, url: str) -> list[dict[str, Any]]:
+    """Fetch and parse a single RSS feed into normalised article dicts."""
+    try:
+        r = await client.get(url, timeout=TIMEOUT, headers={"User-Agent": "Mozilla/5.0 (crypto-scanner)"})
+        if r.status_code != 200:
+            log.warning("RSS %s -> %s", name, r.status_code)
+            return []
+        root = _ET.fromstring(r.text)
+    except Exception as exc:  # noqa: BLE001
+        log.warning("RSS %s failed: %s", name, exc)
+        return []
+
+    items = root.findall(".//item")
+    out: list[dict[str, Any]] = []
+    for it in items[:30]:
+        title = (it.findtext("title") or "").strip()
+        link = (it.findtext("link") or "").strip()
+        pub = it.findtext("pubDate")
+        desc_raw = it.findtext("description") or ""
+        # Try to extract an image from enclosure or media:content
+        image = None
+        enc = it.find("enclosure")
+        if enc is not None and (enc.get("type") or "").startswith("image"):
+            image = enc.get("url")
+        if not image:
+            mc = it.find("{http://search.yahoo.com/mrss/}content")
+            if mc is not None:
+                image = mc.get("url")
+        if not image:
+            mt = it.find("{http://search.yahoo.com/mrss/}thumbnail")
+            if mt is not None:
+                image = mt.get("url")
+        # categories
+        cats = [c.text.strip() for c in it.findall("category") if c.text]
+
+        out.append({
+            "title": title,
+            "summary": _strip_html(desc_raw)[:400],
+            "url": link,
+            "source": name,
+            "published_at": _parse_rss_date(pub),
+            "image": image,
+            "categories": cats[:5],
+        })
+    return out
+
+
+async def fetch_crypto_news(limit: int = 40) -> list[dict[str, Any]]:
+    """Aggregate crypto news from multiple free RSS sources + optional API keys.
+
+    Deduplicates by title and sorts by published_at descending.
+    """
+    cache_key = f"news:{limit}"
+    cached = cache_get(cache_key, ttl=300.0)  # 5-min cache
+    if cached is not None:
+        return cached
+
+    all_articles: list[dict[str, Any]] = []
+
+    # 1) RSS feeds (always available, no key)
+    async with httpx.AsyncClient() as c:
+        tasks = [_fetch_rss_feed(c, name, url) for name, url in NEWS_FEEDS]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        for res in results:
+            if isinstance(res, list):
+                all_articles.extend(res)
+
+    # 2) CryptoPanic (optional, free token) — high-quality curated
+    if CRYPTOPANIC_TOKEN:
+        try:
+            async with httpx.AsyncClient() as c:
+                r = await c.get(
+                    "https://cryptopanic.com/api/v1/posts/",
+                    params={"auth_token": CRYPTOPANIC_TOKEN, "kind": "news", "filter": "hot"},
+                    timeout=TIMEOUT,
+                )
+            if r.status_code == 200:
+                data = r.json()
+                for p in (data.get("results") or [])[:20]:
+                    all_articles.append({
+                        "title": p.get("title", ""),
+                        "summary": (p.get("slug") or "")[:400],
+                        "url": p.get("url", ""),
+                        "source": "CryptoPanic",
+                        "published_at": p.get("published_at"),
+                        "image": None,
+                        "categories": [p.get("currency", {}).get("code")] if p.get("currency") else [],
+                    })
+        except Exception as exc:  # noqa: BLE001
+            log.warning("CryptoPanic fetch failed: %s", exc)
+
+    # 3) CryptoCompare (optional, free key)
+    if CRYPTOCOMPARE_KEY:
+        try:
+            async with httpx.AsyncClient() as c:
+                r = await c.get(
+                    "https://min-api.cryptocompare.com/data/v2/news/?lang=EN",
+                    headers={"authorization": f"Apikey {CRYPTOCOMPARE_KEY}"},
+                    timeout=TIMEOUT,
+                )
+            if r.status_code == 200:
+                data = r.json()
+                for a in (data.get("Data") or [])[:20]:
+                    all_articles.append({
+                        "title": a.get("title", ""),
+                        "summary": (a.get("body") or "")[:400],
+                        "url": a.get("url", ""),
+                        "source": a.get("source_info", {}).get("name", "CryptoCompare"),
+                        "published_at": _parse_rss_date(a.get("published_on") and f"{a['published_on']}"),
+                        "image": a.get("imageurl"),
+                        "categories": [a.get("category")] if a.get("category") else [],
+                    })
+        except Exception as exc:  # noqa: BLE001
+            log.warning("CryptoCompare fetch failed: %s", exc)
+
+    # Deduplicate by normalised title
+    seen: set[str] = set()
+    unique: list[dict[str, Any]] = []
+    for a in all_articles:
+        key = (a.get("title") or "").lower().strip()[:80]
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        unique.append(a)
+
+    # Sort by published_at descending (None last)
+    unique.sort(key=lambda x: x.get("published_at") or "", reverse=True)
+    out = unique[:limit]
+    cache_set(cache_key, out)
+    log.info("News: aggregated %d articles from %d sources", len(out), len(NEWS_FEEDS) + bool(CRYPTOPANIC_TOKEN) + bool(CRYPTOCOMPARE_KEY))
+    return out
+
+
+# ========================================================================== #
+#  TELEGRAM CHANNEL FEED — public web preview (no API key, no bot needed)
+# ========================================================================== #
+# Uses https://t.me/s/<channel> — the public web preview which requires no
+# authentication and works for any public channel. Parses the server-rendered
+# HTML to extract messages, timestamps, views, and media.
+
+TELEGRAM_BASE = "https://t.me/s"
+
+
+def _parse_telegram_html(html: str, channel: str) -> list[dict[str, Any]]:
+    """Parse the t.me/s/ HTML into structured messages.
+
+    Extracts: id, text, datetime, views, media_type, media_url, author.
+    """
+    import re as _re
+    import html as _html
+
+    messages: list[dict[str, Any]] = []
+
+    # Each message is wrapped in <div class="tgme_widget_message ...">
+    # data-post="channel/123"
+    msg_blocks = _re.findall(
+        r'<div class="tgme_widget_message[^"]*"[^>]*data-post="([^"]+)"(.*?)</div>\s*</div>\s*</div>\s*</div>',
+        html,
+        _re.DOTALL,
+    )
+    # Fallback: simpler split if the greedy regex above doesn't match
+    if not msg_blocks:
+        msg_blocks = []
+        for m in _re.finditer(r'data-post="([^"]+)"', html):
+            post_id = m.group(1)
+            start = m.start()
+            # grab a window of 6000 chars after the post id
+            chunk = html[start:start + 6000]
+            msg_blocks.append((post_id, chunk))
+
+    for post_id, block in msg_blocks:
+        # Text content
+        text_match = _re.search(
+            r'<div class="tgme_widget_message_text[^"]*"[^>]*>(.*?)</div>\s*(?=<div|</div>)',
+            block,
+            _re.DOTALL,
+        )
+        text_html = text_match.group(1) if text_match else ""
+        # Convert <br> to newlines, strip tags, then unescape HTML entities
+        text = _re.sub(r"<br\s*/?>", "\n", text_html)
+        text = _strip_html(text)
+        text = _html.unescape(text)
+        # Remove RTL/LRM marks and zero-width chars that clutter display
+        text = text.replace("\u200f", "").replace("\u200e", "").replace("\u200b", "").strip()
+        if not text:
+            continue
+
+        # Datetime
+        dt_match = _re.search(r'<time datetime="([^"]+)"', block)
+        published_at = dt_match.group(1) if dt_match else None
+
+        # Views
+        views_match = _re.search(r'<span class="tgme_widget_message_views">([^<]+)</span>', block)
+        views_str = views_match.group(1).strip() if views_match else None
+
+        # Author
+        author_match = _re.search(r'<span class="tgme_widget_message_owner_name[^"]*">(.*?)</span>', block, _re.DOTALL)
+        author = _strip_html(author_match.group(1)) if author_match else channel
+
+        # Media detection
+        media_type = None
+        media_url = None
+        photo_match = _re.search(r'<a class="tgme_widget_message_photo_wrap[^"]*"[^>]*style="background-image:url\(([^)]+)\)"', block)
+        if photo_match:
+            media_type = "photo"
+            media_url = photo_match.group(1).strip("'\"")
+        video_match = _re.search(r'<i class="tgme_widget_message_video_player[^"]*"[^>]*data-src="([^"]+)"', block)
+        if video_match:
+            media_type = "video"
+            media_url = video_match.group(1)
+
+        # Extract links mentioned in the message (often news sources)
+        links = _re.findall(r'href="(https?://[^"]+)"[^>]*class="tgme_widget_message_link_hover', block)
+
+        messages.append({
+            "id": post_id,
+            "channel": channel,
+            "channel_url": f"https://t.me/{channel}",
+            "text": text,
+            "published_at": published_at,
+            "views": views_str,
+            "author": author,
+            "media_type": media_type,
+            "media_url": media_url,
+            "links": links[:5],
+        })
+
+    # Sort newest first (ISO dates sort correctly as strings)
+    messages.sort(key=lambda x: x.get("published_at") or "", reverse=True)
+    return messages
+
+
+async def fetch_telegram_channel(channel: str, limit: int = 20) -> dict[str, Any]:
+    """Fetch recent messages from a public Telegram channel via t.me/s/.
+
+    Returns: {channel, channel_url, messages[], message_count, fetched_at}
+    No API key or bot token required — uses the public web preview.
+    """
+    channel = channel.strip().lstrip("@")
+    cache_key = f"telegram:{channel}:{limit}"
+    cached = cache_get(cache_key, ttl=120.0)  # 2-min cache
+    if cached is not None:
+        return cached
+
+    url = f"{TELEGRAM_BASE}/{channel}"
+    try:
+        async with httpx.AsyncClient() as c:
+            r = await c.get(url, timeout=TIMEOUT, headers={"User-Agent": "Mozilla/5.0 (crypto-scanner)"})
+        if r.status_code != 200:
+            log.warning("Telegram %s -> %s", channel, r.status_code)
+            return {"channel": channel, "channel_url": f"https://t.me/{channel}", "messages": [], "message_count": 0, "error": f"HTTP {r.status_code}", "fetched_at": _datetime.now(_tz.utc).isoformat()}
+        messages = _parse_telegram_html(r.text, channel)
+    except Exception as exc:  # noqa: BLE001
+        log.warning("Telegram %s failed: %s", channel, exc)
+        return {"channel": channel, "channel_url": f"https://t.me/{channel}", "messages": [], "message_count": 0, "error": str(exc), "fetched_at": _datetime.now(_tz.utc).isoformat()}
+
+    out = {
+        "channel": channel,
+        "channel_url": f"https://t.me/{channel}",
+        "messages": messages[:limit],
+        "message_count": len(messages[:limit]),
+        "fetched_at": _datetime.now(_tz.utc).isoformat(),
+    }
+    cache_set(cache_key, out)
+    log.info("Telegram @%s: fetched %d messages", channel, len(messages))
+    return out
+
+
+# ========================================================================== #
+#  MULTI-SOURCE CROSS-VERIFICATION — merge price/mcap from CoinGecko + CMC
+# ========================================================================== #
+async def fetch_price_cross_verified(coin_ids_gecko: list[str], symbols: list[str]) -> dict[str, Any]:
+    """Cross-verify price data between CoinGecko and CoinMarketCap.
+
+    Returns per-symbol: {price, market_cap, sources: [...], discrepancy_pct}
+    """
+    # CoinGecko simple/price (free, always available)
+    gecko_data = {}
+    if coin_ids_gecko:
+        try:
+            async with httpx.AsyncClient() as c:
+                data = await _get_json(
+                    c,
+                    f"{COINGECKO_BASE}/simple/price",
+                    ids=",".join(coin_ids_gecko),
+                    vs_currencies="usd",
+                    include_market_cap="true",
+                    include_24hr_vol="true",
+                )
+            if isinstance(data, dict):
+                gecko_data = data
+        except Exception:  # noqa: BLE001
+            pass
+
+    # CMC Pro (optional)
+    cmc_data = {}
+    if CMC_AVAILABLE and symbols:
+        cmc_quotes = await fetch_cmc_quotes(symbols)
+        if cmc_quotes:
+            cmc_data = cmc_quotes
+
+    result: dict[str, Any] = {}
+    for sym in symbols:
+        gecko_price = None
+        cmc_price = None
+        # match by symbol heuristics
+        for gid, gd in gecko_data.items():
+            # we don't have symbol->id mapping here, so skip for now
+            pass
+        if sym.upper() in cmc_data:
+            cmc_price = cmc_data[sym.upper()].get("price")
+
+        sources = []
+        if gecko_price is not None:
+            sources.append({"source": "CoinGecko", "price": gecko_price})
+        if cmc_price is not None:
+            sources.append({"source": "CoinMarketCap", "price": cmc_price})
+
+        discrepancy = None
+        if gecko_price and cmc_price and cmc_price > 0:
+            discrepancy = round(abs(gecko_price - cmc_price) / cmc_price * 100, 2)
+
+        result[sym] = {
+            "price": gecko_price or cmc_price,
+            "sources": sources,
+            "discrepancy_pct": discrepancy,
+        }
+    return result

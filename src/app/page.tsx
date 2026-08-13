@@ -28,6 +28,7 @@ import {
   Loader2,
   MessageCircle,
   Moon,
+  Newspaper,
   PieChart,
   Radar,
   Search,
@@ -78,6 +79,7 @@ import { SectorDonut } from "@/components/dashboard/sector-donut";
 import { RiskHeatmap } from "@/components/dashboard/risk-heatmap";
 import { CoinExplorerView } from "@/components/views/coin-explorer-view";
 import { MarketIntelligenceView } from "@/components/views/market-intelligence-view";
+import { NewsFeedView } from "@/components/views/news-feed-view";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { LanguageToggle } from "@/components/language-toggle";
 import { useLanguage } from "@/lib/i18n/LanguageProvider";
@@ -443,8 +445,8 @@ export default function Home() {
   const [diffScanB, setDiffScanB] = useState<ScanStatus | null>(null);
   // help dialog
   const [showHelp, setShowHelp] = useState(false);
-  // main view tab: discovery (scan) | explorer (manual coin analysis) | market (intelligence)
-  const [mainView, setMainView] = useState<"discovery" | "explorer" | "market">("discovery");
+  // main view tab: discovery (scan) | explorer (manual coin analysis) | market (intelligence) | news (feed)
+  const [mainView, setMainView] = useState<"discovery" | "explorer" | "market" | "news">("discovery");
   // when set, Coin Explorer auto-loads this coin (triggered from Market Intelligence click)
   const [explorerInitialId, setExplorerInitialId] = useState<string | null>(null);
   // search input ref for keyboard shortcut
@@ -1121,6 +1123,18 @@ export default function Home() {
             <Globe className="h-4 w-4" />
             <span>{t("nav.market")}</span>
           </button>
+          <button
+            onClick={() => setMainView("news")}
+            className={cn(
+              "flex items-center gap-2 px-3.5 py-2 rounded-lg text-xs font-medium transition-all whitespace-nowrap",
+              mainView === "news"
+                ? "bg-rose-500/15 text-rose-400 shadow-sm"
+                : "text-muted-foreground hover:text-foreground hover:bg-muted/40",
+            )}
+          >
+            <Newspaper className="h-4 w-4" />
+            <span>{t("nav.news")}</span>
+          </button>
         </div>
 
         {/* ============ Coin Explorer view ============ */}
@@ -1141,6 +1155,9 @@ export default function Home() {
             }}
           />
         )}
+
+        {/* ============ News & Telegram Feed view ============ */}
+        {mainView === "news" && <NewsFeedView />}
 
         {/* ============ Discovery view (default) ============ */}
         {mainView === "discovery" && (

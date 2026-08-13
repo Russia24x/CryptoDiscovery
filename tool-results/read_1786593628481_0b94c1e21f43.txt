@@ -1,0 +1,1349 @@
+     1→"use client";
+     2→
+     3→/* -------------------------------------------------------------------------- *
+     4→ *  MarketIntelligenceView  ·  Task 3-b
+     5→ *  ---------------------------------------------------------------------------
+     6→ *  A standalone React component that replaces the need to visit CoinMarketCap
+     7→ *  + DeFiLlama. Fetches `/api/scanner/market/overview` on mount and renders:
+     8→ *
+     9→ *    1. Global market banner   — 6 stat cards (mcap, 24h %, BTC dom, ETH dom,
+    10→ *                                 volume, active coins / markets)
+    11→ *    2. Fear & Greed gauge     — horizontal 0-100 gradient gauge with marker
+    12→ *    3. DeFi TVL total         — large headline number
+    13→ *    4. Tabbed data tables     — Top Coins / Gainers / Losers / Trending /
+    14→ *                                 Top DeFi / Top Fees / Sectors
+    15→ *    5. Refresh button         — manual re-fetch + spinning icon
+    16→ *    6. Cache age indicator    — "Updated Xs ago", auto-updating every 10s
+    17→ *
+    18→ *  Every coin row in Top Coins / Gainers / Losers / Trending is clickable →
+    19→ *  calls `onAnalyzeCoin(geckoId, coinName)` to switch to the Coin Explorer.
+    20→ *
+    21→ *  Conventions:
+    22→ *    - shadcn/ui (New York) — Card, Button, Tabs, Table, Badge, Tooltip,
+    23→ *      Skeleton, Alert.
+    24→ *    - Tailwind 4 — emerald/teal for positive, rose for negative, amber for
+    25→ *      neutral, sky for info (NO indigo / blue primaries).
+    26→ *    - lucide-react icons.
+    27→ *    - useLanguage() for i18n; translation keys live under `market.*`.
+    28→ * ------------------------------------------------------------------------- */
+    29→
+    30→import * as React from "react";
+    31→import {
+    32→  Activity,
+    33→  AlertCircle,
+    34→  ArrowDownRight,
+    35→  ArrowUpRight,
+    36→  BarChart3,
+    37→  Boxes,
+    38→  Building2,
+    39→  Coins,
+    40→  DollarSign,
+    41→  ExternalLink,
+    42→  Eye,
+    43→  Flame,
+    44→  Gauge,
+    45→  Globe,
+    46→  Layers,
+    47→  RefreshCw,
+    48→  Sparkles,
+    49→  TrendingDown,
+    50→  TrendingUp,
+    51→  Wallet,
+    52→} from "lucide-react";
+    53→
+    54→import {
+    55→  Card,
+    56→  CardContent,
+    57→  CardDescription,
+    58→  CardHeader,
+    59→  CardTitle,
+    60→} from "@/components/ui/card";
+    61→import { Button } from "@/components/ui/button";
+    62→import { Badge } from "@/components/ui/badge";
+    63→import { Skeleton } from "@/components/ui/skeleton";
+    64→import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+    65→import {
+    66→  Table,
+    67→  TableBody,
+    68→  TableCell,
+    69→  TableHead,
+    70→  TableHeader,
+    71→  TableRow,
+    72→} from "@/components/ui/table";
+    73→import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+    74→import {
+    75→  Tooltip,
+    76→  TooltipContent,
+    77→  TooltipProvider,
+    78→  TooltipTrigger,
+    79→} from "@/components/ui/tooltip";
+    80→import { useLanguage } from "@/lib/i18n/LanguageProvider";
+    81→import type {
+    82→  FearGreedData,
+    83→  GlobalMarketData,
+    84→  MarketOverview,
+    85→  SectorBreakdown,
+    86→  TopCoin,
+    87→  TopDefiProtocol,
+    88→  TopFeeProtocol,
+    89→  TrendingCoin,
+    90→} from "@/lib/scanner-types";
+    91→
+    92→/* -------------------------------------------------------------------------- */
+    93→/*  Props                                                                     */
+    94→/* -------------------------------------------------------------------------- */
+    95→
+    96→export interface MarketIntelligenceViewProps {
+    97→  /** Called when user clicks a coin row to analyze it in the Coin Explorer. */
+    98→  onAnalyzeCoin?: (geckoId: string, coinName: string) => void;
+    99→}
+   100→
+   101→/* -------------------------------------------------------------------------- */
+   102→/*  Number formatting helpers                                                 */
+   103→/* -------------------------------------------------------------------------- */
+   104→
+   105→/** `$1.27T` · `$1.2B` · `$340M` · `$12K` · `$0.034` · `—` for null. */
+   106→function fmtUsd(v: number | null | undefined): string {
+   107→  if (v == null || typeof v !== "number" || isNaN(v)) return "—";
+   108→  const abs = Math.abs(v);
+   109→  const sign = v < 0 ? "-" : "";
+   110→  if (abs >= 1e12) return `${sign}$${(abs / 1e12).toFixed(2)}T`;
+   111→  if (abs >= 1e9) return `${sign}$${(abs / 1e9).toFixed(2)}B`;
+   112→  if (abs >= 1e6) return `${sign}$${(abs / 1e6).toFixed(1)}M`;
+   113→  if (abs >= 1e3) return `${sign}$${(abs / 1e3).toFixed(1)}K`;
+   114→  if (abs >= 1) return `${sign}$${abs.toFixed(2)}`;
+   115→  if (abs > 0) return `${sign}$${abs.toFixed(4)}`;
+   116→  return "$0.00";
+   117→}
+   118→
+   119→/** Like fmtUsd but tuned for token prices (more decimals for sub-$1 tokens). */
+   120→function fmtPrice(v: number | null | undefined): string {
+   121→  if (v == null || typeof v !== "number" || isNaN(v)) return "—";
+   122→  const abs = Math.abs(v);
+   123→  if (abs >= 1e3) return `$${v.toLocaleString(undefined, { maximumFractionDigits: 0 })}`;
+   124→  if (abs >= 1) return `$${v.toFixed(2)}`;
+   125→  if (abs >= 0.01) return `$${v.toFixed(4)}`;
+   126→  if (abs > 0) return `$${v.toExponential(3)}`;
+   127→  return "$0.00";
+   128→}
+   129→
+   130→/** `+1.2%` / `-2.1%` / `—`. */
+   131→function fmtPct(v: number | null | undefined, digits = 2): string {
+   132→  if (v == null || typeof v !== "number" || isNaN(v)) return "—";
+   133→  const s = v > 0 ? "+" : "";
+   134→  return `${s}${v.toFixed(digits)}%`;
+   135→}
+   136→
+   137→/** `18,404` with commas. */
+   138→function fmtNum(v: number | null | undefined): string {
+   139→  if (v == null || typeof v !== "number" || isNaN(v)) return "—";
+   140→  return v.toLocaleString();
+   141→}
+   142→
+   143→/** Color class for a % change: emerald for positive, rose for negative. */
+   144→function pctColor(v: number | null | undefined): string {
+   145→  if (v == null || isNaN(v)) return "text-muted-foreground";
+   146→  if (v > 0) return "text-emerald-500";
+   147→  if (v < 0) return "text-rose-500";
+   148→  return "text-muted-foreground";
+   149→}
+   150→
+   151→/* -------------------------------------------------------------------------- */
+   152→/*  Fear & Greed helpers                                                      */
+   153→/* -------------------------------------------------------------------------- */
+   154→
+   155→interface FgTier {
+   156→  label: string;
+   157→  color: string; // hex
+   158→  badge: string; // tailwind classes
+   159→}
+   160→
+   161→function fearGreedTier(value: number | null | undefined): FgTier {
+   162→  if (value == null || isNaN(value)) {
+   163→    return {
+   164→      label: "—",
+   165→      color: "#71717a",
+   166→      badge: "bg-muted/40 text-muted-foreground border-muted/60",
+   167→    };
+   168→  }
+   169→  if (value <= 24)
+   170→    return {
+   171→      label: "Extreme Fear",
+   172→      color: "#f43f5e",
+   173→      badge: "bg-rose-500/15 text-rose-400 border-rose-500/30",
+   174→    };
+   175→  if (value <= 44)
+   176→    return {
+   177→      label: "Fear",
+   178→      color: "#f97316",
+   179→      badge: "bg-orange-500/15 text-orange-400 border-orange-500/30",
+   180→    };
+   181→  if (value <= 55)
+   182→    return {
+   183→      label: "Neutral",
+   184→      color: "#f59e0b",
+   185→      badge: "bg-amber-500/15 text-amber-400 border-amber-500/30",
+   186→    };
+   187→  if (value <= 74)
+   188→    return {
+   189→      label: "Greed",
+   190→      color: "#84cc16",
+   191→      badge: "bg-lime-500/15 text-lime-400 border-lime-500/30",
+   192→    };
+   193→  return {
+   194→    label: "Extreme Greed",
+   195→    color: "#10b981",
+   196→    badge: "bg-emerald-500/15 text-emerald-400 border-emerald-500/30",
+   197→  };
+   198→}
+   199→
+   200→/* -------------------------------------------------------------------------- */
+   201→/*  Hooks                                                                     */
+   202→/* -------------------------------------------------------------------------- */
+   203→
+   204→function useMarketOverview() {
+   205→  const [data, setData] = React.useState<MarketOverview | null>(null);
+   206→  const [loading, setLoading] = React.useState(true);
+   207→  const [refreshing, setRefreshing] = React.useState(false);
+   208→  const [error, setError] = React.useState<string | null>(null);
+   209→
+   210→  const load = React.useCallback(async (isRefresh: boolean) => {
+   211→    if (isRefresh) setRefreshing(true);
+   212→    else setLoading(true);
+   213→    setError(null);
+   214→    try {
+   215→      const ctrl = new AbortController();
+   216→      const t = setTimeout(() => ctrl.abort(), 60_000);
+   217→      const res = await fetch("/api/scanner/market/overview", {
+   218→        signal: ctrl.signal,
+   219→        cache: "no-store",
+   220→      });
+   221→      clearTimeout(t);
+   222→      if (!res.ok) {
+   223→        throw new Error(`HTTP ${res.status}`);
+   224→      }
+   225→      const json: MarketOverview = await res.json();
+   226→      setData(json);
+   227→    } catch (err) {
+   228→      const msg = err instanceof Error ? err.message : String(err);
+   229→      if (err instanceof DOMException && err.name === "AbortError") {
+   230→        setError("Request timed out after 60s.");
+   231→      } else {
+   232→        setError(msg);
+   233→      }
+   234→    } finally {
+   235→      setLoading(false);
+   236→      setRefreshing(false);
+   237→    }
+   238→  }, []);
+   239→
+   240→  React.useEffect(() => {
+   241→    load(false);
+   242→  }, [load]);
+   243→
+   244→  return { data, loading, refreshing, error, refresh: () => load(true) };
+   245→}
+   246→
+   247→/** Returns the age in seconds of the cached_at timestamp, re-ticking every 10s. */
+   248→function useCacheAge(cachedAt: string | null | undefined): number | null {
+   249→  const [now, setNow] = React.useState(() => Date.now());
+   250→  React.useEffect(() => {
+   251→    const id = setInterval(() => setNow(Date.now()), 10_000);
+   252→    return () => clearInterval(id);
+   253→  }, []);
+   254→  if (!cachedAt) return null;
+   255→  const t = Date.parse(cachedAt);
+   256→  if (isNaN(t)) return null;
+   257→  return Math.max(0, Math.floor((now - t) / 1000));
+   258→}
+   259→
+   260→function formatAge(secs: number | null): string {
+   261→  if (secs == null) return "";
+   262→  if (secs < 60) return `${secs}s ago`;
+   263→  const m = Math.floor(secs / 60);
+   264→  const s = secs % 60;
+   265→  if (m < 60) return `${m}m ${s}s ago`;
+   266→  const h = Math.floor(m / 60);
+   267→  return `${h}h ${m % 60}m ago`;
+   268→}
+   269→
+   270→/* -------------------------------------------------------------------------- */
+   271→/*  Sub-components — Stat card                                                */
+   272→/* -------------------------------------------------------------------------- */
+   273→
+   274→interface StatCardProps {
+   275→  icon: React.ReactNode;
+   276→  label: string;
+   277→  value: React.ReactNode;
+   278→  sub?: React.ReactNode;
+   279→  accent?: "emerald" | "rose" | "amber" | "sky" | "teal" | "violet" | "default";
+   280→  loading?: boolean;
+   281→}
+   282→
+   283→const STAT_ACCENT: Record<NonNullable<StatCardProps["accent"]>, string> = {
+   284→  emerald: "text-emerald-500 bg-emerald-500/10",
+   285→  rose: "text-rose-500 bg-rose-500/10",
+   286→  amber: "text-amber-500 bg-amber-500/10",
+   287→  sky: "text-sky-500 bg-sky-500/10",
+   288→  teal: "text-teal-500 bg-teal-500/10",
+   289→  violet: "text-violet-500 bg-violet-500/10",
+   290→  default: "text-foreground bg-muted/40",
+   291→};
+   292→
+   293→function StatCard({ icon, label, value, sub, accent = "default", loading }: StatCardProps) {
+   294→  if (loading) {
+   295→    return (
+   296→      <Card className="border-border/60 bg-card/40 backdrop-blur-sm p-4 gap-3">
+   297→        <Skeleton className="h-8 w-8 rounded-md" />
+   298→        <Skeleton className="h-3 w-24" />
+   299→        <Skeleton className="h-6 w-32" />
+   300→        <Skeleton className="h-3 w-20" />
+   301→      </Card>
+   302→    );
+   303→  }
+   304→  return (
+   305→    <Card className="border-border/60 bg-card/40 backdrop-blur-sm p-4 gap-3 hover:border-border/90 transition-colors">
+   306→      <div className="flex items-center justify-between">
+   307→        <span className="text-[11px] uppercase tracking-wider text-muted-foreground font-medium">
+   308→          {label}
+   309→        </span>
+   310→        <span className={`flex size-7 items-center justify-center rounded-md ${STAT_ACCENT[accent]}`}>
+   311→          {icon}
+   312→        </span>
+   313→      </div>
+   314→      <div className="text-xl font-bold tabular-nums leading-none">{value}</div>
+   315→      {sub != null && <div className="text-xs text-muted-foreground">{sub}</div>}
+   316→    </Card>
+   317→  );
+   318→}
+   319→
+   320→/* -------------------------------------------------------------------------- */
+   321→/*  Sub-component — Fear & Greed gauge                                        */
+   322→/* -------------------------------------------------------------------------- */
+   323→
+   324→function FearGreedGauge({ fg }: { fg: FearGreedData | null }) {
+   325→  const value = fg?.value ?? null;
+   326→  const tier = fearGreedTier(value);
+   327→  const pct = value != null && !isNaN(value) ? Math.max(0, Math.min(100, value)) : 0;
+   328→  const markerLeft = `${pct}%`;
+   329→
+   330→  return (
+   331→    <Card className="border-border/60 bg-card/40 backdrop-blur-sm p-5 gap-4">
+   332→      <div className="flex items-center justify-between">
+   333→        <div className="flex items-center gap-2">
+   334→          <Gauge className="size-4 text-amber-500" />
+   335→          <span className="text-sm font-semibold">Fear &amp; Greed</span>
+   336→        </div>
+   337→        {value != null && (
+   338→          <Badge variant="outline" className={tier.badge}>
+   339→            {tier.label}
+   340→          </Badge>
+   341→        )}
+   342→      </div>
+   343→
+   344→      {value == null ? (
+   345→        <div className="flex h-20 items-center justify-center text-sm text-muted-foreground">
+   346→          No data
+   347→        </div>
+   348→      ) : (
+   349→        <>
+   350→          {/* Big number */}
+   351→          <div className="flex items-baseline gap-2">
+   352→            <span
+   353→              className="text-4xl font-bold tabular-nums leading-none"
+   354→              style={{ color: tier.color }}
+   355→            >
+   356→              {value}
+   357→            </span>
+   358→            <span className="text-xs text-muted-foreground">/ 100</span>
+   359→          </div>
+   360→
+   361→          {/* Gradient gauge bar */}
+   362→          <div className="relative pt-1">
+   363→            <div
+   364→              className="h-3 w-full rounded-full"
+   365→              style={{
+   366→                background:
+   367→                  "linear-gradient(90deg, #f43f5e 0%, #f97316 25%, #f59e0b 50%, #84cc16 75%, #10b981 100%)",
+   368→              }}
+   369→            />
+   370→            {/* Marker */}
+   371→            <div
+   372→              className="absolute top-0 -translate-x-1/2"
+   373→              style={{ left: markerLeft }}
+   374→            >
+   375→              <div
+   376→                className="size-5 rounded-full border-2 border-background shadow-md"
+   377→                style={{ backgroundColor: tier.color }}
+   378→              />
+   379→              <div
+   380→                className="mx-auto mt-0.5 h-1.5 w-0.5"
+   381→                style={{ backgroundColor: tier.color }}
+   382→              />
+   383→            </div>
+   384→            {/* Tick labels */}
+   385→            <div className="mt-3 flex justify-between text-[10px] text-muted-foreground">
+   386→              <span>Extreme Fear</span>
+   387→              <span>Neutral</span>
+   388→              <span>Extreme Greed</span>
+   389→            </div>
+   390→          </div>
+   391→        </>
+   392→      )}
+   393→    </Card>
+   394→  );
+   395→}
+   396→
+   397→/* -------------------------------------------------------------------------- */
+   398→/*  Sub-component — DeFi TVL panel                                            */
+   399→/* -------------------------------------------------------------------------- */
+   400→
+   401→function DefiTvlPanel({
+   402→  total,
+   403→  protocolCount,
+   404→}: {
+   405→  total: number | null;
+   406→  protocolCount: number | null;
+   407→}) {
+   408→  return (
+   409→    <Card className="border-border/60 bg-card/40 backdrop-blur-sm p-5 gap-4">
+   410→      <div className="flex items-center gap-2">
+   411→        <Layers className="size-4 text-teal-500" />
+   412→        <span className="text-sm font-semibold">Total DeFi TVL</span>
+   413→      </div>
+   414→      <div className="flex items-baseline gap-2">
+   415→        <span className="text-3xl font-bold tabular-nums text-teal-400 leading-none">
+   416→          {fmtUsd(total)}
+   417→        </span>
+   418→      </div>
+   419→      <div className="text-xs text-muted-foreground">
+   420→        across <span className="font-medium text-foreground">{fmtNum(protocolCount)}</span> protocols
+   421→      </div>
+   422→    </Card>
+   423→  );
+   424→}
+   425→
+   426→/* -------------------------------------------------------------------------- */
+   427→/*  Sub-component — Coin row (Top Coins / Gainers / Losers)                   */
+   428→/* -------------------------------------------------------------------------- */
+   429→
+   430→interface CoinRowProps {
+   431→  coin: TopCoin;
+   432→  onAnalyze?: (geckoId: string, name: string) => void;
+   433→}
+   434→
+   435→function CoinRow({ coin, onAnalyze }: CoinRowProps) {
+   436→  const change24h = coin.price_change_percentage_24h_in_currency;
+   437→  const change7d = coin.price_change_percentage_7d_in_currency;
+   438→  const change30d = coin.price_change_percentage_30d_in_currency;
+   439→  const clickable = !!onAnalyze;
+   440→
+   441→  const handleAnalyze = React.useCallback(() => {
+   442→    onAnalyze?.(coin.id, coin.name);
+   443→  }, [onAnalyze, coin.id, coin.name]);
+   444→
+   445→  return (
+   446→    <TableRow
+   447→      className={`text-xs ${clickable ? "cursor-pointer hover:bg-muted/30" : ""}`}
+   448→      onClick={clickable ? handleAnalyze : undefined}
+   449→    >
+   450→      <TableCell className="text-right text-muted-foreground tabular-nums">
+   451→        {coin.market_cap_rank ?? "—"}
+   452→      </TableCell>
+   453→      <TableCell>
+   454→        <div className="flex items-center gap-2">
+   455→          {coin.image ? (
+   456→            <img
+   457→              src={coin.image}
+   458→              alt={`${coin.name} logo`}
+   459→              loading="lazy"
+   460→              className="size-5 rounded-full"
+   461→            />
+   462→          ) : (
+   463→            <div className="size-5 rounded-full bg-muted/40" />
+   464→          )}
+   465→          <div className="flex flex-col">
+   466→            <span className="font-medium text-foreground">{coin.name}</span>
+   467→            <span className="text-[10px] uppercase text-muted-foreground">{coin.symbol}</span>
+   468→          </div>
+   469→        </div>
+   470→      </TableCell>
+   471→      <TableCell className="text-right tabular-nums font-medium">
+   472→        {fmtPrice(coin.current_price)}
+   473→      </TableCell>
+   474→      <TableCell className="text-right tabular-nums">{fmtUsd(coin.market_cap)}</TableCell>
+   475→      <TableCell className="text-right tabular-nums text-muted-foreground">
+   476→        {fmtUsd(coin.total_volume)}
+   477→      </TableCell>
+   478→      <TableCell className={`text-right tabular-nums font-medium ${pctColor(change24h)}`}>
+   479→        {change24h != null ? (
+   480→          <span className="inline-flex items-center gap-0.5 justify-end">
+   481→            {change24h >= 0 ? (
+   482→              <ArrowUpRight className="size-3" />
+   483→            ) : (
+   484→              <ArrowDownRight className="size-3" />
+   485→            )}
+   486→            {fmtPct(change24h)}
+   487→          </span>
+   488→        ) : (
+   489→          "—"
+   490→        )}
+   491→      </TableCell>
+   492→      <TableCell className={`text-right tabular-nums ${pctColor(change7d)}`}>
+   493→        {fmtPct(change7d)}
+   494→      </TableCell>
+   495→      <TableCell className={`text-right tabular-nums ${pctColor(change30d)}`}>
+   496→        {fmtPct(change30d)}
+   497→      </TableCell>
+   498→      {clickable && (
+   499→        <TableCell className="text-right">
+   500→          <Tooltip>
+   501→            <TooltipTrigger asChild>
+   502→              <Button
+   503→                variant="ghost"
+   504→                size="sm"
+   505→                className="h-7 px-2 text-[11px] text-muted-foreground hover:text-foreground"
+   506→                onClick={(e) => {
+   507→                  e.stopPropagation();
+   508→                  handleAnalyze();
+   509→                }}
+   510→              >
+   511→                <Eye className="size-3.5" />
+   512→                Analyze
+   513→              </Button>
+   514→            </TooltipTrigger>
+   515→            <TooltipContent>Run framework analysis</TooltipContent>
+   516→          </Tooltip>
+   517→        </TableCell>
+   518→      )}
+   519→    </TableRow>
+   520→  );
+   521→}
+   522→
+   523→/* -------------------------------------------------------------------------- */
+   524→/*  Sub-component — Trending row                                              */
+   525→/* -------------------------------------------------------------------------- */
+   526→
+   527→interface TrendingRowProps {
+   528→  coin: TrendingCoin;
+   529→  index: number;
+   530→  onAnalyze?: (geckoId: string, name: string) => void;
+   531→}
+   532→
+   533→function TrendingRow({ coin, index, onAnalyze }: TrendingRowProps) {
+   534→  const clickable = !!onAnalyze;
+   535→  const handleAnalyze = React.useCallback(() => {
+   536→    onAnalyze?.(coin.id, coin.name);
+   537→  }, [onAnalyze, coin.id, coin.name]);
+   538→
+   539→  return (
+   540→    <TableRow
+   541→      className={`text-xs ${clickable ? "cursor-pointer hover:bg-muted/30" : ""}`}
+   542→      onClick={clickable ? handleAnalyze : undefined}
+   543→    >
+   544→      <TableCell className="text-right text-muted-foreground tabular-nums">
+   545→        {index + 1}
+   546→      </TableCell>
+   547→      <TableCell>
+   548→        <div className="flex items-center gap-2">
+   549→          {coin.thumb || coin.small ? (
+   550→            <img
+   551→              src={coin.thumb ?? coin.small ?? ""}
+   552→              alt={`${coin.name} logo`}
+   553→              loading="lazy"
+   554→              className="size-5 rounded-full"
+   555→            />
+   556→          ) : (
+   557→            <div className="size-5 rounded-full bg-muted/40" />
+   558→          )}
+   559→          <div className="flex flex-col">
+   560→            <span className="font-medium text-foreground">{coin.name}</span>
+   561→            <span className="text-[10px] uppercase text-muted-foreground">{coin.symbol}</span>
+   562→          </div>
+   563→        </div>
+   564→      </TableCell>
+   565→      <TableCell className="text-right tabular-nums text-muted-foreground">
+   566→        {coin.market_cap_rank != null ? `#${coin.market_cap_rank}` : "—"}
+   567→      </TableCell>
+   568→      <TableCell className="text-right tabular-nums text-muted-foreground">
+   569→        {coin.price_btc != null ? `${coin.price_btc.toExponential(3)} ₿` : "—"}
+   570→      </TableCell>
+   571→      {clickable && (
+   572→        <TableCell className="text-right">
+   573→          <Tooltip>
+   574→            <TooltipTrigger asChild>
+   575→              <Button
+   576→                variant="ghost"
+   577→                size="sm"
+   578→                className="h-7 px-2 text-[11px] text-muted-foreground hover:text-foreground"
+   579→                onClick={(e) => {
+   580→                  e.stopPropagation();
+   581→                  handleAnalyze();
+   582→                }}
+   583→              >
+   584→                <Eye className="size-3.5" />
+   585→                Analyze
+   586→              </Button>
+   587→            </TooltipTrigger>
+   588→            <TooltipContent>Run framework analysis</TooltipContent>
+   589→          </Tooltip>
+   590→        </TableCell>
+   591→      )}
+   592→    </TableRow>
+   593→  );
+   594→}
+   595→
+   596→/* -------------------------------------------------------------------------- */
+   597→/*  Sub-component — DeFi protocol row                                         */
+   598→/* -------------------------------------------------------------------------- */
+   599→
+   600→function DefiRow({ p }: { p: TopDefiProtocol }) {
+   601→  return (
+   602→    <TableRow className="text-xs hover:bg-muted/30">
+   603→      <TableCell>
+   604→        <div className="flex items-center gap-2">
+   605→          {p.logo ? (
+   606→            <img
+   607→              src={p.logo}
+   608→              alt={`${p.name} logo`}
+   609→              loading="lazy"
+   610→              className="size-5 rounded-full"
+   611→              onError={(e) => {
+   612→                (e.currentTarget as HTMLImageElement).style.visibility = "hidden";
+   613→              }}
+   614→            />
+   615→          ) : (
+   616→            <div className="flex size-5 items-center justify-center rounded-full bg-muted/40 text-[9px] font-semibold uppercase">
+   617→              {p.symbol?.slice(0, 2) || "?"}
+   618→            </div>
+   619→          )}
+   620→          <div className="flex flex-col">
+   621→            <span className="font-medium text-foreground">{p.name}</span>
+   622→            <span className="text-[10px] uppercase text-muted-foreground">{p.symbol}</span>
+   623→          </div>
+   624→        </div>
+   625→      </TableCell>
+   626→      <TableCell className="text-right tabular-nums font-medium text-teal-400">
+   627→        {fmtUsd(p.tvl)}
+   628→      </TableCell>
+   629→      <TableCell>
+   630→        {p.chain ? (
+   631→          <Badge variant="outline" className="border-border/60 bg-muted/30 text-[10px] font-normal">
+   632→            {p.chain.length > 14 ? `${p.chain.slice(0, 13)}…` : p.chain}
+   633→          </Badge>
+   634→        ) : (
+   635→          <span className="text-muted-foreground">—</span>
+   636→        )}
+   637→      </TableCell>
+   638→      <TableCell>
+   639→        {p.category ? (
+   640→          <Badge variant="outline" className="border-sky-500/30 bg-sky-500/10 text-sky-400 text-[10px] font-normal">
+   641→            {p.category.length > 22 ? `${p.category.slice(0, 21)}…` : p.category}
+   642→          </Badge>
+   643→        ) : (
+   644→          <span className="text-muted-foreground">—</span>
+   645→        )}
+   646→      </TableCell>
+   647→      <TableCell className="text-right">
+   648→        {p.url ? (
+   649→          <a
+   650→            href={p.url}
+   651→            target="_blank"
+   652→            rel="noopener noreferrer"
+   653→            className="inline-flex size-6 items-center justify-center rounded-md text-muted-foreground hover:bg-muted/40 hover:text-foreground"
+   654→            aria-label={`Visit ${p.name} website`}
+   655→          >
+   656→            <ExternalLink className="size-3.5" />
+   657→          </a>
+   658→        ) : (
+   659→          <span className="text-muted-foreground">—</span>
+   660→        )}
+   661→      </TableCell>
+   662→    </TableRow>
+   663→  );
+   664→}
+   665→
+   666→/* -------------------------------------------------------------------------- */
+   667→/*  Sub-component — Fee protocol row                                          */
+   668→/* -------------------------------------------------------------------------- */
+   669→
+   670→function FeeRow({ p }: { p: TopFeeProtocol }) {
+   671→  return (
+   672→    <TableRow className="text-xs hover:bg-muted/30">
+   673→      <TableCell>
+   674→        <div className="flex flex-col">
+   675→          <span className="font-medium text-foreground">{p.name}</span>
+   676→          <span className="text-[10px] uppercase text-muted-foreground">{p.symbol}</span>
+   677→        </div>
+   678→      </TableCell>
+   679→      <TableCell className="text-right tabular-nums font-medium">
+   680→        {fmtUsd(p.fees_24h)}
+   681→      </TableCell>
+   682→      <TableCell className="text-right tabular-nums text-emerald-400">
+   683→        {fmtUsd(p.revenue_24h)}
+   684→      </TableCell>
+   685→      <TableCell className="text-right tabular-nums text-muted-foreground">
+   686→        {fmtUsd(p.fees_30d)}
+   687→      </TableCell>
+   688→      <TableCell>
+   689→        {p.category ? (
+   690→          <Badge variant="outline" className="border-sky-500/30 bg-sky-500/10 text-sky-400 text-[10px] font-normal">
+   691→            {p.category.length > 22 ? `${p.category.slice(0, 21)}…` : p.category}
+   692→          </Badge>
+   693→        ) : (
+   694→          <span className="text-muted-foreground">—</span>
+   695→        )}
+   696→      </TableCell>
+   697→    </TableRow>
+   698→  );
+   699→}
+   700→
+   701→/* -------------------------------------------------------------------------- */
+   702→/*  Sub-component — Sectors bar chart                                         */
+   703→/* -------------------------------------------------------------------------- */
+   704→
+   705→const SECTOR_COLORS = [
+   706→  "#10b981", // emerald
+   707→  "#14b8a6", // teal
+   708→  "#0ea5e9", // sky
+   709→  "#f59e0b", // amber
+   710→  "#8b5cf6", // violet
+   711→  "#f43f5e", // rose
+   712→  "#84cc16", // lime
+   713→  "#f97316", // orange
+   714→  "#06b6d4", // cyan
+   715→  "#ec4899", // pink
+   716→];
+   717→
+   718→function SectorsChart({ sectors }: { sectors: SectorBreakdown[] }) {
+   719→  const sorted = React.useMemo(
+   720→    () => [...sectors].sort((a, b) => (b.total_market_cap || 0) - (a.total_market_cap || 0)),
+   721→    [sectors],
+   722→  );
+   723→  const total = React.useMemo(
+   724→    () => sorted.reduce((sum, s) => sum + (s.total_market_cap || 0), 0),
+   725→    [sorted],
+   726→  );
+   727→  const [hovered, setHovered] = React.useState<number | null>(null);
+   728→
+   729→  if (sorted.length === 0) {
+   730→    return (
+   731→      <div className="flex h-32 items-center justify-center text-sm text-muted-foreground">
+   732→        No sector data
+   733→      </div>
+   734→    );
+   735→  }
+   736→
+   737→  return (
+   738→    <div className="space-y-4">
+   739→      {/* Proportional stacked bar */}
+   740→      <div className="flex h-6 w-full overflow-hidden rounded-md border border-border/40">
+   741→        {sorted.map((s, i) => {
+   742→          const v = s.total_market_cap || 0;
+   743→          const w = total > 0 ? (v / total) * 100 : 0;
+   744→          if (w <= 0) return null;
+   745→          return (
+   746→            <Tooltip key={s.sector}>
+   747→              <TooltipTrigger asChild>
+   748→                <div
+   749→                  className="h-full transition-all"
+   750→                  style={{
+   751→                    width: `${w}%`,
+   752→                    backgroundColor: SECTOR_COLORS[i % SECTOR_COLORS.length],
+   753→                    opacity: hovered == null || hovered === i ? 1 : 0.35,
+   754→                  }}
+   755→                  onMouseEnter={() => setHovered(i)}
+   756→                  onMouseLeave={() => setHovered(null)}
+   757→                />
+   758→              </TooltipTrigger>
+   759→              <TooltipContent>
+   760→                <div className="text-xs">
+   761→                  <div className="font-medium">{s.sector}</div>
+   762→                  <div className="text-muted-foreground">{fmtUsd(v)} · {((v / total) * 100).toFixed(1)}%</div>
+   763→                </div>
+   764→              </TooltipContent>
+   765→            </Tooltip>
+   766→          );
+   767→        })}
+   768→      </div>
+   769→
+   770→      {/* Per-sector horizontal bars */}
+   771→      <div className="space-y-2">
+   772→        {sorted.map((s, i) => {
+   773→          const v = s.total_market_cap || 0;
+   774→          const w = total > 0 ? (v / total) * 100 : 0;
+   775→          const color = SECTOR_COLORS[i % SECTOR_COLORS.length];
+   776→          return (
+   777→            <div
+   778→              key={s.sector}
+   779→              className="grid grid-cols-[minmax(120px,1fr)_2fr_auto] items-center gap-3 text-xs"
+   780→              onMouseEnter={() => setHovered(i)}
+   781→              onMouseLeave={() => setHovered(null)}
+   782→            >
+   783→              <div className="flex items-center gap-2 truncate">
+   784→                <span
+   785→                  className="size-2.5 shrink-0 rounded-sm"
+   786→                  style={{ backgroundColor: color }}
+   787→                />
+   788→                <span className="truncate text-foreground">{s.sector}</span>
+   789→              </div>
+   790→              <div className="relative h-2.5 overflow-hidden rounded-full bg-muted/40">
+   791→                <div
+   792→                  className="h-full rounded-full transition-all"
+   793→                  style={{
+   794→                    width: `${w}%`,
+   795→                    backgroundColor: color,
+   796→                    opacity: hovered == null || hovered === i ? 1 : 0.45,
+   797→                  }}
+   798→                />
+   799→              </div>
+   800→              <div className="flex items-center gap-2 tabular-nums">
+   801→                <span className="font-medium text-foreground">{fmtUsd(v)}</span>
+   802→                <span className="text-muted-foreground text-[10px]">
+   803→                  · {s.count} coins · {w.toFixed(1)}%
+   804→                </span>
+   805→              </div>
+   806→            </div>
+   807→          );
+   808→        })}
+   809→      </div>
+   810→    </div>
+   811→  );
+   812→}
+   813→
+   814→/* -------------------------------------------------------------------------- */
+   815→/*  Sub-component — Coin table wrapper                                        */
+   816→/* -------------------------------------------------------------------------- */
+   817→
+   818→interface CoinTableProps {
+   819→  coins: TopCoin[];
+   820→  onAnalyze?: (geckoId: string, name: string) => void;
+   821→  emptyHint?: string;
+   822→}
+   823→
+   824→function CoinTable({ coins, onAnalyze, emptyHint }: CoinTableProps) {
+   825→  if (coins.length === 0) {
+   826→    return (
+   827→      <div className="flex h-32 items-center justify-center text-sm text-muted-foreground">
+   828→        {emptyHint ?? "No coins"}
+   829→      </div>
+   830→    );
+   831→  }
+   832→  return (
+   833→    <div className="max-h-[640px] overflow-auto rounded-md border border-border/40">
+   834→      <Table>
+   835→        <TableHeader className="sticky top-0 z-10 bg-muted/90 backdrop-blur-sm">
+   836→          <TableRow className="border-border/40 hover:bg-transparent">
+   837→            <TableHead className="w-12 text-right text-[11px] uppercase tracking-wider text-muted-foreground">#</TableHead>
+   838→            <TableHead className="text-[11px] uppercase tracking-wider text-muted-foreground">Coin</TableHead>
+   839→            <TableHead className="text-right text-[11px] uppercase tracking-wider text-muted-foreground">Price</TableHead>
+   840→            <TableHead className="text-right text-[11px] uppercase tracking-wider text-muted-foreground">Mkt Cap</TableHead>
+   841→            <TableHead className="text-right text-[11px] uppercase tracking-wider text-muted-foreground">Volume</TableHead>
+   842→            <TableHead className="text-right text-[11px] uppercase tracking-wider text-muted-foreground">24h</TableHead>
+   843→            <TableHead className="text-right text-[11px] uppercase tracking-wider text-muted-foreground">7d</TableHead>
+   844→            <TableHead className="text-right text-[11px] uppercase tracking-wider text-muted-foreground">30d</TableHead>
+   845→            {onAnalyze && <TableHead className="w-20 text-right text-[11px] uppercase tracking-wider text-muted-foreground">Action</TableHead>}
+   846→          </TableRow>
+   847→        </TableHeader>
+   848→        <TableBody>
+   849→          {coins.map((c) => (
+   850→            <CoinRow key={`${c.id}-${c.market_cap_rank ?? c.name}`} coin={c} onAnalyze={onAnalyze} />
+   851→          ))}
+   852→        </TableBody>
+   853→      </Table>
+   854→    </div>
+   855→  );
+   856→}
+   857→
+   858→/* -------------------------------------------------------------------------- */
+   859→/*  Sub-component — Trending table                                            */
+   860→/* -------------------------------------------------------------------------- */
+   861→
+   862→function TrendingTable({
+   863→  coins,
+   864→  onAnalyze,
+   865→}: {
+   866→  coins: TrendingCoin[];
+   867→  onAnalyze?: (geckoId: string, name: string) => void;
+   868→}) {
+   869→  if (coins.length === 0) {
+   870→    return (
+   871→      <div className="flex h-32 items-center justify-center text-sm text-muted-foreground">
+   872→        No trending coins
+   873→      </div>
+   874→    );
+   875→  }
+   876→  return (
+   877→    <div className="max-h-[640px] overflow-auto rounded-md border border-border/40">
+   878→      <Table>
+   879→        <TableHeader className="sticky top-0 z-10 bg-muted/90 backdrop-blur-sm">
+   880→          <TableRow className="border-border/40 hover:bg-transparent">
+   881→            <TableHead className="w-12 text-right text-[11px] uppercase tracking-wider text-muted-foreground">Rank</TableHead>
+   882→            <TableHead className="text-[11px] uppercase tracking-wider text-muted-foreground">Coin</TableHead>
+   883→            <TableHead className="text-right text-[11px] uppercase tracking-wider text-muted-foreground">Mkt Cap Rank</TableHead>
+   884→            <TableHead className="text-right text-[11px] uppercase tracking-wider text-muted-foreground">Price (BTC)</TableHead>
+   885→            {onAnalyze && <TableHead className="w-20 text-right text-[11px] uppercase tracking-wider text-muted-foreground">Action</TableHead>}
+   886→          </TableRow>
+   887→        </TableHeader>
+   888→        <TableBody>
+   889→          {coins.map((c, i) => (
+   890→            <TrendingRow key={`${c.id}-${i}`} coin={c} index={i} onAnalyze={onAnalyze} />
+   891→          ))}
+   892→        </TableBody>
+   893→      </Table>
+   894→    </div>
+   895→  );
+   896→}
+   897→
+   898→/* -------------------------------------------------------------------------- */
+   899→/*  Sub-component — DeFi / Fees tables                                        */
+   900→/* -------------------------------------------------------------------------- */
+   901→
+   902→function DefiTable({ protocols }: { protocols: TopDefiProtocol[] }) {
+   903→  if (protocols.length === 0) {
+   904→    return (
+   905→      <div className="flex h-32 items-center justify-center text-sm text-muted-foreground">
+   906→        No DeFi protocols
+   907→      </div>
+   908→    );
+   909→  }
+   910→  return (
+   911→    <div className="max-h-[640px] overflow-auto rounded-md border border-border/40">
+   912→      <Table>
+   913→        <TableHeader className="sticky top-0 z-10 bg-muted/90 backdrop-blur-sm">
+   914→          <TableRow className="border-border/40 hover:bg-transparent">
+   915→            <TableHead className="text-[11px] uppercase tracking-wider text-muted-foreground">Protocol</TableHead>
+   916→            <TableHead className="text-right text-[11px] uppercase tracking-wider text-muted-foreground">TVL</TableHead>
+   917→            <TableHead className="text-[11px] uppercase tracking-wider text-muted-foreground">Chain</TableHead>
+   918→            <TableHead className="text-[11px] uppercase tracking-wider text-muted-foreground">Category</TableHead>
+   919→            <TableHead className="w-12 text-right text-[11px] uppercase tracking-wider text-muted-foreground">Link</TableHead>
+   920→          </TableRow>
+   921→        </TableHeader>
+   922→        <TableBody>
+   923→          {protocols.map((p, i) => (
+   924→            <DefiRow key={`${p.slug ?? p.name}-${i}`} p={p} />
+   925→          ))}
+   926→        </TableBody>
+   927→      </Table>
+   928→    </div>
+   929→  );
+   930→}
+   931→
+   932→function FeesTable({ protocols }: { protocols: TopFeeProtocol[] }) {
+   933→  if (protocols.length === 0) {
+   934→    return (
+   935→      <div className="flex h-32 items-center justify-center text-sm text-muted-foreground">
+   936→        No fee data
+   937→      </div>
+   938→    );
+   939→  }
+   940→  return (
+   941→    <div className="max-h-[640px] overflow-auto rounded-md border border-border/40">
+   942→      <Table>
+   943→        <TableHeader className="sticky top-0 z-10 bg-muted/90 backdrop-blur-sm">
+   944→          <TableRow className="border-border/40 hover:bg-transparent">
+   945→            <TableHead className="text-[11px] uppercase tracking-wider text-muted-foreground">Protocol</TableHead>
+   946→            <TableHead className="text-right text-[11px] uppercase tracking-wider text-muted-foreground">24h Fees</TableHead>
+   947→            <TableHead className="text-right text-[11px] uppercase tracking-wider text-muted-foreground">24h Revenue</TableHead>
+   948→            <TableHead className="text-right text-[11px] uppercase tracking-wider text-muted-foreground">30d Fees</TableHead>
+   949→            <TableHead className="text-[11px] uppercase tracking-wider text-muted-foreground">Category</TableHead>
+   950→          </TableRow>
+   951→        </TableHeader>
+   952→        <TableBody>
+   953→          {protocols.map((p, i) => (
+   954→            <FeeRow key={`${p.id ?? p.slug ?? p.name}-${i}`} p={p} />
+   955→          ))}
+   956→        </TableBody>
+   957→      </Table>
+   958→    </div>
+   959→  );
+   960→}
+   961→
+   962→/* -------------------------------------------------------------------------- */
+   963→/*  Sub-component — Loading skeleton                                          */
+   964→/* -------------------------------------------------------------------------- */
+   965→
+   966→function LoadingView() {
+   967→  return (
+   968→    <div className="space-y-5">
+   969→      {/* Stats grid skeleton */}
+   970→      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
+   971→        {Array.from({ length: 6 }).map((_, i) => (
+   972→          <Card key={i} className="border-border/60 bg-card/40 backdrop-blur-sm p-4 gap-3">
+   973→            <Skeleton className="h-7 w-7 rounded-md" />
+   974→            <Skeleton className="h-3 w-20" />
+   975→            <Skeleton className="h-6 w-24" />
+   976→            <Skeleton className="h-3 w-16" />
+   977→          </Card>
+   978→        ))}
+   979→      </div>
+   980→      {/* Gauge + TVL skeleton */}
+   981→      <div className="grid gap-3 md:grid-cols-2">
+   982→        <Skeleton className="h-40 rounded-xl" />
+   983→        <Skeleton className="h-40 rounded-xl" />
+   984→      </div>
+   985→      {/* Tabs skeleton */}
+   986→      <Skeleton className="h-9 w-full max-w-2xl rounded-lg" />
+   987→      <Card className="border-border/60 bg-card/40 backdrop-blur-sm p-0">
+   988→        <Skeleton className="h-10 w-full rounded-t-xl" />
+   989→        {Array.from({ length: 8 }).map((_, i) => (
+   990→          <Skeleton key={i} className="h-12 w-full rounded-none" />
+   991→        ))}
+   992→      </Card>
+   993→    </div>
+   994→  );
+   995→}
+   996→
+   997→/* -------------------------------------------------------------------------- */
+   998→/*  Sub-component — Error state                                               */
+   999→/* -------------------------------------------------------------------------- */
+  1000→
+  1001→function ErrorView({ message, onRetry }: { message: string; onRetry: () => void }) {
+  1002→  return (
+  1003→    <Alert variant="destructive" className="border-rose-500/40 bg-rose-500/5">
+  1004→      <AlertCircle className="size-4" />
+  1005→      <AlertTitle>Failed to load market data</AlertTitle>
+  1006→      <AlertDescription>
+  1007→        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+  1008→          <span className="text-xs">{message}</span>
+  1009→          <Button size="sm" variant="outline" onClick={onRetry} className="w-fit">
+  1010→            <RefreshCw className="size-3.5" />
+  1011→            Retry
+  1012→          </Button>
+  1013→        </div>
+  1014→      </AlertDescription>
+  1015→    </Alert>
+  1016→  );
+  1017→}
+  1018→
+  1019→/* -------------------------------------------------------------------------- */
+  1020→/*  Main component                                                            */
+  1021→/* -------------------------------------------------------------------------- */
+  1022→
+  1023→export function MarketIntelligenceView({ onAnalyzeCoin }: MarketIntelligenceViewProps) {
+  1024→  const { t } = useLanguage();
+  1025→  const { data, loading, refreshing, error, refresh } = useMarketOverview();
+  1026→  const cacheAge = useCacheAge(data?.cached_at);
+  1027→
+  1028→  /* Translation helper with English fallback — `t()` returns the key itself
+  1029→     when the translation is missing, so we fall back to the provided English
+  1030→     string in that case (translations will be added later under `market.*`). */
+  1031→  const tt = React.useCallback(
+  1032→    (key: string, fallback: string): string => {
+  1033→      const v = t(key);
+  1034→      return typeof v === "string" && v !== key ? v : fallback;
+  1035→    },
+  1036→    [t],
+  1037→  );
+  1038→
+  1039→  const g: GlobalMarketData | null = data?.global ?? null;
+  1040→  const mcapChange = g?.market_cap_change_percentage_24h_usd ?? null;
+  1041→
+  1042→  /* Tab counts */
+  1043→  const counts = React.useMemo(
+  1044→    () => ({
+  1045→      top: data?.top_coins?.length ?? 0,
+  1046→      gainers: data?.gainers?.length ?? 0,
+  1047→      losers: data?.losers?.length ?? 0,
+  1048→      trending: data?.trending?.length ?? 0,
+  1049→      defi: data?.top_defi?.length ?? 0,
+  1050→      fees: data?.top_fees?.length ?? 0,
+  1051→      sectors: data?.sectors?.length ?? 0,
+  1052→    }),
+  1053→    [data],
+  1054→  );
+  1055→
+  1056→  return (
+  1057→    <TooltipProvider>
+  1058→      <div className="space-y-5">
+  1059→        {/* ---------- Header ---------- */}
+  1060→        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+  1061→          <div className="flex items-center gap-3">
+  1062→            <div className="flex size-10 items-center justify-center rounded-xl bg-teal-500/10 text-teal-500">
+  1063→              <Globe className="size-5" />
+  1064→            </div>
+  1065→            <div>
+  1066→              <h2 className="text-lg font-semibold leading-tight">
+  1067→                {tt("market.title", "Market Intelligence")}
+  1068→              </h2>
+  1069→              <p className="text-xs text-muted-foreground">
+  1070→                {tt("market.subtitle", "CoinMarketCap + DeFiLlama, unified.")}
+  1071→              </p>
+  1072→            </div>
+  1073→          </div>
+  1074→          <div className="flex items-center gap-3">
+  1075→            {cacheAge != null && (
+  1076→              <span className="text-[11px] text-muted-foreground tabular-nums">
+  1077→                Updated {formatAge(cacheAge)}
+  1078→              </span>
+  1079→            )}
+  1080→            <Tooltip>
+  1081→              <TooltipTrigger asChild>
+  1082→                <Button
+  1083→                  variant="outline"
+  1084→                  size="sm"
+  1085→                  onClick={refresh}
+  1086→                  disabled={refreshing}
+  1087→                  className="gap-2"
+  1088→                >
+  1089→                  <RefreshCw className={`size-3.5 ${refreshing ? "animate-spin" : ""}`} />
+  1090→                  {refreshing ? "Refreshing…" : "Refresh"}
+  1091→                </Button>
+  1092→              </TooltipTrigger>
+  1093→              <TooltipContent>Force re-fetch from upstream</TooltipContent>
+  1094→            </Tooltip>
+  1095→          </div>
+  1096→        </div>
+  1097→
+  1098→        {/* ---------- Error ---------- */}
+  1099→        {error && !loading && <ErrorView message={error} onRetry={refresh} />}
+  1100→
+  1101→        {/* ---------- Loading skeleton ---------- */}
+  1102→        {loading && <LoadingView />}
+  1103→
+  1104→        {/* ---------- Main content ---------- */}
+  1105→        {!loading && !error && data && (
+  1106→          <>
+  1107→            {/* ---------- Global market banner ---------- */}
+  1108→            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
+  1109→              <StatCard
+  1110→                icon={<DollarSign className="size-4" />}
+  1111→                label="Total Market Cap"
+  1112→                value={fmtUsd(g?.total_market_cap_usd ?? null)}
+  1113→                accent="teal"
+  1114→                sub={
+  1115→                  <span className={pctColor(mcapChange)}>
+  1116→                    {fmtPct(mcapChange)} (24h)
+  1117→                  </span>
+  1118→                }
+  1119→              />
+  1120→              <StatCard
+  1121→                icon={mcapChange != null && mcapChange >= 0 ? <TrendingUp className="size-4" /> : <TrendingDown className="size-4" />}
+  1122→                label="24h Change"
+  1123→                value={
+  1124→                  <span className={pctColor(mcapChange)}>{fmtPct(mcapChange)}</span>
+  1125→                }
+  1126→                accent={mcapChange != null && mcapChange >= 0 ? "emerald" : "rose"}
+  1127→                sub="Market cap Δ"
+  1128→              />
+  1129→              <StatCard
+  1130→                icon={<Coins className="size-4" />}
+  1131→                label="BTC Dominance"
+  1132→                value={
+  1133→                  g?.btc_dominance != null
+  1134→                    ? `${g.btc_dominance.toFixed(2)}%`
+  1135→                    : "—"
+  1136→                }
+  1137→                accent="amber"
+  1138→                sub={
+  1139→                  g?.eth_dominance != null
+  1140→                    ? `ETH ${g.eth_dominance.toFixed(2)}%`
+  1141→                    : undefined
+  1142→                }
+  1143→              />
+  1144→              <StatCard
+  1145→                icon={<Activity className="size-4" />}
+  1146→                label="24h Volume"
+  1147→                value={fmtUsd(g?.total_volume_usd ?? null)}
+  1148→                accent="sky"
+  1149→                sub="Total spot volume"
+  1150→              />
+  1151→              <StatCard
+  1152→                icon={<Boxes className="size-4" />}
+  1153→                label="Active Coins"
+  1154→                value={fmtNum(g?.active_cryptocurrencies ?? null)}
+  1155→                accent="violet"
+  1156→                sub={`${fmtNum(data.coin_count)} tracked`}
+  1157→              />
+  1158→              <StatCard
+  1159→                icon={<Building2 className="size-4" />}
+  1160→                label="Markets"
+  1161→                value={fmtNum(g?.markets ?? null)}
+  1162→                accent="default"
+  1163→                sub={`${fmtNum(data.defi_protocol_count)} DeFi protocols`}
+  1164→              />
+  1165→            </div>
+  1166→
+  1167→            {/* ---------- Fear & Greed + DeFi TVL ---------- */}
+  1168→            <div className="grid gap-3 md:grid-cols-2">
+  1169→              <FearGreedGauge fg={data.fear_greed} />
+  1170→              <DefiTvlPanel
+  1171→                total={data.defi_tvl_total}
+  1172→                protocolCount={data.defi_protocol_count}
+  1173→              />
+  1174→            </div>
+  1175→
+  1176→            {/* ---------- Tabbed tables ---------- */}
+  1177→            <Tabs defaultValue="top" className="gap-3">
+  1178→              <TabsList className="flex h-auto w-full flex-wrap gap-1 bg-muted/60 p-1 sm:w-fit">
+  1179→                <TabsTrigger value="top" className="gap-1.5 text-xs">
+  1180→                  <BarChart3 className="size-3.5" />
+  1181→                  Top Coins
+  1182→                  <Badge variant="secondary" className="ml-1 h-4 px-1 text-[10px]">{counts.top}</Badge>
+  1183→                </TabsTrigger>
+  1184→                <TabsTrigger value="gainers" className="gap-1.5 text-xs">
+  1185→                  <TrendingUp className="size-3.5 text-emerald-500" />
+  1186→                  Gainers
+  1187→                  <Badge variant="secondary" className="ml-1 h-4 px-1 text-[10px]">{counts.gainers}</Badge>
+  1188→                </TabsTrigger>
+  1189→                <TabsTrigger value="losers" className="gap-1.5 text-xs">
+  1190→                  <TrendingDown className="size-3.5 text-rose-500" />
+  1191→                  Losers
+  1192→                  <Badge variant="secondary" className="ml-1 h-4 px-1 text-[10px]">{counts.losers}</Badge>
+  1193→                </TabsTrigger>
+  1194→                <TabsTrigger value="trending" className="gap-1.5 text-xs">
+  1195→                  <Flame className="size-3.5 text-orange-500" />
+  1196→                  Trending
+  1197→                  <Badge variant="secondary" className="ml-1 h-4 px-1 text-[10px]">{counts.trending}</Badge>
+  1198→                </TabsTrigger>
+  1199→                <TabsTrigger value="defi" className="gap-1.5 text-xs">
+  1200→                  <Layers className="size-3.5 text-teal-500" />
+  1201→                  Top DeFi
+  1202→                  <Badge variant="secondary" className="ml-1 h-4 px-1 text-[10px]">{counts.defi}</Badge>
+  1203→                </TabsTrigger>
+  1204→                <TabsTrigger value="fees" className="gap-1.5 text-xs">
+  1205→                  <Wallet className="size-3.5 text-amber-500" />
+  1206→                  Top Fees
+  1207→                  <Badge variant="secondary" className="ml-1 h-4 px-1 text-[10px]">{counts.fees}</Badge>
+  1208→                </TabsTrigger>
+  1209→                <TabsTrigger value="sectors" className="gap-1.5 text-xs">
+  1210→                  <Sparkles className="size-3.5 text-violet-500" />
+  1211→                  Sectors
+  1212→                  <Badge variant="secondary" className="ml-1 h-4 px-1 text-[10px]">{counts.sectors}</Badge>
+  1213→                </TabsTrigger>
+  1214→              </TabsList>
+  1215→
+  1216→              {/* Top Coins */}
+  1217→              <TabsContent value="top">
+  1218→                <Card className="border-border/60 bg-card/40 backdrop-blur-sm p-0">
+  1219→                  <CardHeader className="px-4 py-3">
+  1220→                    <CardTitle className="text-sm">
+  1221→                      Top {counts.top} Coins by Market Cap
+  1222→                    </CardTitle>
+  1223→                    <CardDescription className="text-xs">
+  1224→                      Click any row to run the framework analysis in the Coin Explorer.
+  1225→                    </CardDescription>
+  1226→                  </CardHeader>
+  1227→                  <CardContent className="px-4 pb-4">
+  1228→                    <CoinTable coins={data.top_coins} onAnalyze={onAnalyzeCoin} />
+  1229→                  </CardContent>
+  1230→                </Card>
+  1231→              </TabsContent>
+  1232→
+  1233→              {/* Gainers */}
+  1234→              <TabsContent value="gainers">
+  1235→                <Card className="border-border/60 bg-card/40 backdrop-blur-sm p-0">
+  1236→                  <CardHeader className="px-4 py-3">
+  1237→                    <CardTitle className="text-sm flex items-center gap-2">
+  1238→                      <TrendingUp className="size-4 text-emerald-500" />
+  1239→                      Top {counts.gainers} Gainers (24h)
+  1240→                    </CardTitle>
+  1241→                    <CardDescription className="text-xs">
+  1242→                      Biggest 24h price increases across tracked coins.
+  1243→                    </CardDescription>
+  1244→                  </CardHeader>
+  1245→                  <CardContent className="px-4 pb-4">
+  1246→                    <CoinTable coins={data.gainers} onAnalyze={onAnalyzeCoin} />
+  1247→                  </CardContent>
+  1248→                </Card>
+  1249→              </TabsContent>
+  1250→
+  1251→              {/* Losers */}
+  1252→              <TabsContent value="losers">
+  1253→                <Card className="border-border/60 bg-card/40 backdrop-blur-sm p-0">
+  1254→                  <CardHeader className="px-4 py-3">
+  1255→                    <CardTitle className="text-sm flex items-center gap-2">
+  1256→                      <TrendingDown className="size-4 text-rose-500" />
+  1257→                      Top {counts.losers} Losers (24h)
+  1258→                    </CardTitle>
+  1259→                    <CardDescription className="text-xs">
+  1260→                      Biggest 24h price decreases across tracked coins.
+  1261→                    </CardDescription>
+  1262→                  </CardHeader>
+  1263→                  <CardContent className="px-4 pb-4">
+  1264→                    <CoinTable coins={data.losers} onAnalyze={onAnalyzeCoin} />
+  1265→                  </CardContent>
+  1266→                </Card>
+  1267→              </TabsContent>
+  1268→
+  1269→              {/* Trending */}
+  1270→              <TabsContent value="trending">
+  1271→                <Card className="border-border/60 bg-card/40 backdrop-blur-sm p-0">
+  1272→                  <CardHeader className="px-4 py-3">
+  1273→                    <CardTitle className="text-sm flex items-center gap-2">
+  1274→                      <Flame className="size-4 text-orange-500" />
+  1275→                      Top {counts.trending} Trending Searches
+  1276→                    </CardTitle>
+  1277→                    <CardDescription className="text-xs">
+  1278→                      Most-searched coins on CoinGecko in the last 24h.
+  1279→                    </CardDescription>
+  1280→                  </CardHeader>
+  1281→                  <CardContent className="px-4 pb-4">
+  1282→                    <TrendingTable coins={data.trending} onAnalyze={onAnalyzeCoin} />
+  1283→                  </CardContent>
+  1284→                </Card>
+  1285→              </TabsContent>
+  1286→
+  1287→              {/* Top DeFi */}
+  1288→              <TabsContent value="defi">
+  1289→                <Card className="border-border/60 bg-card/40 backdrop-blur-sm p-0">
+  1290→                  <CardHeader className="px-4 py-3">
+  1291→                    <CardTitle className="text-sm flex items-center gap-2">
+  1292→                      <Layers className="size-4 text-teal-500" />
+  1293→                      Top {counts.defi} DeFi Protocols by TVL
+  1294→                    </CardTitle>
+  1295→                    <CardDescription className="text-xs">
+  1296→                      Live TVL across chains — DeFiLlama's headline table.
+  1297→                    </CardDescription>
+  1298→                  </CardHeader>
+  1299→                  <CardContent className="px-4 pb-4">
+  1300→                    <DefiTable protocols={data.top_defi} />
+  1301→                  </CardContent>
+  1302→                </Card>
+  1303→              </TabsContent>
+  1304→
+  1305→              {/* Top Fees */}
+  1306→              <TabsContent value="fees">
+  1307→                <Card className="border-border/60 bg-card/40 backdrop-blur-sm p-0">
+  1308→                  <CardHeader className="px-4 py-3">
+  1309→                    <CardTitle className="text-sm flex items-center gap-2">
+  1310→                      <Wallet className="size-4 text-amber-500" />
+  1311→                      Top {counts.fees} Fee Generators
+  1312→                    </CardTitle>
+  1313→                    <CardDescription className="text-xs">
+  1314→                      Protocols ranked by 24h fees &amp; revenue — DeFiLlama fees.
+  1315→                    </CardDescription>
+  1316→                  </CardHeader>
+  1317→                  <CardContent className="px-4 pb-4">
+  1318→                    <FeesTable protocols={data.top_fees} />
+  1319→                  </CardContent>
+  1320→                </Card>
+  1321→              </TabsContent>
+  1322→
+  1323→              {/* Sectors */}
+  1324→              <TabsContent value="sectors">
+  1325→                <Card className="border-border/60 bg-card/40 backdrop-blur-sm p-0">
+  1326→                  <CardHeader className="px-4 py-3">
+  1327→                    <CardTitle className="text-sm flex items-center gap-2">
+  1328→                      <Sparkles className="size-4 text-violet-500" />
+  1329→                      Sector Breakdown ({counts.sectors})
+  1330→                    </CardTitle>
+  1331→                    <CardDescription className="text-xs">
+  1332→                      Market cap distribution across crypto sectors.
+  1333→                    </CardDescription>
+  1334→                  </CardHeader>
+  1335→                  <CardContent className="px-4 pb-4">
+  1336→                    <SectorsChart sectors={data.sectors} />
+  1337→                  </CardContent>
+  1338→                </Card>
+  1339→              </TabsContent>
+  1340→            </Tabs>
+  1341→          </>
+  1342→        )}
+  1343→      </div>
+  1344→    </TooltipProvider>
+  1345→  );
+  1346→}
+  1347→
+  1348→export default MarketIntelligenceView;
+  1349→

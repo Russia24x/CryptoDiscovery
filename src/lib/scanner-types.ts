@@ -255,3 +255,69 @@ export interface MarketOverview {
   defi_protocol_count: number;
   cached_at: string;
 }
+
+// --------------------------------------------------------------------------- //
+//  Crypto News (from /api/scanner/news)
+// --------------------------------------------------------------------------- //
+export interface NewsArticle {
+  title: string;
+  summary: string;
+  url: string;
+  source: string;
+  published_at: string | null;
+  image: string | null;
+  categories: string[];
+}
+
+export interface NewsResponse {
+  count: number;
+  sources_configured: {
+    rss: string[];
+    cryptopanic: boolean;
+    cryptocompare: boolean;
+  };
+  articles: NewsArticle[];
+  fetched_at: string;
+}
+
+// --------------------------------------------------------------------------- //
+//  Telegram channel feed (from /api/scanner/telegram)
+// --------------------------------------------------------------------------- //
+export interface TelegramMessage {
+  id: string;
+  channel: string;
+  channel_url: string;
+  text: string;
+  published_at: string | null;
+  views: string | null;
+  author: string;
+  media_type: string | null;
+  media_url: string | null;
+  links: string[];
+}
+
+export interface TelegramResponse {
+  channel: string;
+  channel_url: string;
+  messages: TelegramMessage[];
+  message_count: number;
+  fetched_at: string;
+  error?: string;
+}
+
+// --------------------------------------------------------------------------- //
+//  Data sources status (from /api/scanner/sources)
+// --------------------------------------------------------------------------- //
+export interface DataSourceInfo {
+  name: string;
+  type: "free" | "api_key";
+  available: boolean;
+  description: string;
+}
+
+export interface SourcesStatus {
+  sources: DataSourceInfo[];
+  free_count: number;
+  keyed_count: number;
+  total_count: number;
+}

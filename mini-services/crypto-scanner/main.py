@@ -99,6 +99,45 @@ async def health():
 
 
 # --------------------------------------------------------------------------- #
+#  Data sources status — surfaces which APIs are configured (free vs key)
+# --------------------------------------------------------------------------- #
+@app.get("/sources")
+async def data_sources_status():
+    """Returns the availability of each data source (free or API-key-backed)."""
+    return {
+        "sources": [
+            {"name": "CoinGecko", "type": "free", "available": True,
+             "description": "Prices, market cap, supply, volume, coin search"},
+            {"name": "DeFiLlama", "type": "free", "available": True,
+             "description": "TVL, fees, revenue, protocol metadata"},
+            {"name": "CoinMarketCap (Pro)", "type": "api_key", "available": sources.is_cmc_available(),
+             "description": "Cross-verification of price/mcap/supply (optional)"},
+            {"name": "CoinMarketCap (Keyless)", "type": "free", "available": True,
+             "description": "Holder ratios, audit info, price ranges"},
+            {"name": "CoinDesk RSS", "type": "free", "available": True,
+             "description": "Crypto news feed"},
+            {"name": "Cointelegraph RSS", "type": "free", "available": True,
+             "description": "Crypto news feed"},
+            {"name": "Decrypt RSS", "type": "free", "available": True,
+             "description": "Crypto news feed"},
+            {"name": "Bitcoinist RSS", "type": "free", "available": True,
+             "description": "Crypto news feed"},
+            {"name": "CryptoPanic API", "type": "api_key", "available": bool(sources.CRYPTOPANIC_TOKEN),
+             "description": "Curated crypto news (optional, free token)"},
+            {"name": "CryptoCompare API", "type": "api_key", "available": bool(sources.CRYPTOCOMPARE_KEY),
+             "description": "Crypto news + price data (optional, free key)"},
+            {"name": "Fear & Greed (alternative.me)", "type": "free", "available": True,
+             "description": "Market sentiment index"},
+            {"name": "Telegram (t.me/s/)", "type": "free", "available": True,
+             "description": "Public channel web preview (no bot token needed)"},
+        ],
+        "free_count": 9,
+        "keyed_count": 3,
+        "total_count": 12,
+    }
+
+
+# --------------------------------------------------------------------------- #
 #  Scan lifecycle
 # --------------------------------------------------------------------------- #
 @app.post("/scan")
@@ -506,6 +545,48 @@ async def market_overview():
         "defi_protocol_count": len(defi_protos),
         "cached_at": datetime.now(timezone.utc).isoformat(),
     }
+
+
+# --------------------------------------------------------------------------- #
+#  Crypto News — multi-source aggregation
+# --------------------------------------------------------------------------- #
+@app.get("/news")
+async def get_news(limit: int = 40, source: str = ""):
+    """Aggregate crypto news from multiple RSS feeds + optional API-key sources.
+
+    Query params:
+      limit  — max articles to return (default 40)
+      source — filter by source name (case-insensitive, e.g. "CoinDesk")
+    """
+    articles = await sources.fetch_crypto_news(limit=limit * 2 if source else limit)
+    if source:
+        s = source.lower()
+        articles = [a for a in articles if s in (a.get("source") or "").lower()]
+    articles = articles[:limit]
+    return {
+        "count": len(articles),
+        "sources_configured": {
+            "rss": [n for n, _ in sources.NEWS_FEEDS],
+            "cryptopanic": bool(sources.CRYPTOPANIC_TOKEN),
+            "cryptocompare": bool(sources.CRYPTOCOMPARE_KEY),
+        },
+        "articles": articles,
+        "fetched_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+
+# --------------------------------------------------------------------------- #
+#  Telegram Channel Feed — public web preview (no bot token needed)
+# --------------------------------------------------------------------------- #
+@app.get("/telegram")
+async def get_telegram(channel: str = "Mastersharkcrypto", limit: int = 20):
+    """Fetch recent messages from a public Telegram channel via t.me/s/.
+
+    Default channel: Mastersharkcrypto (the user's requested channel).
+    Works for any public channel — no API key or bot token required.
+    """
+    data = await sources.fetch_telegram_channel(channel, limit=limit)
+    return data
 
 
 if __name__ == "__main__":

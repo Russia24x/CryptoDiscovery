@@ -1467,3 +1467,105 @@ Stage Summary:
   - Full UI/UX output with Persian + English i18n ✓
   - Engineering improvements: TTL caching, watchdog, per-call timeouts, shared types, clean architecture ✓
 - No unresolved issues. Ready for the scheduled maintenance cron.
+
+---
+Task ID: 4
+Agent: full-stack-developer (News & Telegram)
+Task: Build a standalone React component at `/home/z/my-project/src/components/views/news-feed-view.tsx` that combines crypto news (CoinDesk, Cointelegraph, Decrypt, Bitcoinist RSS, + optional CryptoPanic/CryptoCompare) and a live Telegram channel feed (@Mastersharkcrypto) into one unified, tabbed "News & Signals" view. Consumes the already-verified endpoints `/api/scanner/news`, `/api/scanner/telegram`, `/api/scanner/sources`.
+
+Work Log:
+- Read `/home/z/my-project/worklog.md` to absorb project context — prior tasks built the Next.js 16 + TS + Tailwind 4 + shadcn/ui (New York) dark-theme crypto dashboard, the Python FastAPI scanner service on :3003, the shared `scanner-types.ts` (with `NewsArticle`, `NewsResponse`, `TelegramMessage`, `TelegramResponse`, `DataSourceInfo`, `SourcesStatus`), the `useLanguage()` i18n hook (returns the raw key path string when no translation exists → falls back to inline English), and the existing `coin-explorer-view.tsx` + `market-intelligence-view.tsx` patterns (`tt(key, fallback)` helper, `border-border/60 bg-card/40 backdrop-blur-sm` Card style, `timeAgo`/`secondsSince` helpers, `TooltipProvider` wrapper at the root).
+- Verified the API contract live against the running dev server:
+  - `GET /api/scanner/news?limit=3` → 200, returns `{count, sources_configured:{rss:[4 names],cryptopanic:false,cryptocompare:false}, articles:[{title,summary,url,source,published_at,image,categories}], fetched_at}`. Confirmed `source` is bare ("Cointelegraph", "Decrypt") — matches the SOURCE_STYLES keys.
+  - `GET /api/scanner/telegram?channel=Mastersharkcrypto&limit=2` → 200, returns `{channel, channel_url, messages:[{id:"Mastersharkcrypto/12301", channel, channel_url, text, published_at, views:"5", author, media_type, media_url, links}], message_count, fetched_at}`. Confirmed messages are newest-first (12301 then 12300) and the `id` field encodes the per-message deep link slug (`channel_url + "/" + id.split("/")[1]` → `https://t.me/Mastersharkcrypto/12301`).
+  - `GET /api/scanner/sources` → 200, returns 12 sources. Filtered to the 7 news+telegram-relevant ones (4×RSS, CryptoPanic API, CryptoCompare API, Telegram) via regex `/RSS$/i`, `/^CryptoPanic/i`, `/^CryptoCompare/i`, `/^Telegram/i`.
+- Inspected existing infrastructure:
+  - `src/components/ui/*` — confirmed shadcn components available: card, button, badge, input, tabs, tooltip, skeleton, alert, separator, switch, scroll-area. Confirmed exact prop signatures of `Tabs`/`TabsList`/`TabsTrigger`/`TabsContent`, `Tooltip`/`TooltipProvider`, `Badge`, `Switch`, `Alert`/`AlertTitle`/`AlertDescription`.
+  - `src/lib/i18n/LanguageProvider.tsx` — `useLanguage().t()` returns `any`; for string keys, returns the value or the key path string if missing → `tt(key, fallback)` checks `typeof val === "string" && val !== key`.
+  - `src/lib/i18n/en.json` + `fa.json` — inspected existing `market.*` / `explorer.*` namespaces for translation style; appended `news.*` (11 keys) + `telegram.*` (11 keys) to both files with proper Persian translations.
+- Created `/home/z/my-project/src/components/views/news-feed-view.tsx` (~700 lines, single self-contained `"use client"` component):
+  - **Helpers**:
+    - `timeAgo(iso)` — relative time ("just now", "5s ago", "2m ago", "3h ago", "4d ago", "2w ago", "6mo ago", "1y ago"). Returns "—" on null/invalid.
+    - `timeClock(iso)` — clock time ("13:45" if today, "Aug 13, 13:45" otherwise) for the Telegram message footer.
+    - `secondsSince(iso)` — used to force re-render via the tick interval so the cache-age indicator updates smoothly.
+    - `normalizeSourceName(name)` — strips " RSS", " API", and parenthetical suffixes so source names from `/sources` (e.g. "CoinDesk RSS") match the `SOURCE_STYLES` keys (e.g. "CoinDesk").
+    - `sourceStyle(name)` — looks up `SOURCE_STYLES[name]` then `SOURCE_STYLES[normalizeSourceName(name)]` then falls back to `DEFAULT_SOURCE_STYLE`.
+    - `SOURCE_STYLES` map — 6 color-coded entries per the spec: CoinDesk=amber, Cointelegraph=emerald, Decrypt=sky, Bitcoinist=rose, CryptoPanic=violet, CryptoCompare=teal. Each has `badge` (border+bg+text classes) and `dot` (bg-color for the colored status dot).
+  - **Sub-components**:
+    - `ArticleImage({src, alt})` — `<img loading="lazy" className="aspect-video w-full rounded-md object-cover">` with onError → swaps to a gradient placeholder (emerald→teal→sky) + Newspaper icon. Resets on src change.
+    - `ArticleCard({article})` — whole card is an `<a target="_blank" rel="noopener noreferrer">` link. Renders image, source badge (color-coded with dot), relative time, 2-line `line-clamp-2` title, 3-line `line-clamp-3` summary, up to 3 category chips, "Read article" footer with ExternalLink icon. Hover: `-translate-y-0.5` lift + `border-primary/40` brighten + shadow-lg.
+    - `ArticleCardSkeleton` — 1-col video skeleton + 5 text skeletons.
+    - `SourceChip({active,onClick,label,count,sourceName})` — pill button with optional colored dot (when sourceName provided). Shows count in 10px opacity-70. Active state: `border-primary/40 bg-primary/10`. Inactive: muted, hover lifts.
+    - `MessageSkeleton` — avatar + name + 3 text lines + footer skeletons.
+    - `MessageBubble({msg})` — chat-style rounded card. Header: Send-icon avatar (amber→sky gradient) + @channel (link) + relative time + per-message ExternalLink deep link (Tooltip "Open on Telegram"). Optional photo media (above text, max-h-80, links to deep link). Message text: `dir="auto"` + `whitespace-pre-wrap` + `max-h-[420px] overflow-y-auto` (handles Persian RTL + English LTR mixed, preserves newlines, caps height for very long posts). Links as chips with `Link2` icon + hostname. Footer: clock time + Eye icon + view count.
+    - `SourcesBadgeRow({sources})` — filters to news+telegram-relevant (7 sources). Each badge: green/grey status dot + display name (stripped " RSS") + `free`/`key` tag (emerald for free, amber for key). Tooltip per badge shows full name + description + availability.
+    - `NewsTabContent({...})` — filter bar (chips + search Input with X clear button), loading (6 skeleton cards), error (Alert destructive + Retry), empty (dashed card with Newspaper icon + Clear filters button), grid (1/2/3 col responsive).
+    - `TelegramTabContent({...})` — channel header Card (amber→sky gradient, @channel + Live badge + msg count + updated time + Auto-refresh Switch + Join Channel button), loading (4 skeleton bubbles in max-w-2xl column), error (Alert + Retry), empty (MessageCircle icon), messages feed (max-w-2xl centered narrow column, space-y-3, like Telegram web).
+  - **Main `NewsFeedView`** — wraps everything in `TooltipProvider`. State: `tab`, `news`/`newsLoading`/`newsRefreshing`/`newsError`/`sourceFilter`/`search`, `telegram`/`tgLoading`/`tgRefreshing`/`tgError`/`autoRefresh`, `sources`, tick state. Three `useCallback` fetchers (`fetchNews`, `fetchTelegram`, `fetchSources`) with stable identity. Effects: sources on mount; active-tab content lazy-loaded on tab switch (only fetches if not already loaded); auto-refresh telegram every 60s when toggle on (interval cleared on toggle-off / unmount); tick interval every 1s for smooth cache-age display. Derived: `newsSources` (Set of source names from articles), `filteredArticles` (source filter + search, both client-side), `activeFetchedAt` (current tab's `fetched_at`). Header Card has the title + subtitle + "Updated Xs ago" + Refresh button (spinning RefreshCw when refreshing, disabled during loading). `handleRefresh` calls the current tab's fetcher with `refresh=true`.
+  - **Exports**: named `NewsFeedView` + default export.
+  - **Props**: `{ initialTab?: "news" | "telegram" }` — defaults to "news".
+  - **i18n**: All user-facing strings go through `tt(key, fallback)`. `news.*` (11 keys) + `telegram.*` (11 keys) added to both `en.json` and `fa.json` with proper Persian translations. Component works correctly out-of-the-box in English even if the JSON keys are missing (fallback path).
+- Color discipline: NO indigo or blue as primary. Used emerald (positive accent), teal (gradient pair), amber (Telegram brand + CoinDesk badge + warning), sky (info + Decrypt badge + Telegram gradient pair), rose (errors + Bitcoinist badge), violet (CryptoPanic badge). Sky is allowed because the spec explicitly assigns Decrypt=sky.
+- Responsive: header Card stacks vertically on mobile (`flex-col sm:flex-row`). TabsList is `w-full sm:w-auto` with `flex-1 sm:flex-initial` triggers. News filter bar wraps (`flex-wrap`) and search box goes full-width on mobile. News grid: `grid-cols-1 sm:grid-cols-2 lg:grid-cols-3`. Telegram messages feed: `mx-auto max-w-2xl` (centered narrow column on all breakpoints). Channel header: stacks vertically on mobile.
+- Accessibility: semantic HTML (`<article>` for messages, `<h2>`/`<h3>` headings, `<a>` links with `rel="noopener noreferrer"`). ARIA labels on icon-only buttons (ExternalLink, X clear, Switch). `aria-pressed` on SourceChip. `aria-label` on search Input. All interactive elements are `<button>` or `<a>` (keyboard-reachable). Images have descriptive alt text (`article.title` for thumbnails, "Telegram media" for photos). Tooltips on the per-message deep link and on each data-source badge.
+- Did NOT modify any backend code or existing view components. Only created the new view file + appended i18n keys to `en.json` and `fa.json`.
+- Lint: `bun run lint` → exit 0, **0 errors, 0 warnings** (clean across the whole project).
+- Dev server log: shows `✓ Compiled in 178ms` after the file was created + i18n JSON changes; no compile errors.
+- API endpoints re-verified after the changes: `news:200`, `telegram:200`, `sources:200`.
+
+Stage Summary:
+- **File created**: `/home/z/my-project/src/components/views/news-feed-view.tsx` (~700 lines, single self-contained `"use client"` React component). Named export `NewsFeedView` + default export.
+- **Files modified**: `src/lib/i18n/en.json` and `src/lib/i18n/fa.json` — appended `news.*` (11 keys) and `telegram.*` (11 keys) sections with proper Persian translations.
+- **Props**: `{ initialTab?: "news" | "telegram" }` — defaults to "news". The parent can pre-select the Telegram tab by passing `initialTab="telegram"`.
+- **Data sources**: 3 already-verified endpoints consumed as-is (no backend changes):
+  - `GET /api/scanner/news?limit=40` — fetched lazily on first News tab activation.
+  - `GET /api/scanner/telegram?channel=Mastersharkcrypto&limit=20` — fetched lazily on first Telegram tab activation.
+  - `GET /api/scanner/sources` — fetched once on mount for the data-sources badge row.
+- **UI sections delivered (all from the spec)**:
+  1. Header with title + subtitle + "Updated Xs ago" cache-age indicator (auto-ticks every 1s for smooth display) + Refresh button (spinning icon while refreshing).
+  2. Data sources badge row — 7 news+telegram-relevant sources with green/grey availability dots, `free`/`key` tags, and per-badge tooltips with full descriptions.
+  3. Top-level sub-tabs — Crypto News | Telegram Channel (each with a live count badge).
+  4. Crypto News sub-tab — source filter chips (color-coded dots, click-to-filter), search box (with X clear), responsive 1/2/3-col card grid (thumbnail, color-coded source badge, relative time, 2-line title, 3-line summary, category chips, whole-card-is-link with hover lift), loading skeletons, error Alert with Retry, empty state with Clear filters.
+  5. Telegram Channel sub-tab — channel header (avatar, @channel, Live badge, msg count, updated time, Auto-refresh Switch, Join Channel button), chat-style message feed (centered max-w-2xl column, rounded bubbles, `dir="auto"` for bidi Persian/English text, optional photo media above text, link chips below text, per-message deep link to t.me in header ExternalLink + footer clock time + Eye view count), loading skeletons, error Alert with Retry, empty state.
+- **Quality bar met**: production-ready (no TODOs), TypeScript strict (no `any`), lint clean (0/0), responsive (mobile-first 1-col → 3-col desktop), accessible (semantic HTML, ARIA labels, tooltips, keyboard-reachable), visually polished (premium news reader for the grid, chat-app feel for the Telegram feed, consistent `border-border/60 bg-card/40 backdrop-blur-sm` Card styling, color-coded source system).
+- **Integration notes** (for the agent wiring this into the dashboard):
+  - Import: `import { NewsFeedView } from "@/components/views/news-feed-view";`
+  - Render: `<NewsFeedView initialTab="news" />` (or `"telegram"` to pre-select the Telegram tab).
+  - No backend changes needed — the 3 API endpoints from prior tasks are consumed as-is.
+  - All i18n keys are under `news.*` and `telegram.*` namespaces — already added to `en.json` and `fa.json`.
+
+---
+Task ID: 6
+Agent: main (orchestrator)
+Task: Integrate News & Telegram view into page.tsx, add multi-source API consolidation, final QA.
+
+Work Log:
+- Added `Newspaper` icon import + `NewsFeedView` import to page.tsx.
+- Extended `mainView` state type to include "news" (4th tab).
+- Added News tab button (rose accent) to the main tab navigation bar.
+- Added `{mainView === "news" && <NewsFeedView />}` rendering block.
+- Added `nav.news` i18n key to en.json ("News & Signals") and fa.json ("اخبار و سیگنال").
+- Verified the subagent's `news.*` (11 keys) and `telegram.*` (11 keys) i18n sections are present in both language files.
+
+Multi-source API consolidation (backend):
+- Added 4 free RSS news sources: CoinDesk, Cointelegraph, Decrypt, Bitcoinist (all fetched in parallel via asyncio.gather).
+- Added 2 optional API-key news sources: CryptoPanic (CRYPTOPANIC_TOKEN env), CryptoCompare (CRYPTOCOMPARE_KEY env) — activated if keys present.
+- Added Telegram channel feed via t.me/s/ public web preview (no bot token needed, no API key) — parses server-rendered HTML for messages with text, timestamps, views, media, links.
+- Added `/sources` endpoint surfacing all 12 data sources (9 free + 3 optional API-key) with availability status.
+- Added HTML entity unescaping + RTL/LRM mark removal in Telegram parser for clean Persian text.
+- TTL caching: news=5min, telegram=2min.
+- All fetchers use graceful degradation (if one source fails, others still return data).
+
+Browser QA via agent-browser:
+- Page loads with 4 tabs: دیسکاوری / کاوش ارز / هوش بازار / اخبار و سیگنال ✓
+- News sub-tab: 40 articles from 4 RSS sources, source filter chips with counts (Cointelegraph 19, Decrypt 17, Bitcoinist 4), search box, article cards with thumbnails/source badges/relative time/categories ✓
+- Telegram sub-tab: 11 messages from @Mastersharkcrypto with full Persian text, relative timestamps (10m ago, 1h ago), view counts (6-21 views), deep links to t.me, Join Channel button, auto-refresh toggle ✓
+- Data sources badge row: 7 sources shown with free/key tags and availability dots ✓
+- VLM screenshot analysis: "high-quality dark-mode aesthetic, clean professional layout, no overflow/misalignment issues" ✓
+- Dev log + scanner log: zero errors, all endpoints returning 200 ✓
+
+Stage Summary:
+- The system now has 4 main views: Discovery, Coin Explorer, Market Intelligence, News & Signals.
+- Multi-source API strategy: 9 free sources always active + 3 optional API-key sources (CMC Pro, CryptoPanic, CryptoCompare) ready to activate if keys provided via env vars.
+- Telegram channel @Mastersharkcrypto fully integrated with no authentication required (public web preview).
+- All features verified working end-to-end with real data.

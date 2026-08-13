@@ -2,7 +2,8 @@
   "nav": {
     "discovery": "Discovery",
     "explorer": "Coin Explorer",
-    "market": "Market Intelligence"
+    "market": "Market Intelligence",
+    "news": "News & Signals"
   },
   "header": {
     "title": "Crypto Discovery Framework",
@@ -484,5 +485,32 @@
     "sector": "Sector",
     "count": "Count",
     "visitWebsite": "Visit website"
+  },
+  "news": {
+    "title": "News & Signals",
+    "subtitle": "Crypto news + Telegram channel, unified.",
+    "tab": "Crypto News",
+    "updated": "Updated",
+    "refresh": "Refresh",
+    "allSources": "All Sources",
+    "searchPlaceholder": "Search articles…",
+    "errorTitle": "Failed to load news",
+    "retry": "Retry",
+    "noArticles": "No articles match your filters",
+    "noArticlesDesc": "Try a different source or search term.",
+    "clearFilters": "Clear filters"
+  },
+  "telegram": {
+    "tab": "Telegram Channel",
+    "live": "Live",
+    "messages": "messages",
+    "updated": "updated",
+    "loadingChannel": "Loading channel…",
+    "autoRefresh": "Auto-refresh",
+    "joinChannel": "Join Channel",
+    "errorTitle": "Failed to load Telegram feed",
+    "retry": "Retry",
+    "noMessages": "No messages",
+    "noMessagesDesc": "The channel feed is empty."
   }
 }
