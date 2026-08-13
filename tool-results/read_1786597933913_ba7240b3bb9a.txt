@@ -1,0 +1,760 @@
+   600→
+   601→// --------------------------------------------------------------------------- //
+   602→//  Search result row
+   603→// --------------------------------------------------------------------------- //
+   604→
+   605→function SearchResultRow({
+   606→  coin,
+   607→  onSelect,
+   608→  tf,
+   609→}: {
+   610→  coin: CoinSearchResult;
+   611→  onSelect: (coin: CoinSearchResult) => void;
+   612→  tf: (key: string, fallback: string, vars?: Record<string, string | number>) => string;
+   613→}) {
+   614→  return (
+   615→    <li>
+   616→      <button
+   617→        type="button"
+   618→        onClick={() => onSelect(coin)}
+   619→        className="flex w-full items-center gap-3 px-3 py-2 text-left transition-colors hover:bg-accent/60 focus:bg-accent/60 focus:outline-none"
+   620→      >
+   621→        {coin.thumb ? (
+   622→          <img
+   623→            src={coin.thumb}
+   624→            alt={`${coin.name} logo`}
+   625→            className="size-8 rounded-full bg-muted/40 shrink-0"
+   626→            loading="lazy"
+   627→            onError={(e) => {
+   628→              (e.currentTarget as HTMLImageElement).style.visibility = "hidden";
+   629→            }}
+   630→          />
+   631→        ) : (
+   632→          <div className="size-8 rounded-full bg-muted/40 flex items-center justify-center text-xs font-bold text-muted-foreground shrink-0">
+   633→            {coin.symbol?.slice(0, 2) || "?"}
+   634→          </div>
+   635→        )}
+   636→        <div className="flex-1 min-w-0">
+   637→          <div className="flex items-center gap-2">
+   638→            <span className="text-sm font-medium text-foreground truncate">
+   639→              {coin.name}
+   640→            </span>
+   641→            <Badge variant="outline" className="text-[10px] uppercase tracking-wide">
+   642→              {coin.symbol}
+   643→            </Badge>
+   644→          </div>
+   645→          <div className="text-xs text-muted-foreground truncate">
+   646→            {coin.market_cap_rank != null
+   647→              ? tf("explorer.rank", "Rank") + ` #${coin.market_cap_rank}`
+   648→              : tf("explorer.notRanked", "Not ranked")}
+   649→          </div>
+   650→        </div>
+   651→        <ArrowUpRight className="size-4 text-muted-foreground/60 shrink-0" />
+   652→      </button>
+   653→    </li>
+   654→  );
+   655→}
+   656→
+   657→// --------------------------------------------------------------------------- //
+   658→//  Empty state (no coin selected yet)
+   659→// --------------------------------------------------------------------------- //
+   660→
+   661→function EmptyState({
+   662→  tf,
+   663→}: {
+   664→  tf: (key: string, fallback: string, vars?: Record<string, string | number>) => string;
+   665→}) {
+   666→  return (
+   667→    <Card className="border-dashed border-border/60 bg-card/20">
+   668→      <CardContent className="py-16 flex flex-col items-center text-center gap-4">
+   669→        <div className="relative">
+   670→          <div className="absolute inset-0 blur-2xl bg-emerald-500/20 rounded-full" />
+   671→          <div className="relative size-16 rounded-full bg-gradient-to-br from-emerald-500/20 to-teal-500/20 border border-emerald-500/30 flex items-center justify-center">
+   672→            <Sparkles className="size-7 text-emerald-400" />
+   673→          </div>
+   674→        </div>
+   675→        <div className="space-y-1.5 max-w-md">
+   676→          <h3 className="text-lg font-semibold text-foreground">
+   677→            {tf("explorer.emptyTitle", "Explore any cryptocurrency")}
+   678→          </h3>
+   679→          <p className="text-sm text-muted-foreground leading-relaxed">
+   680→            {tf(
+   681→              "explorer.emptyDesc",
+   682→              "Search for a coin above, choose an analysis persona, and run the full 8-phase framework to get a complete evidence-first report.",
+   683→            )}
+   684→          </p>
+   685→        </div>
+   686→        <div className="grid grid-cols-3 gap-2 mt-2 text-[10px] uppercase tracking-wide text-muted-foreground/80">
+   687→          <div className="flex flex-col items-center gap-1">
+   688→            <Search className="size-4" />
+   689→            <span>{tf("explorer.step1", "Search")}</span>
+   690→          </div>
+   691→          <div className="flex flex-col items-center gap-1">
+   692→            <Target className="size-4" />
+   693→            <span>{tf("explorer.step2", "Persona")}</span>
+   694→          </div>
+   695→          <div className="flex flex-col items-center gap-1">
+   696→            <Zap className="size-4" />
+   697→            <span>{tf("explorer.step3", "Analyze")}</span>
+   698→          </div>
+   699→        </div>
+   700→      </CardContent>
+   701→    </Card>
+   702→  );
+   703→}
+   704→
+   705→// --------------------------------------------------------------------------- //
+   706→//  Selected coin panel + persona selector + Analyze button
+   707→// --------------------------------------------------------------------------- //
+   708→
+   709→function SelectedCoinPanel({
+   710→  coin,
+   711→  persona,
+   712→  onPersonaChange,
+   713→  onAnalyze,
+   714→  onClear,
+   715→  analyzing,
+   716→  tf,
+   717→}: {
+   718→  coin: CoinSearchResult;
+   719→  persona: Persona;
+   720→  onPersonaChange: (p: Persona) => void;
+   721→  onAnalyze: () => void;
+   722→  onClear: () => void;
+   723→  analyzing: boolean;
+   724→  tf: (key: string, fallback: string, vars?: Record<string, string | number>) => string;
+   725→}) {
+   726→  return (
+   727→    <Card className="border-border/60 bg-card/40 backdrop-blur-sm shadow-lg shadow-black/20">
+   728→      <CardHeader className="pb-3">
+   729→        <div className="flex items-start justify-between gap-3">
+   730→          <CardTitle className="text-base flex items-center gap-2">
+   731→            <Crosshair className="size-4 text-emerald-400" />
+   732→            {tf("explorer.selectedCoin", "Selected Coin")}
+   733→          </CardTitle>
+   734→          <Tooltip>
+   735→            <TooltipTrigger asChild>
+   736→              <button
+   737→                type="button"
+   738→                onClick={onClear}
+   739→                className="rounded-md p-1.5 text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
+   740→                aria-label={tf("explorer.deselectCoin", "Deselect coin")}
+   741→              >
+   742→                <X className="size-4" />
+   743→              </button>
+   744→            </TooltipTrigger>
+   745→            <TooltipContent>
+   746→              {tf("explorer.deselectCoin", "Deselect coin")}
+   747→            </TooltipContent>
+   748→          </Tooltip>
+   749→        </div>
+   750→      </CardHeader>
+   751→
+   752→      <CardContent className="space-y-5">
+   753→        {/* Coin identity row */}
+   754→        <div className="flex items-center gap-4">
+   755→          {coin.large ? (
+   756→            <img
+   757→              src={coin.large}
+   758→              alt={`${coin.name} logo`}
+   759→              className="size-14 rounded-full bg-muted/40 shrink-0 ring-2 ring-emerald-500/20"
+   760→              onError={(e) => {
+   761→                (e.currentTarget as HTMLImageElement).style.visibility = "hidden";
+   762→              }}
+   763→            />
+   764→          ) : (
+   765→            <div className="size-14 rounded-full bg-gradient-to-br from-emerald-500/20 to-teal-500/20 border border-emerald-500/30 flex items-center justify-center text-lg font-bold text-emerald-300 shrink-0">
+   766→              {coin.symbol?.slice(0, 2) || "?"}
+   767→            </div>
+   768→          )}
+   769→          <div className="min-w-0 flex-1">
+   770→            <div className="flex items-center gap-2 flex-wrap">
+   771→              <h2 className="text-xl font-semibold text-foreground truncate">
+   772→                {coin.name}
+   773→              </h2>
+   774→              <Badge variant="outline" className="uppercase tracking-wide">
+   775→                {coin.symbol}
+   776→              </Badge>
+   777→            </div>
+   778→            <div className="text-sm text-muted-foreground mt-0.5">
+   779→              {coin.market_cap_rank != null
+   780→                ? tf("explorer.marketCapRank", "Market cap rank") + ` #${coin.market_cap_rank}`
+   781→                : tf("explorer.unrankedCoin", "Unranked coin")}
+   782→            </div>
+   783→          </div>
+   784→        </div>
+   785→
+   786→        <Separator className="bg-border/40" />
+   787→
+   788→        {/* Persona selector */}
+   789→        <div className="space-y-3">
+   790→          <div className="flex items-center gap-2">
+   791→            <Target className="size-4 text-emerald-400" />
+   792→            <span className="text-sm font-medium text-foreground">
+   793→              {tf("explorer.personaTitle", "Analysis Persona")}
+   794→            </span>
+   795→          </div>
+   796→          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+   797→            {PERSONAS.map((p) => {
+   798→              const isActive = persona === p.value;
+   799→              return (
+   800→                <button
+   801→                  key={p.value}
+   802→                  type="button"
+   803→                  onClick={() => onPersonaChange(p.value)}
+   804→                  aria-pressed={isActive}
+   805→                  className={cn(
+   806→                    "group relative flex flex-col gap-0.5 rounded-lg border p-3 text-left transition-all",
+   807→                    isActive
+   808→                      ? "border-emerald-500/60 bg-emerald-500/10 shadow-md shadow-emerald-500/10"
+   809→                      : "border-border/60 bg-input/20 hover:bg-accent/40 hover:border-border",
+   810→                  )}
+   811→                >
+   812→                  <span
+   813→                    className={cn(
+   814→                      "text-sm font-medium leading-tight",
+   815→                      isActive ? "text-emerald-300" : "text-foreground",
+   816→                    )}
+   817→                  >
+   818→                    {p.label}
+   819→                  </span>
+   820→                  <span className="text-[11px] leading-snug text-muted-foreground">
+   821→                    {p.desc}
+   822→                  </span>
+   823→                  {isActive && (
+   824→                    <span className="absolute right-2 top-2 size-1.5 rounded-full bg-emerald-400 shadow-[0_0_8px] shadow-emerald-400/60" />
+   825→                  )}
+   826→                </button>
+   827→              );
+   828→            })}
+   829→          </div>
+   830→        </div>
+   831→
+   832→        {/* Analyze button */}
+   833→        <Button
+   834→          type="button"
+   835→          onClick={onAnalyze}
+   836→          disabled={analyzing}
+   837→          className="w-full h-12 text-base font-semibold bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-400 hover:to-teal-400 text-white border-0 shadow-lg shadow-emerald-500/30 transition-all hover:shadow-emerald-500/40 disabled:opacity-60"
+   838→        >
+   839→          {analyzing ? (
+   840→            <>
+   841→              <Loader2 className="size-5 animate-spin" />
+   842→              {tf("explorer.analyzing", "Analyzing…")}
+   843→            </>
+   844→          ) : (
+   845→            <>
+   846→              <Zap className="size-5" />
+   847→              {tf("explorer.runAnalysis", "Run 8-Phase Analysis")}
+   848→            </>
+   849→          )}
+   850→        </Button>
+   851→      </CardContent>
+   852→    </Card>
+   853→  );
+   854→}
+   855→
+   856→// --------------------------------------------------------------------------- //
+   857→//  Analyzing card — full-card loading state with cycling phase messages
+   858→// --------------------------------------------------------------------------- //
+   859→
+   860→function AnalyzingCard({
+   861→  phaseIdx,
+   862→  tf,
+   863→}: {
+   864→  phaseIdx: number;
+   865→  tf: (key: string, fallback: string, vars?: Record<string, string | number>) => string;
+   866→}) {
+   867→  // Fake progress that asymptotically approaches 90% — gives the user a sense
+   868→  // of forward motion without lying about the actual completion %.
+   869→  const [progress, setProgress] = React.useState(2);
+   870→  React.useEffect(() => {
+   871→    const id = window.setInterval(() => {
+   872→      setProgress((p) => {
+   873→        if (p >= 92) return p;
+   874→        // Decelerating curve: the closer we get to 92, the slower we move.
+   875→        const remaining = 92 - p;
+   876→        const step = Math.max(0.4, remaining * 0.06);
+   877→        return Math.min(92, p + step);
+   878→      });
+   879→    }, 400);
+   880→    return () => window.clearInterval(id);
+   881→  }, []);
+   882→
+   883→  return (
+   884→    <Card className="border-emerald-500/30 bg-card/40 backdrop-blur-sm shadow-xl shadow-emerald-500/10 overflow-hidden">
+   885→      <div className="relative">
+   886→        {/* Top accent bar */}
+   887→        <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-emerald-400/80 to-transparent" />
+   888→        <CardContent className="py-12 flex flex-col items-center text-center gap-6">
+   889→          {/* Animated radar-like spinner */}
+   890→          <div className="relative size-20">
+   891→            <div className="absolute inset-0 rounded-full border-2 border-emerald-500/20" />
+   892→            <div className="absolute inset-0 rounded-full border-t-2 border-emerald-400 animate-spin" style={{ animationDuration: "1.4s" }} />
+   893→            <div className="absolute inset-2 rounded-full border-2 border-teal-500/10" />
+   894→            <div className="absolute inset-2 rounded-full border-b-2 border-teal-400 animate-spin" style={{ animationDuration: "2s", animationDirection: "reverse" }} />
+   895→            <div className="absolute inset-0 flex items-center justify-center">
+   896→              <Brain className="size-7 text-emerald-400" />
+   897→            </div>
+   898→          </div>
+   899→
+   900→          <div className="space-y-2">
+   901→            <h3 className="text-lg font-semibold text-foreground flex items-center justify-center gap-2">
+   902→              <Loader2 className="size-4 animate-spin text-emerald-400" />
+   903→              {tf("explorer.analyzingTitle", "Running framework analysis")}
+   904→            </h3>
+   905→            <p
+   906→              key={phaseIdx}
+   907→              className="text-sm text-muted-foreground transition-opacity duration-300 max-w-md"
+   908→            >
+   909→              {ANALYZE_PHASE_MESSAGES[phaseIdx]}
+   910→            </p>
+   911→          </div>
+   912→
+   913→          {/* Phase dots */}
+   914→          <div className="flex items-center gap-1.5">
+   915→            {ANALYZE_PHASE_MESSAGES.map((_, i) => (
+   916→              <span
+   917→                key={i}
+   918→                className={cn(
+   919→                  "h-1.5 rounded-full transition-all duration-300",
+   920→                  i === phaseIdx
+   921→                    ? "w-6 bg-emerald-400"
+   922→                    : i < phaseIdx
+   923→                      ? "w-1.5 bg-emerald-500/50"
+   924→                      : "w-1.5 bg-muted",
+   925→                )}
+   926→              />
+   927→            ))}
+   928→          </div>
+   929→
+   930→          {/* Progress bar */}
+   931→          <div className="w-full max-w-md space-y-1.5">
+   932→            <Progress
+   933→              value={progress}
+   934→              className="h-1.5 bg-muted/40 [&_[data-slot=progress-indicator]]:bg-gradient-to-r [&_[data-slot=progress-indicator]]:from-emerald-500 [&_[data-slot=progress-indicator]]:to-teal-400"
+   935→            />
+   936→            <div className="flex items-center justify-between text-[10px] uppercase tracking-wide text-muted-foreground/70">
+   937→              <span>{tf("explorer.phase", "Phase")} {phaseIdx + 1}/{ANALYZE_PHASE_MESSAGES.length}</span>
+   938→              <span>{tf("explorer.takesSeconds", "usually 5–30s")}</span>
+   939→            </div>
+   940→          </div>
+   941→        </CardContent>
+   942→      </div>
+   943→    </Card>
+   944→  );
+   945→}
+   946→
+   947→// --------------------------------------------------------------------------- //
+   948→//  Error card
+   949→// --------------------------------------------------------------------------- //
+   950→
+   951→function ErrorCard({
+   952→  message,
+   953→  onRetry,
+   954→  tf,
+   955→}: {
+   956→  message: string;
+   957→  onRetry: () => void;
+   958→  tf: (key: string, fallback: string, vars?: Record<string, string | number>) => string;
+   959→}) {
+   960→  const isTimeout = /timeout|abort|504|rate.?limit/i.test(message);
+   961→  return (
+   962→    <Alert variant="destructive" className="border-rose-500/40 bg-rose-500/10">
+   963→      <AlertCircle className="size-4 text-rose-400" />
+   964→      <AlertTitle className="text-rose-300">
+   965→        {isTimeout
+   966→          ? tf("explorer.errorTimeoutTitle", "Analysis timed out")
+   967→          : tf("explorer.errorTitle", "Analysis failed")}
+   968→      </AlertTitle>
+   969→      <AlertDescription className="text-rose-200/80">
+   970→        <p className="mb-3">
+   971→          {isTimeout
+   972→            ? tf(
+   973→                "explorer.errorTimeoutDesc",
+   974→                "The upstream API may be rate-limited or slow. Please wait a few seconds and try again.",
+   975→              )
+   976→            : message}
+   977→        </p>
+   978→        <Button
+   979→          type="button"
+   980→          size="sm"
+   981→          variant="outline"
+   982→          onClick={onRetry}
+   983→          className="border-rose-500/40 text-rose-200 hover:bg-rose-500/15 hover:text-rose-100"
+   984→        >
+   985→          <RotateCcw className="size-3.5" />
+   986→          {tf("explorer.retry", "Retry analysis")}
+   987→        </Button>
+   988→      </AlertDescription>
+   989→    </Alert>
+   990→  );
+   991→}
+   992→
+   993→// --------------------------------------------------------------------------- //
+   994→//  Report card — rich summary of the resulting FullReport
+   995→// --------------------------------------------------------------------------- //
+   996→
+   997→function ReportCard({
+   998→  report,
+   999→  onViewFull,
+  1000→  onReportProvided,
+  1001→  tf,
+  1002→}: {
+  1003→  report: FullReport;
+  1004→  onViewFull: () => void;
+  1005→  onReportProvided: boolean;
+  1006→  tf: (key: string, fallback: string, vars?: Record<string, string | number>) => string;
+  1007→}) {
+  1008→  const pqScore = report.project_quality_score ?? 0;
+  1009→  const tqScore = report.token_quality_score;
+  1010→  const confidence = report.confidence ?? 0;
+  1011→  const veto = report.veto;
+  1012→  const decision = report.decision;
+  1013→  const candidate = report.candidate;
+  1014→
+  1015→  return (
+  1016→    <Card className="border-border/60 bg-card/40 backdrop-blur-sm shadow-xl shadow-black/30 overflow-hidden">
+  1017→      {/* Top accent bar */}
+  1018→      <div className={cn(
+  1019→        "h-1 w-full",
+  1020→        pqScore >= 70 ? "bg-emerald-500/60"
+  1021→        : pqScore >= 50 ? "bg-amber-500/60"
+  1022→        : "bg-rose-500/60",
+  1023→      )} />
+  1024→
+  1025→      <CardHeader className="pb-3">
+  1026→        <div className="flex items-center justify-between gap-3">
+  1027→          <CardTitle className="text-base flex items-center gap-2">
+  1028→            <Sparkles className="size-4 text-emerald-400" />
+  1029→            {tf("explorer.reportTitle", "Analysis Report")}
+  1030→          </CardTitle>
+  1031→          {veto?.triggered && (
+  1032→            <Tooltip>
+  1033→              <TooltipTrigger asChild>
+  1034→                <Badge className="bg-rose-500/20 text-rose-300 border-rose-500/40 gap-1">
+  1035→                  <ShieldAlert className="size-3" />
+  1036→                  {tf("explorer.vetoTriggered", "Veto triggered")}
+  1037→                </Badge>
+  1038→              </TooltipTrigger>
+  1039→              <TooltipContent className="max-w-xs">
+  1040→                {veto.reason || veto.veto_type || "Veto"}
+  1041→              </TooltipContent>
+  1042→            </Tooltip>
+  1043→          )}
+  1044→        </div>
+  1045→        <CardDescription className="sr-only">
+  1046→          {tf("explorer.reportDesc", "Full framework analysis report for")} {candidate.name}
+  1047→        </CardDescription>
+  1048→      </CardHeader>
+  1049→
+  1050→      <CardContent className="space-y-5">
+  1051→        {/* ----------------------------------------------------------- */}
+  1052→        {/*  Header row: score radial + action/confidence/token info     */}
+  1053→        {/* ----------------------------------------------------------- */}
+  1054→        <div className="flex flex-col sm:flex-row gap-5 sm:items-center">
+  1055→          {/* Score radial */}
+  1056→          <div className="flex flex-col items-center gap-1.5 shrink-0 mx-auto sm:mx-0">
+  1057→            <ScoreRadial
+  1058→              score={pqScore}
+  1059→              max={100}
+  1060→              size={132}
+  1061→              strokeWidth={10}
+  1062→              label={tf("explorer.projectQuality", "Project Quality")}
+  1063→              sublabel={tf("explorer.outOf100", "out of 100")}
+  1064→            />
+  1065→          </div>
+  1066→
+  1067→          {/* Action + confidence + token quality */}
+  1068→          <div className="flex-1 space-y-3 min-w-0">
+  1069→            <div className="flex flex-wrap items-center gap-2">
+  1070→              <Badge className={cn("gap-1", actionBadgeClass(decision.action_label))}>
+  1071→                <TrendingUp className="size-3" />
+  1072→                {decision.action_label}
+  1073→              </Badge>
+  1074→              <Badge variant="outline" className="gap-1">
+  1075→                <Target className="size-3" />
+  1076→                {tf("explorer.confidence", "Confidence")}: {fmtPct(confidence)}
+  1077→              </Badge>
+  1078→              {tqScore != null && (
+  1079→                <Badge variant="outline" className="gap-1">
+  1080→                  <Zap className="size-3" />
+  1081→                  {tf("explorer.tokenQuality", "Token")}: {tqScore.toFixed(0)}/100
+  1082→                </Badge>
+  1083→              )}
+  1084→              {report.evidence_grade && (
+  1085→                <Badge variant="outline">
+  1086→                  {tf("explorer.evidenceGrade", "Evidence")}: {report.evidence_grade}
+  1087→                </Badge>
+  1088→              )}
+  1089→            </div>
+  1090→
+  1091→            {/* Key links */}
+  1092→            <div className="flex items-center gap-1.5 flex-wrap">
+  1093→              <KeyLinkIcon
+  1094→                href={candidate.website}
+  1095→                icon={<Globe className="size-4" />}
+  1096→                label={tf("explorer.website", "Website")}
+  1097→              />
+  1098→              <KeyLinkIcon
+  1099→                href={candidate.twitter}
+  1100→                icon={<Twitter className="size-4" />}
+  1101→                label={tf("explorer.twitter", "Twitter / X")}
+  1102→              />
+  1103→              <KeyLinkIcon
+  1104→                href={candidate.github}
+  1105→                icon={<Github className="size-4" />}
+  1106→                label={tf("explorer.github", "GitHub")}
+  1107→              />
+  1108→              <KeyLinkIcon
+  1109→                href={candidate.blockchain_explorer}
+  1110→                icon={<Crosshair className="size-4" />}
+  1111→                label={tf("explorer.explorer", "Block explorer")}
+  1112→              />
+  1113→            </div>
+  1114→
+  1115→            {/* Valuation multiples (if present) */}
+  1116→            {report.valuation_multiples && (
+  1117→              <div className="grid grid-cols-3 gap-2 pt-1">
+  1118→                <MultipleTile
+  1119→                  label="P/R"
+  1120→                  value={report.valuation_multiples.p_r}
+  1121→                />
+  1122→                <MultipleTile
+  1123→                  label="P/F"
+  1124→                  value={report.valuation_multiples.p_f}
+  1125→                />
+  1126→                <MultipleTile
+  1127→                  label="P/T"
+  1128→                  value={report.valuation_multiples.p_t}
+  1129→                />
+  1130→              </div>
+  1131→            )}
+  1132→          </div>
+  1133→        </div>
+  1134→
+  1135→        <Separator className="bg-border/40" />
+  1136→
+  1137→        {/* ----------------------------------------------------------- */}
+  1138→        {/*  5 fundamental axes                                          */}
+  1139→        {/* ----------------------------------------------------------- */}
+  1140→        <div className="space-y-3">
+  1141→          <h4 className="text-sm font-medium text-foreground flex items-center gap-2">
+  1142→            <Crosshair className="size-4 text-emerald-400" />
+  1143→            {tf("explorer.fiveAxes", "5 Fundamental Axes")}
+  1144→          </h4>
+  1145→          <div className="space-y-2.5">
+  1146→            {report.axes.map((ax, i) => (
+  1147→              <AxisRow key={`${ax.name}-${i}`} name={ax.name} score={ax.score} reason={ax.key_reason} />
+  1148→            ))}
+  1149→          </div>
+  1150→        </div>
+  1151→
+  1152→        <Separator className="bg-border/40" />
+  1153→
+  1154→        {/* ----------------------------------------------------------- */}
+  1155→        {/*  Executive verdict                                           */}
+  1156→        {/* ----------------------------------------------------------- */}
+  1157→        {report.executive_verdict && (
+  1158→          <div className="space-y-2">
+  1159→            <h4 className="text-sm font-medium text-foreground flex items-center gap-2">
+  1160→              <Target className="size-4 text-emerald-400" />
+  1161→              {tf("explorer.executiveVerdict", "Executive Verdict")}
+  1162→            </h4>
+  1163→            <p className="text-sm text-muted-foreground leading-relaxed">
+  1164→              {report.executive_verdict}
+  1165→            </p>
+  1166→          </div>
+  1167→        )}
+  1168→
+  1169→        {/* ----------------------------------------------------------- */}
+  1170→        {/*  Final thesis (highlighted blockquote)                       */}
+  1171→        {/* ----------------------------------------------------------- */}
+  1172→        {report.final_thesis && (
+  1173→          <blockquote className="relative rounded-lg border border-emerald-500/30 bg-emerald-500/[0.06] px-4 py-3 pl-9">
+  1174→            <Quote className="absolute left-2.5 top-3 size-4 text-emerald-400/70" />
+  1175→            <p className="text-sm text-foreground/90 leading-relaxed italic">
+  1176→              {report.final_thesis}
+  1177→            </p>
+  1178→          </blockquote>
+  1179→        )}
+  1180→
+  1181→        {/* ----------------------------------------------------------- */}
+  1182→        {/*  Severe risks (if any)                                       */}
+  1183→        {/* ----------------------------------------------------------- */}
+  1184→        {Array.isArray(report.severe_risks) && report.severe_risks.some((r) => r.present) && (
+  1185→          <div className="space-y-2">
+  1186→            <h4 className="text-sm font-medium text-rose-300 flex items-center gap-2">
+  1187→              <ShieldAlert className="size-4" />
+  1188→              {tf("explorer.severeRisks", "Severe Risks Detected")}
+  1189→            </h4>
+  1190→            <ul className="flex flex-wrap gap-1.5">
+  1191→              {report.severe_risks.filter((r) => r.present).map((r, i) => (
+  1192→                <Badge key={i} variant="outline" className="border-rose-500/40 text-rose-300 bg-rose-500/10 text-[11px]">
+  1193→                  {r.name}
+  1194→                </Badge>
+  1195→              ))}
+  1196→            </ul>
+  1197→          </div>
+  1198→        )}
+  1199→
+  1200→        {/* ----------------------------------------------------------- */}
+  1201→        {/*  Catalysts (if any, positive only for brevity)               */}
+  1202→        {/* ----------------------------------------------------------- */}
+  1203→        {Array.isArray(report.catalysts) && report.catalysts.length > 0 && (
+  1204→          <div className="space-y-2">
+  1205→            <h4 className="text-sm font-medium text-foreground flex items-center gap-2">
+  1206→              <Zap className="size-4 text-emerald-400" />
+  1207→              {tf("explorer.catalysts", "Key Catalysts")}
+  1208→            </h4>
+  1209→            <ul className="space-y-1.5">
+  1210→              {report.catalysts.slice(0, 3).map((c, i) => (
+  1211→                <li key={i} className="flex items-start gap-2 text-sm text-muted-foreground">
+  1212→                  <span className={cn(
+  1213→                    "mt-1 size-1.5 rounded-full shrink-0",
+  1214→                    c.positive ? "bg-emerald-400" : "bg-rose-400",
+  1215→                  )} />
+  1216→                  <span className="leading-relaxed">
+  1217→                    {c.description}
+  1218→                    {c.eta && (
+  1219→                      <span className="text-muted-foreground/70 ml-1">({c.eta})</span>
+  1220→                    )}
+  1221→                  </span>
+  1222→                </li>
+  1223→              ))}
+  1224→            </ul>
+  1225→          </div>
+  1226→        )}
+  1227→
+  1228→        <Separator className="bg-border/40" />
+  1229→
+  1230→        {/* ----------------------------------------------------------- */}
+  1231→        {/*  Footer: view-full-report button                             */}
+  1232→        {/* ----------------------------------------------------------- */}
+  1233→        {onReportProvided && (
+  1234→          <Button
+  1235→            type="button"
+  1236→            onClick={onViewFull}
+  1237→            variant="outline"
+  1238→            className="w-full border-emerald-500/40 text-emerald-300 hover:bg-emerald-500/10 hover:text-emerald-200"
+  1239→          >
+  1240→            <ArrowUpRight className="size-4" />
+  1241→            {tf("explorer.viewFullReport", "View Full Report")}
+  1242→          </Button>
+  1243→        )}
+  1244→      </CardContent>
+  1245→    </Card>
+  1246→  );
+  1247→}
+  1248→
+  1249→// --------------------------------------------------------------------------- //
+  1250→//  Helpers: KeyLinkIcon, MultipleTile, AxisRow
+  1251→// --------------------------------------------------------------------------- //
+  1252→
+  1253→function KeyLinkIcon({
+  1254→  href,
+  1255→  icon,
+  1256→  label,
+  1257→}: {
+  1258→  href: string | null | undefined;
+  1259→  icon: React.ReactNode;
+  1260→  label: string;
+  1261→}) {
+  1262→  if (!href) return null;
+  1263→  let safeHref = href;
+  1264→  try {
+  1265→    // Ensure protocol-relative or bare URLs become absolute & https.
+  1266→    if (!/^https?:\/\//i.test(href)) safeHref = `https://${href}`;
+  1267→  } catch {
+  1268→    /* ignore */
+  1269→  }
+  1270→  return (
+  1271→    <Tooltip>
+  1272→      <TooltipTrigger asChild>
+  1273→        <a
+  1274→          href={safeHref}
+  1275→          target="_blank"
+  1276→          rel="noopener noreferrer"
+  1277→          aria-label={label}
+  1278→          className="inline-flex size-8 items-center justify-center rounded-md border border-border/60 bg-input/20 text-muted-foreground transition-all hover:bg-accent/60 hover:text-foreground hover:border-border"
+  1279→        >
+  1280→          {icon}
+  1281→        </a>
+  1282→      </TooltipTrigger>
+  1283→      <TooltipContent>{label}</TooltipContent>
+  1284→    </Tooltip>
+  1285→  );
+  1286→}
+  1287→
+  1288→function MultipleTile({
+  1289→  label,
+  1290→  value,
+  1291→}: {
+  1292→  label: string;
+  1293→  value: number | null | undefined;
+  1294→}) {
+  1295→  const display = value == null || Number.isNaN(value)
+  1296→    ? "N/A"
+  1297→    : value >= 100
+  1298→      ? value.toFixed(0)
+  1299→      : value.toFixed(2);
+  1300→  const tone =
+  1301→    value == null
+  1302→      ? "text-muted-foreground"
+  1303→      : value > 50
+  1304→        ? "text-rose-300"
+  1305→        : value > 20
+  1306→          ? "text-amber-300"
+  1307→          : "text-emerald-300";
+  1308→  return (
+  1309→    <div className="rounded-md border border-border/60 bg-input/20 px-2 py-1.5 text-center">
+  1310→      <div className="text-[10px] uppercase tracking-wide text-muted-foreground">{label}</div>
+  1311→      <div className={cn("text-sm font-semibold tabular-nums", tone)}>{display}</div>
+  1312→    </div>
+  1313→  );
+  1314→}
+  1315→
+  1316→function AxisRow({
+  1317→  name,
+  1318→  score,
+  1319→  reason,
+  1320→}: {
+  1321→  name: string;
+  1322→  score: number;
+  1323→  reason?: string;
+  1324→}) {
+  1325→  // Axis scores are 0–10 → normalise to 0–100 for the progress bar.
+  1326→  const pct = Math.max(0, Math.min(100, (score / 10) * 100));
+  1327→  const color = axisBarColor(score);
+  1328→  const scoreText =
+  1329→    score >= 0 ? (score >= 10 ? score.toFixed(0) : score.toFixed(1)) : "—";
+  1330→  return (
+  1331→    <div className="space-y-1">
+  1332→      <div className="flex items-center justify-between gap-3">
+  1333→        <span className="text-sm text-foreground truncate">{name}</span>
+  1334→        <span
+  1335→          className="text-xs font-semibold tabular-nums shrink-0"
+  1336→          style={{ color }}
+  1337→        >
+  1338→          {scoreText}/10
+  1339→        </span>
+  1340→      </div>
+  1341→      <div className="h-1.5 w-full rounded-full bg-muted/40 overflow-hidden">
+  1342→        <div
+  1343→          className="h-full rounded-full transition-all duration-700"
+  1344→          style={{
+  1345→            width: `${pct}%`,
+  1346→            backgroundColor: color,
+  1347→            boxShadow: `0 0 6px ${color}55`,
+  1348→          }}
+  1349→        />
+  1350→      </div>
+  1351→      {reason && (
+  1352→        <p className="text-[11px] text-muted-foreground/80 leading-relaxed line-clamp-2">
+  1353→          {reason}
+  1354→        </p>
+  1355→      )}
+  1356→    </div>
+  1357→  );
+  1358→}
+  1359→

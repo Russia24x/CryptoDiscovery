@@ -193,7 +193,7 @@ def match_llama_protocol(
 # --------------------------------------------------------------------------- #
 
 async def _cmc_get(client: httpx.AsyncClient, path: str, **params: Any) -> Any:
-    """Fetch from CMC Pro API with API key header."""
+    """Fetch from CMC Pro API with API key header. Returns None on any error."""
     if not CMC_AVAILABLE:
         return None
     try:
@@ -210,6 +210,31 @@ async def _cmc_get(client: httpx.AsyncClient, path: str, **params: Any) -> Any:
     except (httpx.HTTPError, ValueError) as exc:
         log.warning("CMC GET %s failed: %s", path, exc)
         return None
+
+
+class CmcPlanNotSupported(Exception):
+    """Raised when the CMC API key's subscription plan doesn't support an endpoint (HTTP 403)."""
+    pass
+
+
+async def _cmc_get_strict(client: httpx.AsyncClient, path: str, **params: Any) -> dict[str, Any]:
+    """Fetch from CMC Pro API, raising CmcPlanNotSupported on 403.
+
+    Unlike _cmc_get, this surfaces 403 errors so the caller can distinguish
+    "no API key" from "key exists but plan doesn't support this endpoint".
+    """
+    r = await client.get(
+        f"{CMC_PRO_BASE}{path}",
+        params=params,
+        headers={"X-CMC_Pro_API_Key": CMC_API_KEY},
+        timeout=TIMEOUT,
+    )
+    if r.status_code == 403:
+        raise CmcPlanNotSupported(f"CMC plan doesn't support {path}")
+    if r.status_code != 200:
+        log.warning("CMC GET %s -> %s", path, r.status_code)
+        return {}
+    return r.json()
 
 
 async def fetch_cmc_quotes(symbols: list[str]) -> dict[str, dict[str, Any]] | None:
@@ -368,6 +393,7 @@ async def fetch_cmc_airdrops(limit: int = 50, status: str = "ONGOING") -> list[d
     Unique to CMC Pro — no free source provides structured airdrop data.
     Status: ONGOING, UPCOMING, ENDED (default ONGOING).
     Returns None if no API key.
+    Raises CmcPlanNotSupported if the key's plan doesn't include airdrops (403).
     """
     if not CMC_AVAILABLE:
         return None
@@ -377,7 +403,7 @@ async def fetch_cmc_airdrops(limit: int = 50, status: str = "ONGOING") -> list[d
         return cached
     try:
         async with httpx.AsyncClient() as c:
-            data = await _cmc_get(c, "/v1/cryptocurrency/airdrop", limit=limit, status=status)
+            data = await _cmc_get_strict(c, "/v1/cryptocurrency/airdrop", limit=limit, status=status)
         if not isinstance(data, dict) or "data" not in data:
             return None
         out = []
@@ -399,6 +425,8 @@ async def fetch_cmc_airdrops(limit: int = 50, status: str = "ONGOING") -> list[d
         cache_set(cache_key, out)
         log.info("CMC Pro: fetched %d airdrops (status=%s)", len(out), status)
         return out
+    except CmcPlanNotSupported:
+        raise  # Re-raise so the endpoint can show the correct message
     except (httpx.HTTPError, ValueError) as exc:
         log.warning("CMC airdrops failed: %s", exc)
         return None
@@ -437,6 +465,45 @@ async def fetch_cmc_exchange_map(limit: int = 50) -> list[dict[str, Any]] | None
         return out
     except (httpx.HTTPError, ValueError) as exc:
         log.warning("CMC exchange map failed: %s", exc)
+        return None
+
+
+async def fetch_cmc_global_metrics() -> dict[str, Any] | None:
+    """Fetch global crypto market metrics from CMC Pro.
+
+    Available with Basic plan — provides CMC's own BTC dominance, total mcap,
+    and 24h volume. Used to cross-verify CoinGecko's global data.
+    Returns None if no API key.
+    """
+    if not CMC_AVAILABLE:
+        return None
+    cache_key = "cmc_global_metrics"
+    cached = cache_get(cache_key, ttl=300.0)
+    if cached is not None:
+        return cached
+    try:
+        async with httpx.AsyncClient() as c:
+            data = await _cmc_get(c, "/v1/global-metrics/quotes/latest")
+        if not isinstance(data, dict) or "data" not in data:
+            return None
+        d = data["data"]
+        out = {
+            "total_market_cap_usd": d.get("quote", {}).get("USD", {}).get("total_market_cap"),
+            "total_volume_24h_usd": d.get("quote", {}).get("USD", {}).get("total_volume_24h"),
+            "total_market_cap_yesterday_usd": d.get("quote", {}).get("USD", {}).get("total_market_cap_yesterday"),
+            "total_volume_24h_yesterday_usd": d.get("quote", {}).get("USD", {}).get("total_volume_24h_yesterday"),
+            "total_market_cap_percentage_change_24h": d.get("quote", {}).get("USD", {}).get("total_market_cap_yesterday_percentage_change"),
+            "btc_dominance": d.get("btc_dominance"),
+            "eth_dominance": d.get("eth_dominance"),
+            "active_cryptocurrencies": d.get("active_cryptocurrencies"),
+            "active_market_pairs": d.get("active_market_pairs"),
+            "last_updated": d.get("last_updated"),
+        }
+        cache_set(cache_key, out)
+        log.info("CMC Pro: global metrics fetched (BTC dom=%s)", out.get("btc_dominance"))
+        return out
+    except (httpx.HTTPError, ValueError) as exc:
+        log.warning("CMC global metrics failed: %s", exc)
         return None
 
 

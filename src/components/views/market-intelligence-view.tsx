@@ -160,7 +160,8 @@ function pctColor(v: number | null | undefined): string {
 /* -------------------------------------------------------------------------- */
 
 interface FgTier {
-  label: string;
+  labelKey: string; // i18n key (empty if no label / not translatable)
+  label: string; // English fallback
   color: string; // hex
   badge: string; // tailwind classes
 }
@@ -168,6 +169,7 @@ interface FgTier {
 function fearGreedTier(value: number | null | undefined): FgTier {
   if (value == null || isNaN(value)) {
     return {
+      labelKey: "",
       label: "—",
       color: "#71717a",
       badge: "bg-muted/40 text-muted-foreground border-muted/60",
@@ -175,33 +177,50 @@ function fearGreedTier(value: number | null | undefined): FgTier {
   }
   if (value <= 24)
     return {
+      labelKey: "market.fearGreedExtremeFear",
       label: "Extreme Fear",
       color: "#f43f5e",
       badge: "bg-rose-500/15 text-rose-400 border-rose-500/30",
     };
   if (value <= 44)
     return {
+      labelKey: "market.fearGreedFear",
       label: "Fear",
       color: "#f97316",
       badge: "bg-orange-500/15 text-orange-400 border-orange-500/30",
     };
   if (value <= 55)
     return {
+      labelKey: "market.fearGreedNeutral",
       label: "Neutral",
       color: "#f59e0b",
       badge: "bg-amber-500/15 text-amber-400 border-amber-500/30",
     };
   if (value <= 74)
     return {
+      labelKey: "market.fearGreedGreed",
       label: "Greed",
       color: "#84cc16",
       badge: "bg-lime-500/15 text-lime-400 border-lime-500/30",
     };
   return {
+    labelKey: "market.fearGreedExtremeGreed",
     label: "Extreme Greed",
     color: "#10b981",
     badge: "bg-emerald-500/15 text-emerald-400 border-emerald-500/30",
   };
+}
+
+/** Translate-with-fallback helper, reusable by any sub-component. */
+function useTt() {
+  const { t } = useLanguage();
+  return React.useCallback(
+    (key: string, fallback: string, vars?: Record<string, string | number>): string => {
+      const v = t(key, vars);
+      return typeof v === "string" && v !== key ? v : fallback;
+    },
+    [t],
+  );
 }
 
 /* -------------------------------------------------------------------------- */
@@ -329,6 +348,7 @@ function StatCard({ icon, label, value, sub, accent = "default", loading }: Stat
 /* -------------------------------------------------------------------------- */
 
 function FearGreedGauge({ fg }: { fg: FearGreedData | null }) {
+  const tt = useTt();
   const value = fg?.value ?? null;
   const tier = fearGreedTier(value);
   const pct = value != null && !isNaN(value) ? Math.max(0, Math.min(100, value)) : 0;
@@ -339,18 +359,20 @@ function FearGreedGauge({ fg }: { fg: FearGreedData | null }) {
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
           <Gauge className="size-4 text-amber-500" />
-          <span className="text-sm font-semibold">Fear &amp; Greed</span>
+          <span className="text-sm font-semibold" dir="auto">
+            {tt("market.fearGreed", "Fear & Greed")}
+          </span>
         </div>
         {value != null && (
-          <Badge variant="outline" className={tier.badge}>
-            {tier.label}
+          <Badge variant="outline" className={tier.badge} dir="auto">
+            {tier.labelKey ? tt(tier.labelKey, tier.label) : tier.label}
           </Badge>
         )}
       </div>
 
       {value == null ? (
         <div className="flex h-20 items-center justify-center text-sm text-muted-foreground">
-          No data
+          {tt("common.noData", "No data")}
         </div>
       ) : (
         <>
@@ -362,7 +384,9 @@ function FearGreedGauge({ fg }: { fg: FearGreedData | null }) {
             >
               {value}
             </span>
-            <span className="text-xs text-muted-foreground">/ 100</span>
+            <span className="text-xs text-muted-foreground" dir="auto">
+              {tt("market.fearGreedOf100", "/ 100")}
+            </span>
           </div>
 
           {/* Gradient gauge bar */}
@@ -389,10 +413,10 @@ function FearGreedGauge({ fg }: { fg: FearGreedData | null }) {
               />
             </div>
             {/* Tick labels */}
-            <div className="mt-3 flex justify-between text-[10px] text-muted-foreground">
-              <span>Extreme Fear</span>
-              <span>Neutral</span>
-              <span>Extreme Greed</span>
+            <div className="mt-3 flex justify-between text-[10px] text-muted-foreground" dir="auto">
+              <span>{tt("market.fearGreedExtremeFear", "Extreme Fear")}</span>
+              <span>{tt("market.fearGreedNeutral", "Neutral")}</span>
+              <span>{tt("market.fearGreedExtremeGreed", "Extreme Greed")}</span>
             </div>
           </div>
         </>
@@ -412,19 +436,22 @@ function DefiTvlPanel({
   total: number | null;
   protocolCount: number | null;
 }) {
+  const tt = useTt();
   return (
     <Card className="border-border/60 bg-card/40 backdrop-blur-sm p-5 gap-4">
       <div className="flex items-center gap-2">
         <Layers className="size-4 text-teal-500" />
-        <span className="text-sm font-semibold">Total DeFi TVL</span>
+        <span className="text-sm font-semibold" dir="auto">
+          {tt("market.totalDefiTvl", "Total DeFi TVL")}
+        </span>
       </div>
       <div className="flex items-baseline gap-2">
         <span className="text-3xl font-bold tabular-nums text-teal-400 leading-none">
           {fmtUsd(total)}
         </span>
       </div>
-      <div className="text-xs text-muted-foreground">
-        across <span className="font-medium text-foreground">{fmtNum(protocolCount)}</span> protocols
+      <div className="text-xs text-muted-foreground" dir="auto">
+        {tt("market.acrossProtocols", "across {n} protocols", { n: fmtNum(protocolCount) })}
       </div>
     </Card>
   );
@@ -440,6 +467,7 @@ interface CoinRowProps {
 }
 
 function CoinRow({ coin, onAnalyze }: CoinRowProps) {
+  const tt = useTt();
   const change24h = coin.price_change_percentage_24h_in_currency;
   const change7d = coin.price_change_percentage_7d_in_currency;
   const change30d = coin.price_change_percentage_30d_in_currency;
@@ -470,7 +498,7 @@ function CoinRow({ coin, onAnalyze }: CoinRowProps) {
             <div className="size-5 rounded-full bg-muted/40" />
           )}
           <div className="flex flex-col">
-            <span className="font-medium text-foreground">{coin.name}</span>
+            <span className="font-medium text-foreground" dir="auto">{coin.name}</span>
             <span className="text-[10px] uppercase text-muted-foreground">{coin.symbol}</span>
           </div>
         </div>
@@ -516,10 +544,10 @@ function CoinRow({ coin, onAnalyze }: CoinRowProps) {
                 }}
               >
                 <Eye className="size-3.5" />
-                Analyze
+                {tt("market.analyze", "Analyze")}
               </Button>
             </TooltipTrigger>
-            <TooltipContent>Run framework analysis</TooltipContent>
+            <TooltipContent>{tt("market.runAnalysis", "Run framework analysis")}</TooltipContent>
           </Tooltip>
         </TableCell>
       )}
@@ -538,6 +566,7 @@ interface TrendingRowProps {
 }
 
 function TrendingRow({ coin, index, onAnalyze }: TrendingRowProps) {
+  const tt = useTt();
   const clickable = !!onAnalyze;
   const handleAnalyze = React.useCallback(() => {
     onAnalyze?.(coin.id, coin.name);
@@ -564,7 +593,7 @@ function TrendingRow({ coin, index, onAnalyze }: TrendingRowProps) {
             <div className="size-5 rounded-full bg-muted/40" />
           )}
           <div className="flex flex-col">
-            <span className="font-medium text-foreground">{coin.name}</span>
+            <span className="font-medium text-foreground" dir="auto">{coin.name}</span>
             <span className="text-[10px] uppercase text-muted-foreground">{coin.symbol}</span>
           </div>
         </div>
@@ -589,10 +618,10 @@ function TrendingRow({ coin, index, onAnalyze }: TrendingRowProps) {
                 }}
               >
                 <Eye className="size-3.5" />
-                Analyze
+                {tt("market.analyze", "Analyze")}
               </Button>
             </TooltipTrigger>
-            <TooltipContent>Run framework analysis</TooltipContent>
+            <TooltipContent>{tt("market.runAnalysis", "Run framework analysis")}</TooltipContent>
           </Tooltip>
         </TableCell>
       )}
@@ -605,6 +634,7 @@ function TrendingRow({ coin, index, onAnalyze }: TrendingRowProps) {
 /* -------------------------------------------------------------------------- */
 
 function DefiRow({ p }: { p: TopDefiProtocol }) {
+  const tt = useTt();
   return (
     <TableRow className="text-xs hover:bg-muted/30">
       <TableCell>
@@ -625,7 +655,7 @@ function DefiRow({ p }: { p: TopDefiProtocol }) {
             </div>
           )}
           <div className="flex flex-col">
-            <span className="font-medium text-foreground">{p.name}</span>
+            <span className="font-medium text-foreground" dir="auto">{p.name}</span>
             <span className="text-[10px] uppercase text-muted-foreground">{p.symbol}</span>
           </div>
         </div>
@@ -635,7 +665,7 @@ function DefiRow({ p }: { p: TopDefiProtocol }) {
       </TableCell>
       <TableCell>
         {p.chain ? (
-          <Badge variant="outline" className="border-border/60 bg-muted/30 text-[10px] font-normal">
+          <Badge variant="outline" className="border-border/60 bg-muted/30 text-[10px] font-normal" dir="auto">
             {p.chain.length > 14 ? `${p.chain.slice(0, 13)}…` : p.chain}
           </Badge>
         ) : (
@@ -644,7 +674,7 @@ function DefiRow({ p }: { p: TopDefiProtocol }) {
       </TableCell>
       <TableCell>
         {p.category ? (
-          <Badge variant="outline" className="border-sky-500/30 bg-sky-500/10 text-sky-400 text-[10px] font-normal">
+          <Badge variant="outline" className="border-sky-500/30 bg-sky-500/10 text-sky-400 text-[10px] font-normal" dir="auto">
             {p.category.length > 22 ? `${p.category.slice(0, 21)}…` : p.category}
           </Badge>
         ) : (
@@ -658,7 +688,7 @@ function DefiRow({ p }: { p: TopDefiProtocol }) {
             target="_blank"
             rel="noopener noreferrer"
             className="inline-flex size-6 items-center justify-center rounded-md text-muted-foreground hover:bg-muted/40 hover:text-foreground"
-            aria-label={`Visit ${p.name} website`}
+            aria-label={tt("market.visitWebsiteAria", "Visit {name} website", { name: p.name })}
           >
             <ExternalLink className="size-3.5" />
           </a>
@@ -679,7 +709,7 @@ function FeeRow({ p }: { p: TopFeeProtocol }) {
     <TableRow className="text-xs hover:bg-muted/30">
       <TableCell>
         <div className="flex flex-col">
-          <span className="font-medium text-foreground">{p.name}</span>
+          <span className="font-medium text-foreground" dir="auto">{p.name}</span>
           <span className="text-[10px] uppercase text-muted-foreground">{p.symbol}</span>
         </div>
       </TableCell>
@@ -694,7 +724,7 @@ function FeeRow({ p }: { p: TopFeeProtocol }) {
       </TableCell>
       <TableCell>
         {p.category ? (
-          <Badge variant="outline" className="border-sky-500/30 bg-sky-500/10 text-sky-400 text-[10px] font-normal">
+          <Badge variant="outline" className="border-sky-500/30 bg-sky-500/10 text-sky-400 text-[10px] font-normal" dir="auto">
             {p.category.length > 22 ? `${p.category.slice(0, 21)}…` : p.category}
           </Badge>
         ) : (
@@ -723,6 +753,7 @@ const SECTOR_COLORS = [
 ];
 
 function SectorsChart({ sectors }: { sectors: SectorBreakdown[] }) {
+  const tt = useTt();
   const sorted = React.useMemo(
     () => [...sectors].sort((a, b) => (b.total_market_cap || 0) - (a.total_market_cap || 0)),
     [sectors],
@@ -736,7 +767,7 @@ function SectorsChart({ sectors }: { sectors: SectorBreakdown[] }) {
   if (sorted.length === 0) {
     return (
       <div className="flex h-32 items-center justify-center text-sm text-muted-foreground">
-        No sector data
+        {tt("market.noSectorData", "No sector data")}
       </div>
     );
   }
@@ -764,7 +795,7 @@ function SectorsChart({ sectors }: { sectors: SectorBreakdown[] }) {
                 />
               </TooltipTrigger>
               <TooltipContent>
-                <div className="text-xs">
+                <div className="text-xs" dir="auto">
                   <div className="font-medium">{s.sector}</div>
                   <div className="text-muted-foreground">{fmtUsd(v)} · {((v / total) * 100).toFixed(1)}%</div>
                 </div>
@@ -792,7 +823,7 @@ function SectorsChart({ sectors }: { sectors: SectorBreakdown[] }) {
                   className="size-2.5 shrink-0 rounded-sm"
                   style={{ backgroundColor: color }}
                 />
-                <span className="truncate text-foreground">{s.sector}</span>
+                <span className="truncate text-foreground" dir="auto">{s.sector}</span>
               </div>
               <div className="relative h-2.5 overflow-hidden rounded-full bg-muted/40">
                 <div
@@ -804,10 +835,10 @@ function SectorsChart({ sectors }: { sectors: SectorBreakdown[] }) {
                   }}
                 />
               </div>
-              <div className="flex items-center gap-2 tabular-nums">
+              <div className="flex items-center gap-2 tabular-nums" dir="auto">
                 <span className="font-medium text-foreground">{fmtUsd(v)}</span>
                 <span className="text-muted-foreground text-[10px]">
-                  · {s.count} coins · {w.toFixed(1)}%
+                  · {s.count} {tt("market.coinsLabel", "coins")} · {w.toFixed(1)}%
                 </span>
               </div>
             </div>
@@ -829,10 +860,11 @@ interface CoinTableProps {
 }
 
 function CoinTable({ coins, onAnalyze, emptyHint }: CoinTableProps) {
+  const tt = useTt();
   if (coins.length === 0) {
     return (
       <div className="flex h-32 items-center justify-center text-sm text-muted-foreground">
-        {emptyHint ?? "No coins"}
+        {emptyHint ?? tt("market.noCoins", "No coins")}
       </div>
     );
   }
@@ -841,15 +873,15 @@ function CoinTable({ coins, onAnalyze, emptyHint }: CoinTableProps) {
       <Table>
         <TableHeader className="sticky top-0 z-10 bg-muted/90 backdrop-blur-sm">
           <TableRow className="border-border/40 hover:bg-transparent">
-            <TableHead className="w-12 text-right text-[11px] uppercase tracking-wider text-muted-foreground">#</TableHead>
-            <TableHead className="text-[11px] uppercase tracking-wider text-muted-foreground">Coin</TableHead>
-            <TableHead className="text-right text-[11px] uppercase tracking-wider text-muted-foreground">Price</TableHead>
-            <TableHead className="text-right text-[11px] uppercase tracking-wider text-muted-foreground">Mkt Cap</TableHead>
-            <TableHead className="text-right text-[11px] uppercase tracking-wider text-muted-foreground">Volume</TableHead>
-            <TableHead className="text-right text-[11px] uppercase tracking-wider text-muted-foreground">24h</TableHead>
-            <TableHead className="text-right text-[11px] uppercase tracking-wider text-muted-foreground">7d</TableHead>
-            <TableHead className="text-right text-[11px] uppercase tracking-wider text-muted-foreground">30d</TableHead>
-            {onAnalyze && <TableHead className="w-20 text-right text-[11px] uppercase tracking-wider text-muted-foreground">Action</TableHead>}
+            <TableHead className="w-12 text-right text-[11px] uppercase tracking-wider text-muted-foreground" dir="auto">{tt("market.rank", "#")}</TableHead>
+            <TableHead className="text-[11px] uppercase tracking-wider text-muted-foreground" dir="auto">{tt("market.coin", "Coin")}</TableHead>
+            <TableHead className="text-right text-[11px] uppercase tracking-wider text-muted-foreground" dir="auto">{tt("market.price", "Price")}</TableHead>
+            <TableHead className="text-right text-[11px] uppercase tracking-wider text-muted-foreground" dir="auto">{tt("market.mktCap", "Mkt Cap")}</TableHead>
+            <TableHead className="text-right text-[11px] uppercase tracking-wider text-muted-foreground" dir="auto">{tt("market.volume", "Volume")}</TableHead>
+            <TableHead className="text-right text-[11px] uppercase tracking-wider text-muted-foreground" dir="auto">{tt("market.col24h", "24h")}</TableHead>
+            <TableHead className="text-right text-[11px] uppercase tracking-wider text-muted-foreground" dir="auto">{tt("market.col7d", "7d")}</TableHead>
+            <TableHead className="text-right text-[11px] uppercase tracking-wider text-muted-foreground" dir="auto">{tt("market.col30d", "30d")}</TableHead>
+            {onAnalyze && <TableHead className="w-20 text-right text-[11px] uppercase tracking-wider text-muted-foreground" dir="auto">{tt("market.colAction", "Action")}</TableHead>}
           </TableRow>
         </TableHeader>
         <TableBody>
@@ -873,10 +905,11 @@ function TrendingTable({
   coins: TrendingCoin[];
   onAnalyze?: (geckoId: string, name: string) => void;
 }) {
+  const tt = useTt();
   if (coins.length === 0) {
     return (
       <div className="flex h-32 items-center justify-center text-sm text-muted-foreground">
-        No trending coins
+        {tt("market.noTrendingCoins", "No trending coins")}
       </div>
     );
   }
@@ -885,11 +918,11 @@ function TrendingTable({
       <Table>
         <TableHeader className="sticky top-0 z-10 bg-muted/90 backdrop-blur-sm">
           <TableRow className="border-border/40 hover:bg-transparent">
-            <TableHead className="w-12 text-right text-[11px] uppercase tracking-wider text-muted-foreground">Rank</TableHead>
-            <TableHead className="text-[11px] uppercase tracking-wider text-muted-foreground">Coin</TableHead>
-            <TableHead className="text-right text-[11px] uppercase tracking-wider text-muted-foreground">Mkt Cap Rank</TableHead>
-            <TableHead className="text-right text-[11px] uppercase tracking-wider text-muted-foreground">Price (BTC)</TableHead>
-            {onAnalyze && <TableHead className="w-20 text-right text-[11px] uppercase tracking-wider text-muted-foreground">Action</TableHead>}
+            <TableHead className="w-12 text-right text-[11px] uppercase tracking-wider text-muted-foreground" dir="auto">{tt("market.colRank", "Rank")}</TableHead>
+            <TableHead className="text-[11px] uppercase tracking-wider text-muted-foreground" dir="auto">{tt("market.coin", "Coin")}</TableHead>
+            <TableHead className="text-right text-[11px] uppercase tracking-wider text-muted-foreground" dir="auto">{tt("market.colMktCapRank", "Mkt Cap Rank")}</TableHead>
+            <TableHead className="text-right text-[11px] uppercase tracking-wider text-muted-foreground" dir="auto">{tt("market.colPriceBtc", "Price (BTC)")}</TableHead>
+            {onAnalyze && <TableHead className="w-20 text-right text-[11px] uppercase tracking-wider text-muted-foreground" dir="auto">{tt("market.colAction", "Action")}</TableHead>}
           </TableRow>
         </TableHeader>
         <TableBody>
@@ -907,10 +940,11 @@ function TrendingTable({
 /* -------------------------------------------------------------------------- */
 
 function DefiTable({ protocols }: { protocols: TopDefiProtocol[] }) {
+  const tt = useTt();
   if (protocols.length === 0) {
     return (
       <div className="flex h-32 items-center justify-center text-sm text-muted-foreground">
-        No DeFi protocols
+        {tt("market.noDefiProtocols", "No DeFi protocols")}
       </div>
     );
   }
@@ -919,11 +953,11 @@ function DefiTable({ protocols }: { protocols: TopDefiProtocol[] }) {
       <Table>
         <TableHeader className="sticky top-0 z-10 bg-muted/90 backdrop-blur-sm">
           <TableRow className="border-border/40 hover:bg-transparent">
-            <TableHead className="text-[11px] uppercase tracking-wider text-muted-foreground">Protocol</TableHead>
-            <TableHead className="text-right text-[11px] uppercase tracking-wider text-muted-foreground">TVL</TableHead>
-            <TableHead className="text-[11px] uppercase tracking-wider text-muted-foreground">Chain</TableHead>
-            <TableHead className="text-[11px] uppercase tracking-wider text-muted-foreground">Category</TableHead>
-            <TableHead className="w-12 text-right text-[11px] uppercase tracking-wider text-muted-foreground">Link</TableHead>
+            <TableHead className="text-[11px] uppercase tracking-wider text-muted-foreground" dir="auto">{tt("market.protocol", "Protocol")}</TableHead>
+            <TableHead className="text-right text-[11px] uppercase tracking-wider text-muted-foreground" dir="auto">{tt("market.tvl", "TVL")}</TableHead>
+            <TableHead className="text-[11px] uppercase tracking-wider text-muted-foreground" dir="auto">{tt("market.chain", "Chain")}</TableHead>
+            <TableHead className="text-[11px] uppercase tracking-wider text-muted-foreground" dir="auto">{tt("market.category", "Category")}</TableHead>
+            <TableHead className="w-12 text-right text-[11px] uppercase tracking-wider text-muted-foreground" dir="auto">{tt("market.link", "Link")}</TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
@@ -937,10 +971,11 @@ function DefiTable({ protocols }: { protocols: TopDefiProtocol[] }) {
 }
 
 function FeesTable({ protocols }: { protocols: TopFeeProtocol[] }) {
+  const tt = useTt();
   if (protocols.length === 0) {
     return (
       <div className="flex h-32 items-center justify-center text-sm text-muted-foreground">
-        No fee data
+        {tt("market.noFeeData", "No fee data")}
       </div>
     );
   }
@@ -949,11 +984,11 @@ function FeesTable({ protocols }: { protocols: TopFeeProtocol[] }) {
       <Table>
         <TableHeader className="sticky top-0 z-10 bg-muted/90 backdrop-blur-sm">
           <TableRow className="border-border/40 hover:bg-transparent">
-            <TableHead className="text-[11px] uppercase tracking-wider text-muted-foreground">Protocol</TableHead>
-            <TableHead className="text-right text-[11px] uppercase tracking-wider text-muted-foreground">24h Fees</TableHead>
-            <TableHead className="text-right text-[11px] uppercase tracking-wider text-muted-foreground">24h Revenue</TableHead>
-            <TableHead className="text-right text-[11px] uppercase tracking-wider text-muted-foreground">30d Fees</TableHead>
-            <TableHead className="text-[11px] uppercase tracking-wider text-muted-foreground">Category</TableHead>
+            <TableHead className="text-[11px] uppercase tracking-wider text-muted-foreground" dir="auto">{tt("market.protocol", "Protocol")}</TableHead>
+            <TableHead className="text-right text-[11px] uppercase tracking-wider text-muted-foreground" dir="auto">{tt("market.fees24h", "24h Fees")}</TableHead>
+            <TableHead className="text-right text-[11px] uppercase tracking-wider text-muted-foreground" dir="auto">{tt("market.revenue24h", "24h Revenue")}</TableHead>
+            <TableHead className="text-right text-[11px] uppercase tracking-wider text-muted-foreground" dir="auto">{tt("market.fees30d", "30d Fees")}</TableHead>
+            <TableHead className="text-[11px] uppercase tracking-wider text-muted-foreground" dir="auto">{tt("market.category", "Category")}</TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
@@ -1006,16 +1041,17 @@ function LoadingView() {
 /* -------------------------------------------------------------------------- */
 
 function ErrorView({ message, onRetry }: { message: string; onRetry: () => void }) {
+  const tt = useTt();
   return (
     <Alert variant="destructive" className="border-rose-500/40 bg-rose-500/5">
       <AlertCircle className="size-4" />
-      <AlertTitle>Failed to load market data</AlertTitle>
+      <AlertTitle dir="auto">{tt("market.errorTitle", "Failed to load market data")}</AlertTitle>
       <AlertDescription>
         <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-          <span className="text-xs">{message}</span>
+          <span className="text-xs" dir="auto">{message}</span>
           <Button size="sm" variant="outline" onClick={onRetry} className="w-fit">
             <RefreshCw className="size-3.5" />
-            Retry
+            {tt("market.retry", "Retry")}
           </Button>
         </div>
       </AlertDescription>
@@ -1029,6 +1065,7 @@ function ErrorView({ message, onRetry }: { message: string; onRetry: () => void 
 
 /** Upgrade card shown when CMC Pro API key is not configured. */
 function CmcProRequired({ title, description }: { title: string; description: string }) {
+  const tt = useTt();
   return (
     <Card className="border-amber-500/30 bg-amber-500/5">
       <CardContent className="flex flex-col items-center gap-3 py-12 text-center">
@@ -1036,11 +1073,11 @@ function CmcProRequired({ title, description }: { title: string; description: st
           <KeyRound className="size-6" />
         </div>
         <div className="space-y-1">
-          <h3 className="text-sm font-semibold text-foreground">{title}</h3>
-          <p className="mx-auto max-w-md text-xs text-muted-foreground">{description}</p>
+          <h3 className="text-sm font-semibold text-foreground" dir="auto">{title}</h3>
+          <p className="mx-auto max-w-md text-xs text-muted-foreground" dir="auto">{description}</p>
         </div>
-        <div className="rounded-md border border-amber-500/20 bg-amber-500/10 px-3 py-1.5 text-[11px] text-amber-600 dark:text-amber-400">
-          Set <code className="font-mono">CMC_API_KEY</code> env var to unlock this data
+        <div className="rounded-md border border-amber-500/20 bg-amber-500/10 px-3 py-1.5 text-[11px] text-amber-600 dark:text-amber-400" dir="auto">
+          {tt("market.setCmcKey", "Set {env} env var to unlock this data", { env: "CMC_API_KEY" })}
         </div>
       </CardContent>
     </Card>
@@ -1049,18 +1086,19 @@ function CmcProRequired({ title, description }: { title: string; description: st
 
 /** Airdrops table — CMC Pro exclusive. */
 function AirdropsTable({ airdrops }: { airdrops: CmcAirdrop[] }) {
+  const tt = useTt();
   return (
     <div className="overflow-x-auto">
       <Table>
         <TableHeader>
           <TableRow className="hover:bg-transparent">
-            <TableHead className="text-xs">Project</TableHead>
-            <TableHead className="text-xs">Status</TableHead>
-            <TableHead className="text-right text-xs">Total Value</TableHead>
-            <TableHead className="text-right text-xs">Participants</TableHead>
-            <TableHead className="text-xs">Start</TableHead>
-            <TableHead className="text-xs">End</TableHead>
-            <TableHead className="text-xs">Link</TableHead>
+            <TableHead className="text-xs" dir="auto">{tt("market.colProject", "Project")}</TableHead>
+            <TableHead className="text-xs" dir="auto">{tt("market.colStatus", "Status")}</TableHead>
+            <TableHead className="text-right text-xs" dir="auto">{tt("market.colValue", "Total Value")}</TableHead>
+            <TableHead className="text-right text-xs" dir="auto">{tt("market.colParticipants", "Participants")}</TableHead>
+            <TableHead className="text-xs" dir="auto">{tt("market.colStart", "Start")}</TableHead>
+            <TableHead className="text-xs" dir="auto">{tt("market.colEnd", "End")}</TableHead>
+            <TableHead className="text-xs" dir="auto">{tt("market.colLink", "Link")}</TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
@@ -1120,23 +1158,24 @@ function AirdropsTable({ airdrops }: { airdrops: CmcAirdrop[] }) {
 
 /** Categories table — CMC Pro exclusive. */
 function CategoriesTable({ categories }: { categories: CmcCategory[] }) {
+  const tt = useTt();
   return (
     <div className="overflow-x-auto">
       <Table>
         <TableHeader>
           <TableRow className="hover:bg-transparent">
-            <TableHead className="text-xs">Category</TableHead>
-            <TableHead className="text-right text-xs">Tokens</TableHead>
-            <TableHead className="text-right text-xs">Market Cap</TableHead>
-            <TableHead className="text-right text-xs">24h %</TableHead>
-            <TableHead className="text-right text-xs">Volume 24h</TableHead>
-            <TableHead className="text-xs">Top Coins</TableHead>
+            <TableHead className="text-xs" dir="auto">{tt("market.category", "Category")}</TableHead>
+            <TableHead className="text-right text-xs" dir="auto">{tt("market.colTokens", "Tokens")}</TableHead>
+            <TableHead className="text-right text-xs" dir="auto">{tt("market.colMarketCap", "Market Cap")}</TableHead>
+            <TableHead className="text-right text-xs" dir="auto">{tt("market.col24h", "24h %")}</TableHead>
+            <TableHead className="text-right text-xs" dir="auto">{tt("market.colVolume24h", "Volume 24h")}</TableHead>
+            <TableHead className="text-xs" dir="auto">{tt("market.colTopCoins", "Top Coins")}</TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
           {categories.map((c) => (
             <TableRow key={c.id} className="text-xs">
-              <TableCell className="font-medium">{c.name}</TableCell>
+              <TableCell className="font-medium" dir="auto">{c.name}</TableCell>
               <TableCell className="text-right tabular-nums text-muted-foreground">{c.num_tokens}</TableCell>
               <TableCell className="text-right tabular-nums">
                 {c.market_cap != null ? `$${(c.market_cap / 1e9).toFixed(2)}B` : "—"}
@@ -1216,8 +1255,8 @@ export function MarketIntelligenceView({ onAnalyzeCoin }: MarketIntelligenceView
      when the translation is missing, so we fall back to the provided English
      string in that case (translations will be added later under `market.*`). */
   const tt = React.useCallback(
-    (key: string, fallback: string): string => {
-      const v = t(key);
+    (key: string, fallback: string, vars?: Record<string, string | number>): string => {
+      const v = t(key, vars);
       return typeof v === "string" && v !== key ? v : fallback;
     },
     [t],
@@ -1260,8 +1299,8 @@ export function MarketIntelligenceView({ onAnalyzeCoin }: MarketIntelligenceView
           </div>
           <div className="flex items-center gap-3">
             {cacheAge != null && (
-              <span className="text-[11px] text-muted-foreground tabular-nums">
-                Updated {formatAge(cacheAge)}
+              <span className="text-[11px] text-muted-foreground tabular-nums" dir="auto">
+                {tt("market.updated", "Updated")} {formatAge(cacheAge)}
               </span>
             )}
             <Tooltip>
@@ -1274,10 +1313,10 @@ export function MarketIntelligenceView({ onAnalyzeCoin }: MarketIntelligenceView
                   className="gap-2"
                 >
                   <RefreshCw className={`size-3.5 ${refreshing ? "animate-spin" : ""}`} />
-                  {refreshing ? "Refreshing…" : "Refresh"}
+                  {refreshing ? tt("market.refreshing", "Refreshing…") : tt("market.refresh", "Refresh")}
                 </Button>
               </TooltipTrigger>
-              <TooltipContent>Force re-fetch from upstream</TooltipContent>
+              <TooltipContent>{tt("market.forceRefresh", "Force re-fetch from upstream")}</TooltipContent>
             </Tooltip>
           </div>
         </div>
@@ -1295,27 +1334,27 @@ export function MarketIntelligenceView({ onAnalyzeCoin }: MarketIntelligenceView
             <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
               <StatCard
                 icon={<DollarSign className="size-4" />}
-                label="Total Market Cap"
+                label={tt("market.totalMarketCap", "TOTAL MARKET CAP")}
                 value={fmtUsd(g?.total_market_cap_usd ?? null)}
                 accent="teal"
                 sub={
-                  <span className={pctColor(mcapChange)}>
+                  <span className={pctColor(mcapChange)} dir="auto">
                     {fmtPct(mcapChange)} (24h)
                   </span>
                 }
               />
               <StatCard
                 icon={mcapChange != null && mcapChange >= 0 ? <TrendingUp className="size-4" /> : <TrendingDown className="size-4" />}
-                label="24h Change"
+                label={tt("market.change24h", "24H CHANGE")}
                 value={
                   <span className={pctColor(mcapChange)}>{fmtPct(mcapChange)}</span>
                 }
                 accent={mcapChange != null && mcapChange >= 0 ? "emerald" : "rose"}
-                sub="Market cap Δ"
+                sub={tt("market.marketCapDelta", "Market cap Δ")}
               />
               <StatCard
                 icon={<Coins className="size-4" />}
-                label="BTC Dominance"
+                label={tt("market.btcDominance", "BTC DOMINANCE")}
                 value={
                   g?.btc_dominance != null
                     ? `${g.btc_dominance.toFixed(2)}%`
@@ -1330,24 +1369,24 @@ export function MarketIntelligenceView({ onAnalyzeCoin }: MarketIntelligenceView
               />
               <StatCard
                 icon={<Activity className="size-4" />}
-                label="24h Volume"
+                label={tt("market.volume24h", "24H VOLUME")}
                 value={fmtUsd(g?.total_volume_usd ?? null)}
                 accent="sky"
-                sub="Total spot volume"
+                sub={tt("market.totalSpotVolume", "Total spot volume")}
               />
               <StatCard
                 icon={<Boxes className="size-4" />}
-                label="Active Coins"
+                label={tt("market.activeCoins", "ACTIVE COINS")}
                 value={fmtNum(g?.active_cryptocurrencies ?? null)}
                 accent="violet"
-                sub={`${fmtNum(data.coin_count)} tracked`}
+                sub={`${fmtNum(data.coin_count)} ${tt("market.tracked", "tracked")}`}
               />
               <StatCard
                 icon={<Building2 className="size-4" />}
-                label="Markets"
+                label={tt("market.markets", "MARKETS")}
                 value={fmtNum(g?.markets ?? null)}
                 accent="default"
-                sub={`${fmtNum(data.defi_protocol_count)} DeFi protocols`}
+                sub={`${fmtNum(data.defi_protocol_count)} ${tt("market.defiProtocols", "DeFi protocols")}`}
               />
             </div>
 
@@ -1365,52 +1404,52 @@ export function MarketIntelligenceView({ onAnalyzeCoin }: MarketIntelligenceView
               <TabsList className="flex h-auto w-full flex-wrap gap-1 bg-muted/60 p-1 sm:w-fit">
                 <TabsTrigger value="top" className="gap-1.5 text-xs">
                   <BarChart3 className="size-3.5" />
-                  Top Coins
+                  <span dir="auto">{tt("market.topCoins", "Top Coins")}</span>
                   <Badge variant="secondary" className="ml-1 h-4 px-1 text-[10px]">{counts.top}</Badge>
                 </TabsTrigger>
                 <TabsTrigger value="gainers" className="gap-1.5 text-xs">
                   <TrendingUp className="size-3.5 text-emerald-500" />
-                  Gainers
+                  <span dir="auto">{tt("market.gainers", "Gainers")}</span>
                   <Badge variant="secondary" className="ml-1 h-4 px-1 text-[10px]">{counts.gainers}</Badge>
                 </TabsTrigger>
                 <TabsTrigger value="losers" className="gap-1.5 text-xs">
                   <TrendingDown className="size-3.5 text-rose-500" />
-                  Losers
+                  <span dir="auto">{tt("market.losers", "Losers")}</span>
                   <Badge variant="secondary" className="ml-1 h-4 px-1 text-[10px]">{counts.losers}</Badge>
                 </TabsTrigger>
                 <TabsTrigger value="trending" className="gap-1.5 text-xs">
                   <Flame className="size-3.5 text-orange-500" />
-                  Trending
+                  <span dir="auto">{tt("market.trending", "Trending")}</span>
                   <Badge variant="secondary" className="ml-1 h-4 px-1 text-[10px]">{counts.trending}</Badge>
                 </TabsTrigger>
                 <TabsTrigger value="defi" className="gap-1.5 text-xs">
                   <Layers className="size-3.5 text-teal-500" />
-                  Top DeFi
+                  <span dir="auto">{tt("market.topDefi", "Top DeFi")}</span>
                   <Badge variant="secondary" className="ml-1 h-4 px-1 text-[10px]">{counts.defi}</Badge>
                 </TabsTrigger>
                 <TabsTrigger value="fees" className="gap-1.5 text-xs">
                   <Wallet className="size-3.5 text-amber-500" />
-                  Top Fees
+                  <span dir="auto">{tt("market.topFees", "Top Fees")}</span>
                   <Badge variant="secondary" className="ml-1 h-4 px-1 text-[10px]">{counts.fees}</Badge>
                 </TabsTrigger>
                 <TabsTrigger value="sectors" className="gap-1.5 text-xs">
                   <Sparkles className="size-3.5 text-violet-500" />
-                  Sectors
+                  <span dir="auto">{tt("market.sectors", "Sectors")}</span>
                   <Badge variant="secondary" className="ml-1 h-4 px-1 text-[10px]">{counts.sectors}</Badge>
                 </TabsTrigger>
                 {/* CMC Pro exclusive tabs — marked with key icon */}
                 <TabsTrigger value="airdrops" className="gap-1.5 text-xs">
                   <Gift className="size-3.5 text-amber-500" />
-                  Airdrops
+                  <span dir="auto">{tt("market.airdrops", "Airdrops")}</span>
                   <Badge variant="outline" className="ml-1 h-4 gap-0.5 border-amber-500/30 px-1 text-[9px] text-amber-500">
-                    <KeyRound className="size-2.5" />PRO
+                    <KeyRound className="size-2.5" />{tt("market.pro", "PRO")}
                   </Badge>
                 </TabsTrigger>
                 <TabsTrigger value="categories" className="gap-1.5 text-xs">
                   <Boxes className="size-3.5 text-cyan-500" />
-                  Categories
+                  <span dir="auto">{tt("market.categories", "Categories")}</span>
                   <Badge variant="outline" className="ml-1 h-4 gap-0.5 border-amber-500/30 px-1 text-[9px] text-amber-500">
-                    <KeyRound className="size-2.5" />PRO
+                    <KeyRound className="size-2.5" />{tt("market.pro", "PRO")}
                   </Badge>
                 </TabsTrigger>
               </TabsList>
@@ -1419,11 +1458,11 @@ export function MarketIntelligenceView({ onAnalyzeCoin }: MarketIntelligenceView
               <TabsContent value="top">
                 <Card className="border-border/60 bg-card/40 backdrop-blur-sm p-0">
                   <CardHeader className="px-4 py-3">
-                    <CardTitle className="text-sm">
-                      Top {counts.top} Coins by Market Cap
+                    <CardTitle className="text-sm" dir="auto">
+                      {tt("market.topCoinsTitle", "Top {n} Coins by Market Cap", { n: counts.top })}
                     </CardTitle>
-                    <CardDescription className="text-xs">
-                      Click any row to run the framework analysis in the Coin Explorer.
+                    <CardDescription className="text-xs" dir="auto">
+                      {tt("market.clickToAnalyze", "Click any row to run the framework analysis in the Coin Explorer.")}
                     </CardDescription>
                   </CardHeader>
                   <CardContent className="px-4 pb-4">
@@ -1438,10 +1477,10 @@ export function MarketIntelligenceView({ onAnalyzeCoin }: MarketIntelligenceView
                   <CardHeader className="px-4 py-3">
                     <CardTitle className="text-sm flex items-center gap-2">
                       <TrendingUp className="size-4 text-emerald-500" />
-                      Top {counts.gainers} Gainers (24h)
+                      <span dir="auto">{tt("market.gainersTitle", "Top {n} Gainers (24h)", { n: counts.gainers })}</span>
                     </CardTitle>
-                    <CardDescription className="text-xs">
-                      Biggest 24h price increases across tracked coins.
+                    <CardDescription className="text-xs" dir="auto">
+                      {tt("market.gainersDescLong", "Biggest 24h price increases across tracked coins.")}
                     </CardDescription>
                   </CardHeader>
                   <CardContent className="px-4 pb-4">
@@ -1456,10 +1495,10 @@ export function MarketIntelligenceView({ onAnalyzeCoin }: MarketIntelligenceView
                   <CardHeader className="px-4 py-3">
                     <CardTitle className="text-sm flex items-center gap-2">
                       <TrendingDown className="size-4 text-rose-500" />
-                      Top {counts.losers} Losers (24h)
+                      <span dir="auto">{tt("market.losersTitle", "Top {n} Losers (24h)", { n: counts.losers })}</span>
                     </CardTitle>
-                    <CardDescription className="text-xs">
-                      Biggest 24h price decreases across tracked coins.
+                    <CardDescription className="text-xs" dir="auto">
+                      {tt("market.losersDescLong", "Biggest 24h price decreases across tracked coins.")}
                     </CardDescription>
                   </CardHeader>
                   <CardContent className="px-4 pb-4">
@@ -1474,10 +1513,10 @@ export function MarketIntelligenceView({ onAnalyzeCoin }: MarketIntelligenceView
                   <CardHeader className="px-4 py-3">
                     <CardTitle className="text-sm flex items-center gap-2">
                       <Flame className="size-4 text-orange-500" />
-                      Top {counts.trending} Trending Searches
+                      <span dir="auto">{tt("market.trendingTitle", "Top {n} Trending Searches", { n: counts.trending })}</span>
                     </CardTitle>
-                    <CardDescription className="text-xs">
-                      Most-searched coins on CoinGecko in the last 24h.
+                    <CardDescription className="text-xs" dir="auto">
+                      {tt("market.trendingDescLong", "Most-searched coins on CoinGecko in the last 24h.")}
                     </CardDescription>
                   </CardHeader>
                   <CardContent className="px-4 pb-4">
@@ -1492,10 +1531,10 @@ export function MarketIntelligenceView({ onAnalyzeCoin }: MarketIntelligenceView
                   <CardHeader className="px-4 py-3">
                     <CardTitle className="text-sm flex items-center gap-2">
                       <Layers className="size-4 text-teal-500" />
-                      Top {counts.defi} DeFi Protocols by TVL
+                      <span dir="auto">{tt("market.topDefiTitle", "Top {n} DeFi Protocols by TVL", { n: counts.defi })}</span>
                     </CardTitle>
-                    <CardDescription className="text-xs">
-                      Live TVL across chains — DeFiLlama's headline table.
+                    <CardDescription className="text-xs" dir="auto">
+                      {tt("market.topDefiDescLong", "Live TVL across chains — DeFiLlama's headline table.")}
                     </CardDescription>
                   </CardHeader>
                   <CardContent className="px-4 pb-4">
@@ -1510,10 +1549,10 @@ export function MarketIntelligenceView({ onAnalyzeCoin }: MarketIntelligenceView
                   <CardHeader className="px-4 py-3">
                     <CardTitle className="text-sm flex items-center gap-2">
                       <Wallet className="size-4 text-amber-500" />
-                      Top {counts.fees} Fee Generators
+                      <span dir="auto">{tt("market.topFeesTitle", "Top {n} Fee Generators", { n: counts.fees })}</span>
                     </CardTitle>
-                    <CardDescription className="text-xs">
-                      Protocols ranked by 24h fees &amp; revenue — DeFiLlama fees.
+                    <CardDescription className="text-xs" dir="auto">
+                      {tt("market.topFeesDescLong", "Protocols ranked by 24h fees & revenue — DeFiLlama fees.")}
                     </CardDescription>
                   </CardHeader>
                   <CardContent className="px-4 pb-4">
@@ -1528,10 +1567,10 @@ export function MarketIntelligenceView({ onAnalyzeCoin }: MarketIntelligenceView
                   <CardHeader className="px-4 py-3">
                     <CardTitle className="text-sm flex items-center gap-2">
                       <Sparkles className="size-4 text-violet-500" />
-                      Sector Breakdown ({counts.sectors})
+                      <span dir="auto">{tt("market.sectorsTitle", "Sector Breakdown ({n})", { n: counts.sectors })}</span>
                     </CardTitle>
-                    <CardDescription className="text-xs">
-                      Market cap distribution across crypto sectors.
+                    <CardDescription className="text-xs" dir="auto">
+                      {tt("market.sectorsDescLong", "Market cap distribution across crypto sectors.")}
                     </CardDescription>
                   </CardHeader>
                   <CardContent className="px-4 pb-4">
@@ -1546,27 +1585,33 @@ export function MarketIntelligenceView({ onAnalyzeCoin }: MarketIntelligenceView
                   <CardHeader className="px-4 py-3">
                     <CardTitle className="text-sm flex items-center gap-2">
                       <Gift className="size-4 text-amber-500" />
-                      Crypto Airdrops
+                      <span dir="auto">{tt("market.cryptoAirdrops", "Crypto Airdrops")}</span>
                       <Badge variant="outline" className="gap-0.5 border-amber-500/30 text-[10px] text-amber-500">
-                        <KeyRound className="size-3" />CMC PRO
+                        <KeyRound className="size-3" />{tt("market.cmcPro", "CMC PRO")}
                       </Badge>
                     </CardTitle>
-                    <CardDescription className="text-xs">
-                      Active airdrops — total value, participants, requirements. Exclusive to CoinMarketCap Pro API.
+                    <CardDescription className="text-xs" dir="auto">
+                      {tt("market.airdropsDesc", "Active airdrops — total value, participants, requirements. Exclusive to CoinMarketCap Pro API.")}
                     </CardDescription>
                   </CardHeader>
                   <CardContent className="px-4 pb-4">
                     {airdropsLoading && <Skeleton className="h-64 w-full" />}
                     {!airdropsLoading && airdropsData?.cmc_pro_required && (
                       <CmcProRequired
-                        title="Airdrops require CMC Pro API key"
-                        description="Airdrop data (total value, participants, requirements, dates) is exclusively available through the CoinMarketCap Pro API — no free source provides this structured data."
+                        title={tt("market.airdropsRequireCmcPro", "Airdrops require CMC Pro API key")}
+                        description={tt("market.airdropsRequireCmcProDesc", "Airdrop data (total value, participants, requirements, dates) is exclusively available through the CoinMarketCap Pro API — no free source provides this structured data.")}
                       />
                     )}
-                    {!airdropsLoading && airdropsData && !airdropsData.cmc_pro_required && (
+                    {!airdropsLoading && airdropsData?.plan_not_supported && (
+                      <CmcProRequired
+                        title={tt("market.airdropsNotAvailablePlan", "Airdrops not available on your CMC plan")}
+                        description={tt("market.airdropsNotAvailablePlanDesc", "Your CoinMarketCap API key is active but its subscription plan doesn't include the airdrops endpoint. Upgrade to a higher tier (Professional or above) to unlock airdrop data.")}
+                      />
+                    )}
+                    {!airdropsLoading && airdropsData && !airdropsData.cmc_pro_required && !airdropsData.plan_not_supported && (
                       <>
-                        <p className="mb-3 text-xs text-muted-foreground">
-                          Showing {airdropsData.count} ongoing airdrops
+                        <p className="mb-3 text-xs text-muted-foreground" dir="auto">
+                          {tt("market.showingAirdrops", "Showing {count} ongoing airdrops", { count: airdropsData.count })}
                         </p>
                         <AirdropsTable airdrops={airdropsData.airdrops} />
                       </>
@@ -1581,27 +1626,27 @@ export function MarketIntelligenceView({ onAnalyzeCoin }: MarketIntelligenceView
                   <CardHeader className="px-4 py-3">
                     <CardTitle className="text-sm flex items-center gap-2">
                       <Boxes className="size-4 text-cyan-500" />
-                      CMC Categories
+                      <span dir="auto">{tt("market.cmcCategories", "CMC Categories")}</span>
                       <Badge variant="outline" className="gap-0.5 border-amber-500/30 text-[10px] text-amber-500">
-                        <KeyRound className="size-3" />CMC PRO
+                        <KeyRound className="size-3" />{tt("market.cmcPro", "CMC PRO")}
                       </Badge>
                     </CardTitle>
-                    <CardDescription className="text-xs">
-                      Market cap & volume by CoinMarketCap category — richer than inferred sectors, with 24h/7d changes.
+                    <CardDescription className="text-xs" dir="auto">
+                      {tt("market.categoriesDescLong", "Market cap & volume by CoinMarketCap category — richer than inferred sectors, with 24h/7d changes.")}
                     </CardDescription>
                   </CardHeader>
                   <CardContent className="px-4 pb-4">
                     {categoriesLoading && <Skeleton className="h-64 w-full" />}
                     {!categoriesLoading && categoriesData?.cmc_pro_required && (
                       <CmcProRequired
-                        title="Categories require CMC Pro API key"
-                        description="CoinMarketCap's category taxonomy includes per-category market cap, 24h/7d changes, volume, and top 3 coins — data not available from free sources."
+                        title={tt("market.categoriesRequireCmcPro", "Categories require CMC Pro API key")}
+                        description={tt("market.categoriesRequireCmcProDesc", "CoinMarketCap's category taxonomy includes per-category market cap, 24h/7d changes, volume, and top 3 coins — data not available from free sources.")}
                       />
                     )}
                     {!categoriesLoading && categoriesData && !categoriesData.cmc_pro_required && (
                       <>
-                        <p className="mb-3 text-xs text-muted-foreground">
-                          Showing {categoriesData.count} categories
+                        <p className="mb-3 text-xs text-muted-foreground" dir="auto">
+                          {tt("market.showingCategories", "Showing {count} categories", { count: categoriesData.count })}
                         </p>
                         <CategoriesTable categories={categoriesData.categories} />
                       </>

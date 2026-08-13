@@ -362,6 +362,7 @@ export interface CmcAirdrop {
 
 export interface CmcAirdropsResponse {
   cmc_pro_required?: boolean;
+  plan_not_supported?: boolean;
   airdrops: CmcAirdrop[];
   count: number;
   status_filter?: string;

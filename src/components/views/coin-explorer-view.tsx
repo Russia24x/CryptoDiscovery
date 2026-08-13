@@ -88,15 +88,15 @@ const PERSONAS: { value: Persona; label: string; desc: string }[] = [
   { value: "comprehensive", label: "Comprehensive", desc: "Balanced across all axes" },
 ];
 
-const ANALYZE_PHASE_MESSAGES: string[] = [
-  "Collecting evidence from CoinGecko, DeFiLlama & CoinMarketCap…",
-  "Screening candidate against persona criteria…",
-  "Cross-verifying TVL, market cap & fees across sources…",
-  "Evaluating the 5 fundamental axes…",
-  "Computing valuation multiples (P/R, P/F, P/T)…",
-  "Running veto & severe-risk checks…",
-  "Synthesizing final thesis & decision…",
-  "Formatting report…",
+const ANALYZE_PHASE_MESSAGES: { key: string; fallback: string }[] = [
+  { key: "explorer.phaseMessage1", fallback: "Collecting evidence from CoinGecko, DeFiLlama & CoinMarketCap…" },
+  { key: "explorer.phaseMessage2", fallback: "Screening candidate against persona criteria…" },
+  { key: "explorer.phaseMessage3", fallback: "Cross-verifying TVL, market cap & fees across sources…" },
+  { key: "explorer.phaseMessage4", fallback: "Evaluating the 5 fundamental axes…" },
+  { key: "explorer.phaseMessage5", fallback: "Computing valuation multiples (P/R, P/F, P/T)…" },
+  { key: "explorer.phaseMessage6", fallback: "Running veto & severe-risk checks…" },
+  { key: "explorer.phaseMessage7", fallback: "Synthesizing final thesis & decision…" },
+  { key: "explorer.phaseMessage8", fallback: "Formatting report…" },
 ];
 
 // --------------------------------------------------------------------------- //
@@ -233,7 +233,7 @@ export function CoinExplorerView({
         setResults(Array.isArray(data.results) ? data.results : []);
       } catch (e) {
         if (cancelled) return;
-        setSearchError(e instanceof Error ? e.message : "Search failed");
+        setSearchError(e instanceof Error ? e.message : tf("explorer.searchFailed", "Search failed"));
         setResults([]);
       } finally {
         if (!cancelled) setSearching(false);
@@ -418,7 +418,7 @@ export function CoinExplorerView({
       setReport(data as FullReport);
     } catch (e) {
       if ((e as Error)?.name === "AbortError") return; // user cancelled
-      setError(e instanceof Error ? e.message : "Analysis failed");
+      setError(e instanceof Error ? e.message : tf("explorer.errorTitle", "Analysis failed"));
     } finally {
       if (analyzeAbortRef.current === ctrl) {
         analyzeAbortRef.current = null;
@@ -796,6 +796,8 @@ function SelectedCoinPanel({
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
             {PERSONAS.map((p) => {
               const isActive = persona === p.value;
+              const label = tf(`personas.${p.value}`, p.label);
+              const desc = tf(`personas.${p.value}Desc`, p.desc);
               return (
                 <button
                   key={p.value}
@@ -814,11 +816,12 @@ function SelectedCoinPanel({
                       "text-sm font-medium leading-tight",
                       isActive ? "text-emerald-300" : "text-foreground",
                     )}
+                    dir="auto"
                   >
-                    {p.label}
+                    {label}
                   </span>
-                  <span className="text-[11px] leading-snug text-muted-foreground">
-                    {p.desc}
+                  <span className="text-[11px] leading-snug text-muted-foreground" dir="auto">
+                    {desc}
                   </span>
                   {isActive && (
                     <span className="absolute right-2 top-2 size-1.5 rounded-full bg-emerald-400 shadow-[0_0_8px] shadow-emerald-400/60" />
@@ -904,9 +907,10 @@ function AnalyzingCard({
             </h3>
             <p
               key={phaseIdx}
+              dir="auto"
               className="text-sm text-muted-foreground transition-opacity duration-300 max-w-md"
             >
-              {ANALYZE_PHASE_MESSAGES[phaseIdx]}
+              {tf(ANALYZE_PHASE_MESSAGES[phaseIdx].key, ANALYZE_PHASE_MESSAGES[phaseIdx].fallback)}
             </p>
           </div>
 
@@ -1108,7 +1112,7 @@ function ReportCard({
               <KeyLinkIcon
                 href={candidate.blockchain_explorer}
                 icon={<Crosshair className="size-4" />}
-                label={tf("explorer.explorer", "Block explorer")}
+                label={tf("explorer.explorerBlock", "Block explorer")}
               />
             </div>
 

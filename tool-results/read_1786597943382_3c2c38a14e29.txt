@@ -1,0 +1,1398 @@
+     1→"use client";
+     2→
+     3→/* -------------------------------------------------------------------------- *
+     4→ *  NewsFeedView  ·  Task 4
+     5→ *  ---------------------------------------------------------------------------
+     6→ *  A standalone React component that unifies crypto news (RSS from CoinDesk,
+     7→ *  Cointelegraph, Decrypt, Bitcoinist, plus optional CryptoPanic/CryptoCompare)
+     8→ *  and a live Telegram channel feed (@Mastersharkcrypto) into one tabbed
+     9→ *  "News & Signals" view.
+    10→ *
+    11→ *    1. Top-level sub-tabs       — Crypto News | Telegram Channel
+    12→ *    2. Data sources badge row   — fetches /api/scanner/sources once on mount,
+    13→ *                                  shows availability dots (free / api_key)
+    14→ *    3. Crypto News              — source filter chips + search box + responsive
+    15→ *                                  card grid (1/2/3 cols), with thumbnails,
+    16→ *                                  color-coded source badges, relative time,
+    17→ *                                  category chips; whole card links out.
+    18→ *    4. Telegram Channel         — chat-style vertical feed of message bubbles
+    19→ *                                  with bidi-aware text (dir="auto"), view
+    20→ *                                  counts, optional photo media, link chips,
+    21→ *                                  per-message deep link to t.me.
+    22→ *
+    23→ *  API contracts (already built & verified — do NOT modify backend):
+    24→ *    GET /api/scanner/news?limit=40&source=             -> NewsResponse
+    25→ *    GET /api/scanner/telegram?channel=..&limit=20      -> TelegramResponse
+    26→ *    GET /api/scanner/sources                           -> SourcesStatus
+    27→ *
+    28→ *  Conventions:
+    29→ *    - shadcn/ui (New York) — Card, Button, Badge, Input, Tabs, Tooltip,
+    30→ *      Skeleton, Alert, Separator, Switch.
+    31→ *    - Tailwind 4 — emerald/teal accents, amber for Telegram, rose for errors,
+    32→ *      sky for info. NO indigo / blue primaries.
+    33→ *    - lucide-react icons.
+    34→ *    - useLanguage() for i18n; translation keys live under `news.*` / `telegram.*`.
+    35→ * ------------------------------------------------------------------------- */
+    36→
+    37→import * as React from "react";
+    38→import {
+    39→  AlertCircle,
+    40→  BookOpen,
+    41→  Clock,
+    42→  Eye,
+    43→  ExternalLink,
+    44→  Filter,
+    45→  Link2,
+    46→  MessageCircle,
+    47→  Newspaper,
+    48→  Radio,
+    49→  RefreshCw,
+    50→  Search,
+    51→  Send,
+    52→  X,
+    53→} from "lucide-react";
+    54→
+    55→import { useLanguage } from "@/lib/i18n/LanguageProvider";
+    56→import {
+    57→  NewsArticle,
+    58→  NewsResponse,
+    59→  PersianNewsArticle,
+    60→  PersianNewsResponse,
+    61→  TelegramMessage,
+    62→  TelegramResponse,
+    63→  DataSourceInfo,
+    64→  SourcesStatus,
+    65→} from "@/lib/scanner-types";
+    66→
+    67→import {
+    68→  Card,
+    69→  CardContent,
+    70→  CardFooter,
+    71→} from "@/components/ui/card";
+    72→import { Button } from "@/components/ui/button";
+    73→import { Badge } from "@/components/ui/badge";
+    74→import { Input } from "@/components/ui/input";
+    75→import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
+    76→import { Skeleton } from "@/components/ui/skeleton";
+    77→import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+    78→import { Switch } from "@/components/ui/switch";
+    79→import {
+    80→  Tooltip,
+    81→  TooltipContent,
+    82→  TooltipProvider,
+    83→  TooltipTrigger,
+    84→} from "@/components/ui/tooltip";
+    85→
+    86→// --------------------------------------------------------------------------- //
+    87→//  Props
+    88→// --------------------------------------------------------------------------- //
+    89→
+    90→interface NewsFeedViewProps {
+    91→  /** Optional: pre-selected sub-tab */
+    92→  initialTab?: "news" | "news_fa" | "telegram";
+    93→}
+    94→
+    95→// --------------------------------------------------------------------------- //
+    96→//  Source color system
+    97→// --------------------------------------------------------------------------- //
+    98→
+    99→interface SourceStyle {
+   100→  badge: string; // classes for the colored source badge
+   101→  dot: string; // classes for the colored status dot
+   102→}
+   103→
+   104→const SOURCE_STYLES: Record<string, SourceStyle> = {
+   105→  CoinDesk: {
+   106→    badge: "border-amber-500/30 bg-amber-500/15 text-amber-600 dark:text-amber-400",
+   107→    dot: "bg-amber-500",
+   108→  },
+   109→  Cointelegraph: {
+   110→    badge: "border-emerald-500/30 bg-emerald-500/15 text-emerald-600 dark:text-emerald-400",
+   111→    dot: "bg-emerald-500",
+   112→  },
+   113→  Decrypt: {
+   114→    badge: "border-sky-500/30 bg-sky-500/15 text-sky-600 dark:text-sky-400",
+   115→    dot: "bg-sky-500",
+   116→  },
+   117→  Bitcoinist: {
+   118→    badge: "border-rose-500/30 bg-rose-500/15 text-rose-600 dark:text-rose-400",
+   119→    dot: "bg-rose-500",
+   120→  },
+   121→  CryptoPanic: {
+   122→    badge: "border-violet-500/30 bg-violet-500/15 text-violet-600 dark:text-violet-400",
+   123→    dot: "bg-violet-500",
+   124→  },
+   125→  CryptoCompare: {
+   126→    badge: "border-teal-500/30 bg-teal-500/15 text-teal-600 dark:text-teal-400",
+   127→    dot: "bg-teal-500",
+   128→  },
+   129→  // Persian sources
+   130→  ArzDigital: {
+   131→    badge: "border-cyan-500/30 bg-cyan-500/15 text-cyan-600 dark:text-cyan-400",
+   132→    dot: "bg-cyan-500",
+   133→  },
+   134→  MihanBlockchain: {
+   135→    badge: "border-orange-500/30 bg-orange-500/15 text-orange-600 dark:text-orange-400",
+   136→    dot: "bg-orange-500",
+   137→  },
+   138→};
+   139→
+   140→const DEFAULT_SOURCE_STYLE: SourceStyle = {
+   141→  badge: "border-border bg-muted text-muted-foreground",
+   142→  dot: "bg-muted-foreground",
+   143→};
+   144→
+   145→/** Strip suffixes/parens so source names from /sources match the SOURCE_STYLES keys. */
+   146→function normalizeSourceName(name: string): string {
+   147→  return name
+   148→    .replace(/\s+RSS$/i, "")
+   149→    .replace(/\s+API$/i, "")
+   150→    .replace(/\s*\(.*?\)\s*/g, "")
+   151→    .trim();
+   152→}
+   153→
+   154→function sourceStyle(name: string): SourceStyle {
+   155→  return SOURCE_STYLES[name] ?? SOURCE_STYLES[normalizeSourceName(name)] ?? DEFAULT_SOURCE_STYLE;
+   156→}
+   157→
+   158→// Sources shown in the data-sources badge row (news + telegram relevant only).
+   159→const RELEVANT_SOURCE_PATTERNS = [
+   160→  /RSS$/i,
+   161→  /^CryptoPanic/i,
+   162→  /^CryptoCompare/i,
+   163→  /^Telegram/i,
+   164→  /^ArzDigital/i,
+   165→  /^MihanBlockchain/i,
+   166→];
+   167→
+   168→function isNewsOrTelegramSource(s: DataSourceInfo): boolean {
+   169→  return RELEVANT_SOURCE_PATTERNS.some((p) => p.test(s.name));
+   170→}
+   171→
+   172→// --------------------------------------------------------------------------- //
+   173→//  Time helpers
+   174→// --------------------------------------------------------------------------- //
+   175→
+   176→/** Format an ISO date string as a short relative time, e.g. "5m ago". */
+   177→function timeAgo(iso: string | null): string {
+   178→  if (!iso) return "—";
+   179→  const date = new Date(iso);
+   180→  if (isNaN(date.getTime())) return "—";
+   181→  const diffSec = Math.max(0, Math.floor((Date.now() - date.getTime()) / 1000));
+   182→  if (diffSec < 5) return "just now";
+   183→  if (diffSec < 60) return `${diffSec}s ago`;
+   184→  const min = Math.floor(diffSec / 60);
+   185→  if (min < 60) return `${min}m ago`;
+   186→  const hr = Math.floor(min / 60);
+   187→  if (hr < 24) return `${hr}h ago`;
+   188→  const day = Math.floor(hr / 24);
+   189→  if (day < 7) return `${day}d ago`;
+   190→  const wk = Math.floor(day / 7);
+   191→  if (wk < 5) return `${wk}w ago`;
+   192→  const mon = Math.floor(day / 30);
+   193→  if (mon < 12) return `${mon}mo ago`;
+   194→  const yr = Math.floor(day / 365);
+   195→  return `${yr}y ago`;
+   196→}
+   197→
+   198→/** Format an ISO date string as a clock time, e.g. "13:45" or "Aug 13, 13:45". */
+   199→function timeClock(iso: string | null): string {
+   200→  if (!iso) return "—";
+   201→  const date = new Date(iso);
+   202→  if (isNaN(date.getTime())) return "—";
+   203→  const now = new Date();
+   204→  const sameDay =
+   205→    date.getFullYear() === now.getFullYear() &&
+   206→    date.getMonth() === now.getMonth() &&
+   207→    date.getDate() === now.getDate();
+   208→  const time = date.toLocaleTimeString(undefined, {
+   209→    hour: "2-digit",
+   210→    minute: "2-digit",
+   211→  });
+   212→  if (sameDay) return time;
+   213→  const dateStr = date.toLocaleDateString(undefined, {
+   214→    month: "short",
+   215→    day: "numeric",
+   216→  });
+   217→  return `${dateStr}, ${time}`;
+   218→}
+   219→
+   220→/** Seconds since an ISO date. Returns 0 when invalid. */
+   221→function secondsSince(iso: string | null): number {
+   222→  if (!iso) return 0;
+   223→  const date = new Date(iso);
+   224→  if (isNaN(date.getTime())) return 0;
+   225→  return Math.max(0, Math.floor((Date.now() - date.getTime()) / 1000));
+   226→}
+   227→
+   228→// --------------------------------------------------------------------------- //
+   229→//  Sub-components — News
+   230→// --------------------------------------------------------------------------- //
+   231→
+   232→/** Thumbnail with graceful fallback when the image fails to load. */
+   233→function ArticleImage({ src, alt }: { src: string | null; alt: string }) {
+   234→  const [errored, setErrored] = React.useState(false);
+   235→  React.useEffect(() => setErrored(false), [src]);
+   236→  if (!src || errored) {
+   237→    return (
+   238→      <div className="flex aspect-video w-full items-center justify-center rounded-md bg-gradient-to-br from-emerald-500/10 via-teal-500/10 to-sky-500/10">
+   239→        <Newspaper className="size-8 text-muted-foreground/40" />
+   240→      </div>
+   241→    );
+   242→  }
+   243→  return (
+   244→    <img
+   245→      src={src}
+   246→      alt={alt}
+   247→      loading="lazy"
+   248→      onError={() => setErrored(true)}
+   249→      className="aspect-video w-full rounded-md object-cover transition-opacity"
+   250→    />
+   251→  );
+   252→}
+   253→
+   254→/** A single news article card. The whole card is a link. */
+   255→function ArticleCard({ article }: { article: NewsArticle }) {
+   256→  const st = sourceStyle(article.source);
+   257→  return (
+   258→    <a
+   259→      href={article.url}
+   260→      target="_blank"
+   261→      rel="noopener noreferrer"
+   262→      className="group block focus:outline-none"
+   263→    >
+   264→      <Card className="h-full overflow-hidden border-border/60 bg-card/40 p-0 backdrop-blur-sm transition-all duration-200 hover:-translate-y-0.5 hover:border-primary/40 hover:shadow-lg focus-visible:ring-2 focus-visible:ring-ring/50">
+   265→        <ArticleImage src={article.image} alt={article.title} />
+   266→        <div className="space-y-2 p-4">
+   267→          <div className="flex items-center justify-between gap-2">
+   268→            <Badge variant="outline" className={st.badge}>
+   269→              <span className={`size-1.5 rounded-full ${st.dot}`} />
+   270→              {article.source}
+   271→            </Badge>
+   272→            <span className="flex shrink-0 items-center gap-1 text-[10px] text-muted-foreground">
+   273→              <Clock className="size-3" />
+   274→              {timeAgo(article.published_at)}
+   275→            </span>
+   276→          </div>
+   277→          <h3 className="line-clamp-2 font-semibold leading-snug text-foreground">
+   278→            {article.title}
+   279→          </h3>
+   280→          {article.summary && (
+   281→            <p className="line-clamp-3 text-sm text-muted-foreground">{article.summary}</p>
+   282→          )}
+   283→          {article.categories.length > 0 && (
+   284→            <div className="flex flex-wrap gap-1 pt-1">
+   285→              {article.categories.slice(0, 3).map((c) => (
+   286→                <span
+   287→                  key={c}
+   288→                  className="rounded bg-muted/60 px-1.5 py-0.5 text-[10px] text-muted-foreground"
+   289→                >
+   290→                  {c}
+   291→                </span>
+   292→              ))}
+   293→            </div>
+   294→          )}
+   295→        </div>
+   296→        <CardFooter className="border-t border-border/40 px-4 py-2">
+   297→          <span className="flex items-center gap-1 text-xs text-muted-foreground transition-colors group-hover:text-primary">
+   298→            <ExternalLink className="size-3" />
+   299→            Read article
+   300→          </span>
+   301→        </CardFooter>
+   302→      </Card>
+   303→    </a>
+   304→  );
+   305→}
+   306→
+   307→/** Skeleton card for the loading state. */
+   308→function ArticleCardSkeleton() {
+   309→  return (
+   310→    <Card className="overflow-hidden border-border/60 bg-card/40 p-0 backdrop-blur-sm">
+   311→      <Skeleton className="aspect-video w-full rounded-none" />
+   312→      <div className="space-y-2 p-4">
+   313→        <div className="flex justify-between">
+   314→          <Skeleton className="h-5 w-24" />
+   315→          <Skeleton className="h-4 w-12" />
+   316→        </div>
+   317→        <Skeleton className="h-4 w-full" />
+   318→        <Skeleton className="h-4 w-3/4" />
+   319→        <Skeleton className="h-3 w-full" />
+   320→        <Skeleton className="h-3 w-5/6" />
+   321→      </div>
+   322→    </Card>
+   323→  );
+   324→}
+   325→
+   326→/** Source filter chip. */
+   327→function SourceChip({
+   328→  active,
+   329→  onClick,
+   330→  label,
+   331→  count,
+   332→  sourceName,
+   333→}: {
+   334→  active: boolean;
+   335→  onClick: () => void;
+   336→  label: string;
+   337→  count: number;
+   338→  sourceName?: string;
+   339→}) {
+   340→  const st = sourceName ? sourceStyle(sourceName) : null;
+   341→  return (
+   342→    <button
+   343→      type="button"
+   344→      onClick={onClick}
+   345→      aria-pressed={active}
+   346→      className={`inline-flex items-center gap-1.5 rounded-md border px-2 py-1 text-xs transition-colors ${
+   347→        active
+   348→          ? "border-primary/40 bg-primary/10 text-foreground"
+   349→          : "border-border/60 bg-card/40 text-muted-foreground hover:bg-muted/60 hover:text-foreground"
+   350→      }`}
+   351→    >
+   352→      {st && <span className={`size-1.5 rounded-full ${st.dot}`} />}
+   353→      <span>{label}</span>
+   354→      <span className="text-[10px] opacity-70">{count}</span>
+   355→    </button>
+   356→  );
+   357→}
+   358→
+   359→// --------------------------------------------------------------------------- //
+   360→//  Sub-components — Telegram
+   361→// --------------------------------------------------------------------------- //
+   362→
+   363→/** Skeleton for a telegram message bubble. */
+   364→function MessageSkeleton() {
+   365→  return (
+   366→    <div className="rounded-xl border border-border/60 bg-card/40 p-4 backdrop-blur-sm">
+   367→      <div className="mb-3 flex items-center gap-2">
+   368→        <Skeleton className="size-8 rounded-full" />
+   369→        <Skeleton className="h-4 w-32" />
+   370→      </div>
+   371→      <Skeleton className="mb-2 h-3 w-full" />
+   372→      <Skeleton className="mb-2 h-3 w-11/12" />
+   373→      <Skeleton className="mb-2 h-3 w-3/4" />
+   374→      <div className="mt-3 flex justify-between">
+   375→        <Skeleton className="h-3 w-20" />
+   376→        <Skeleton className="h-3 w-16" />
+   377→      </div>
+   378→    </div>
+   379→  );
+   380→}
+   381→
+   382→/** A single telegram message bubble. */
+   383→function MessageBubble({ msg }: { msg: TelegramMessage }) {
+   384→  // Derive per-message deep link: t.me/<channel>/<messageId>
+   385→  const msgNum = msg.id.split("/")[1] ?? "";
+   386→  const deepLink =
+   387→    msg.channel_url && msgNum ? `${msg.channel_url}/${msgNum}` : msg.channel_url;
+   388→  const hasPhoto = msg.media_type === "photo" && msg.media_url;
+   389→  const album = msg.media_all && msg.media_all.length > 1 ? msg.media_all : null;
+   390→
+   391→  return (
+   392→    <article className="rounded-xl border border-border/60 bg-card/40 p-4 backdrop-blur-sm transition-colors hover:border-border">
+   393→      {/* Header: avatar + channel + time */}
+   394→      <div className="mb-2 flex items-center gap-2">
+   395→        <div className="flex size-8 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-amber-500/30 to-sky-500/30 text-amber-600 dark:text-amber-400">
+   396→          <Send className="size-4" />
+   397→        </div>
+   398→        <div className="flex min-w-0 flex-1 items-center gap-2">
+   399→          <a
+   400→            href={msg.channel_url}
+   401→            target="_blank"
+   402→            rel="noopener noreferrer"
+   403→            className="truncate text-sm font-medium text-foreground hover:text-primary"
+   404→          >
+   405→            @{msg.channel}
+   406→          </a>
+   407→          <span className="text-[10px] text-muted-foreground">·</span>
+   408→          <span className="shrink-0 text-[10px] text-muted-foreground">
+   409→            {timeAgo(msg.published_at)}
+   410→          </span>
+   411→        </div>
+   412→        <Tooltip>
+   413→          <TooltipTrigger asChild>
+   414→            <a
+   415→              href={deepLink}
+   416→              target="_blank"
+   417→              rel="noopener noreferrer"
+   418→              className="flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+   419→              aria-label="Open message on Telegram"
+   420→            >
+   421→              <ExternalLink className="size-3.5" />
+   422→            </a>
+   423→          </TooltipTrigger>
+   424→          <TooltipContent>Open on Telegram</TooltipContent>
+   425→        </Tooltip>
+   426→      </div>
+   427→
+   428→      {/* Optional photo media — single photo or album grid */}
+   429→      {hasPhoto && !album && (
+   430→        <a
+   431→          href={deepLink}
+   432→          target="_blank"
+   433→          rel="noopener noreferrer"
+   434→          className="mb-3 block focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+   435→        >
+   436→          <img
+   437→            src={msg.media_url as string}
+   438→            alt="Telegram media"
+   439→            loading="lazy"
+   440→            className="max-h-80 w-full rounded-lg object-cover"
+   441→          />
+   442→        </a>
+   443→      )}
+   444→      {album && (
+   445→        <div className="mb-3 grid gap-1" style={{ gridTemplateColumns: `repeat(${Math.min(album.length, 2)}, 1fr)` }}>
+   446→          {album.slice(0, 4).map((url, i) => (
+   447→            <a
+   448→              key={`${url}-${i}`}
+   449→              href={deepLink}
+   450→              target="_blank"
+   451→              rel="noopener noreferrer"
+   452→              className="block overflow-hidden rounded-lg focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+   453→            >
+   454→              <img
+   455→                src={url}
+   456→                alt={`Telegram media ${i + 1}`}
+   457→                loading="lazy"
+   458→                className="h-32 w-full object-cover transition-transform hover:scale-105 sm:h-40"
+   459→              />
+   460→            </a>
+   461→          ))}
+   462→        </div>
+   463→      )}
+   464→
+   465→      {/* Message text — dir="auto" handles bidi (Persian RTL + English LTR mix) */}
+   466→      <div
+   467→        dir="auto"
+   468→        className="max-h-[420px] overflow-y-auto whitespace-pre-wrap break-words text-sm leading-relaxed text-foreground/90 [scrollbar-width:thin]"
+   469→      >
+   470→        {msg.text}
+   471→      </div>
+   472→
+   473→      {/* External links as compact chips */}
+   474→      {msg.links.length > 0 && (
+   475→        <div className="mt-3 flex flex-wrap gap-1.5">
+   476→          {msg.links.slice(0, 6).map((l, i) => {
+   477→            let host = l;
+   478→            try {
+   479→              host = new URL(l).hostname.replace(/^www\./, "");
+   480→            } catch {
+   481→              host = l;
+   482→            }
+   483→            return (
+   484→              <a
+   485→                key={`${l}-${i}`}
+   486→                href={l}
+   487→                target="_blank"
+   488→                rel="noopener noreferrer"
+   489→                className="inline-flex items-center gap-1 rounded-md border border-border/60 bg-muted/40 px-2 py-0.5 text-[11px] text-muted-foreground transition-colors hover:border-primary/40 hover:text-foreground"
+   490→              >
+   491→                <Link2 className="size-3" />
+   492→                <span className="max-w-[180px] truncate">{host}</span>
+   493→              </a>
+   494→            );
+   495→          })}
+   496→        </div>
+   497→      )}
+   498→
+   499→      {/* Footer: clock time + view count */}
+   500→      <div className="mt-3 flex items-center justify-between border-t border-border/40 pt-2 text-[11px] text-muted-foreground">
+   501→        <span className="flex items-center gap-1">
+   502→          <Clock className="size-3" />
+   503→          {timeClock(msg.published_at)}
+   504→        </span>
+   505→        {msg.views != null && (
+   506→          <span className="flex items-center gap-1">
+   507→            <Eye className="size-3" />
+   508→            {msg.views} views
+   509→          </span>
+   510→        )}
+   511→      </div>
+   512→    </article>
+   513→  );
+   514→}
+   515→
+   516→// --------------------------------------------------------------------------- //
+   517→//  Sub-components — Data sources badge row
+   518→// --------------------------------------------------------------------------- //
+   519→
+   520→function SourcesBadgeRow({ sources }: { sources: DataSourceInfo[] }) {
+   521→  const relevant = React.useMemo(
+   522→    () => sources.filter(isNewsOrTelegramSource),
+   523→    [sources],
+   524→  );
+   525→  if (relevant.length === 0) return null;
+   526→  return (
+   527→    <div className="flex flex-wrap items-center gap-1.5">
+   528→      <span className="flex items-center gap-1 text-xs text-muted-foreground">
+   529→        <Radio className="size-3.5" />
+   530→        Data sources:
+   531→      </span>
+   532→      {relevant.map((s) => {
+   533→        const displayName = s.name.replace(/\s+RSS$/i, "");
+   534→        const st = sourceStyle(s.name);
+   535→        return (
+   536→          <Tooltip key={s.name}>
+   537→            <TooltipTrigger asChild>
+   538→              <div
+   539→                className={`inline-flex items-center gap-1 rounded-md border px-1.5 py-0.5 text-[10px] ${
+   540→                  s.available
+   541→                    ? "border-emerald-500/30 bg-emerald-500/5 text-foreground"
+   542→                    : "border-border/60 bg-muted/40 text-muted-foreground"
+   543→                }`}
+   544→              >
+   545→                <span
+   546→                  className={`size-1.5 rounded-full ${
+   547→                    s.available ? "bg-emerald-500" : "bg-muted-foreground/40"
+   548→                  }`}
+   549→                />
+   550→                {displayName}
+   551→                <span
+   552→                  className={`ml-0.5 rounded px-1 py-px text-[9px] ${
+   553→                    s.type === "free"
+   554→                      ? "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400"
+   555→                      : "bg-amber-500/15 text-amber-600 dark:text-amber-400"
+   556→                  }`}
+   557→                >
+   558→                  {s.type === "free" ? "free" : "key"}
+   559→                </span>
+   560→              </div>
+   561→            </TooltipTrigger>
+   562→            <TooltipContent className="max-w-[240px] text-left">
+   563→              <div className="font-semibold">{s.name}</div>
+   564→              <div className="text-xs opacity-90">{s.description}</div>
+   565→              <div className="mt-1 text-[10px] opacity-70">
+   566→                {s.available ? "Available" : "Unavailable"} · {s.type}
+   567→              </div>
+   568→            </TooltipContent>
+   569→          </Tooltip>
+   570→        );
+   571→      })}
+   572→    </div>
+   573→  );
+   574→}
+   575→
+   576→// --------------------------------------------------------------------------- //
+   577→//  News tab content
+   578→// --------------------------------------------------------------------------- //
+   579→
+   580→interface NewsTabContentProps {
+   581→  loading: boolean;
+   582→  error: string | null;
+   583→  news: NewsResponse | null;
+   584→  sources: string[];
+   585→  sourceFilter: string;
+   586→  setSourceFilter: (s: string) => void;
+   587→  search: string;
+   588→  setSearch: (s: string) => void;
+   589→  filteredArticles: NewsArticle[];
+   590→  onRetry: () => void;
+   591→  tt: (key: string, fallback: string) => string;
+   592→}
+   593→
+   594→function NewsTabContent({
+   595→  loading,
+   596→  error,
+   597→  news,
+   598→  sources,
+   599→  sourceFilter,
+   600→  setSourceFilter,
+   601→  search,
+   602→  setSearch,
+   603→  filteredArticles,
+   604→  onRetry,
+   605→  tt,
+   606→}: NewsTabContentProps) {
+   607→  return (
+   608→    <div className="space-y-4">
+   609→      {/* Filter bar */}
+   610→      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+   611→        <div className="flex flex-wrap items-center gap-1.5">
+   612→          <Filter className="size-3.5 text-muted-foreground" />
+   613→          <SourceChip
+   614→            active={sourceFilter === "all"}
+   615→            onClick={() => setSourceFilter("all")}
+   616→            label={tt("news.allSources", "All Sources")}
+   617→            count={news?.articles.length ?? 0}
+   618→          />
+   619→          {sources.map((s) => (
+   620→            <SourceChip
+   621→              key={s}
+   622→              active={sourceFilter === s}
+   623→              onClick={() => setSourceFilter(s)}
+   624→              label={s}
+   625→              count={news?.articles.filter((a) => a.source === s).length ?? 0}
+   626→              sourceName={s}
+   627→            />
+   628→          ))}
+   629→        </div>
+   630→        <div className="relative sm:w-64">
+   631→          <Search className="absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
+   632→          <Input
+   633→            value={search}
+   634→            onChange={(e) => setSearch(e.target.value)}
+   635→            placeholder={tt("news.searchPlaceholder", "Search articles…")}
+   636→            className="h-8 pl-8 text-sm"
+   637→            aria-label="Search articles"
+   638→          />
+   639→          {search && (
+   640→            <button
+   641→              type="button"
+   642→              onClick={() => setSearch("")}
+   643→              className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground transition-colors hover:text-foreground"
+   644→              aria-label="Clear search"
+   645→            >
+   646→              <X className="size-3.5" />
+   647→            </button>
+   648→          )}
+   649→        </div>
+   650→      </div>
+   651→
+   652→      {/* Loading state */}
+   653→      {loading && (
+   654→        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+   655→          {Array.from({ length: 6 }).map((_, i) => (
+   656→            <ArticleCardSkeleton key={i} />
+   657→          ))}
+   658→        </div>
+   659→      )}
+   660→
+   661→      {/* Error state */}
+   662→      {error && !loading && (
+   663→        <Alert variant="destructive">
+   664→          <AlertCircle className="size-4" />
+   665→          <AlertTitle>{tt("news.errorTitle", "Failed to load news")}</AlertTitle>
+   666→          <AlertDescription className="flex items-center justify-between gap-3">
+   667→            <span className="break-all text-xs">{error}</span>
+   668→            <Button size="sm" variant="outline" onClick={onRetry} className="shrink-0">
+   669→              <RefreshCw className="size-3.5" />
+   670→              {tt("news.retry", "Retry")}
+   671→            </Button>
+   672→          </AlertDescription>
+   673→        </Alert>
+   674→      )}
+   675→
+   676→      {/* Empty state */}
+   677→      {!loading && !error && filteredArticles.length === 0 && (
+   678→        <Card className="border-dashed border-border/60 bg-card/40">
+   679→          <CardContent className="flex flex-col items-center justify-center gap-3 p-12 text-center">
+   680→            <div className="flex size-14 items-center justify-center rounded-full bg-muted/60">
+   681→              <Newspaper className="size-6 text-muted-foreground/60" />
+   682→            </div>
+   683→            <div>
+   684→              <p className="font-medium">
+   685→                {tt("news.noArticles", "No articles match your filters")}
+   686→              </p>
+   687→              <p className="text-sm text-muted-foreground">
+   688→                {tt("news.noArticlesDesc", "Try a different source or search term.")}
+   689→              </p>
+   690→            </div>
+   691→            {(sourceFilter !== "all" || search) && (
+   692→              <Button
+   693→                size="sm"
+   694→                variant="outline"
+   695→                onClick={() => {
+   696→                  setSourceFilter("all");
+   697→                  setSearch("");
+   698→                }}
+   699→              >
+   700→                {tt("news.clearFilters", "Clear filters")}
+   701→              </Button>
+   702→            )}
+   703→          </CardContent>
+   704→        </Card>
+   705→      )}
+   706→
+   707→      {/* Articles grid */}
+   708→      {!loading && !error && filteredArticles.length > 0 && (
+   709→        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+   710→          {filteredArticles.map((a, i) => (
+   711→            <ArticleCard key={`${a.url}-${i}`} article={a} />
+   712→          ))}
+   713→        </div>
+   714→      )}
+   715→    </div>
+   716→  );
+   717→}
+   718→
+   719→// --------------------------------------------------------------------------- //
+   720→//  Persian news tab content
+   721→// --------------------------------------------------------------------------- //
+   722→
+   723→const PERSIAN_CATEGORY_STYLES: Record<string, { label: string; badge: string }> = {
+   724→  breaking: { label: "خبر فوری", badge: "border-rose-500/30 bg-rose-500/15 text-rose-400" },
+   725→  blog: { label: "مقاله", badge: "border-cyan-500/30 bg-cyan-500/15 text-cyan-400" },
+   726→  news: { label: "خبر", badge: "border-orange-500/30 bg-orange-500/15 text-orange-400" },
+   727→  analysis: { label: "تحلیل", badge: "border-amber-500/30 bg-amber-500/15 text-amber-400" },
+   728→};
+   729→
+   730→function PersianArticleCard({ article }: { article: PersianNewsArticle }) {
+   731→  const st = sourceStyle(article.source);
+   732→  const cat = article.category ? PERSIAN_CATEGORY_STYLES[article.category] : null;
+   733→  return (
+   734→    <a
+   735→      href={article.url}
+   736→      target="_blank"
+   737→      rel="noopener noreferrer"
+   738→      className="group flex flex-col overflow-hidden rounded-xl border border-border/60 bg-card/40 backdrop-blur-sm transition-all hover:-translate-y-0.5 hover:border-primary/40 hover:shadow-lg"
+   739→    >
+   740→      <ArticleImage src={article.image} alt={article.title} />
+   741→      <div className="flex flex-1 flex-col gap-2 p-4">
+   742→        <div className="flex items-center gap-1.5 flex-wrap">
+   743→          <span className={`inline-flex items-center gap-1 rounded-md border px-1.5 py-0.5 text-[10px] font-medium ${st.badge}`}>
+   744→            <span className={`size-1.5 rounded-full ${st.dot}`} />
+   745→            {article.source}
+   746→          </span>
+   747→          {cat && (
+   748→            <span className={`inline-flex items-center rounded-md border px-1.5 py-0.5 text-[10px] font-medium ${cat.badge}`}>
+   749→              {cat.label}
+   750→            </span>
+   751→          )}
+   752→          <span className="ml-auto text-[10px] text-muted-foreground">
+   753→            {timeAgo(article.published_at)}
+   754→          </span>
+   755→        </div>
+   756→        <h3 dir="auto" className="line-clamp-2 text-sm font-semibold leading-snug text-foreground">
+   757→          {article.title}
+   758→        </h3>
+   759→        <p dir="auto" className="line-clamp-3 text-xs leading-relaxed text-muted-foreground">
+   760→          {article.summary}
+   761→        </p>
+   762→        <div className="mt-auto flex items-center gap-1 pt-1 text-[11px] text-muted-foreground transition-colors group-hover:text-primary">
+   763→          <ExternalLink className="size-3" />
+   764→          {article.source === "ArzDigital" ? "arzdigital.com" : "mihanblockchain.com"}
+   765→        </div>
+   766→      </div>
+   767→    </a>
+   768→  );
+   769→}
+   770→
+   771→interface PersianNewsTabContentProps {
+   772→  loading: boolean;
+   773→  error: string | null;
+   774→  newsFa: PersianNewsResponse | null;
+   775→  categoryFilter: string;
+   776→  setCategoryFilter: (v: string) => void;
+   777→  search: string;
+   778→  setSearch: (v: string) => void;
+   779→  filteredArticles: PersianNewsArticle[];
+   780→  onRetry: () => void;
+   781→  tt: (key: string, fallback: string) => string;
+   782→}
+   783→
+   784→function PersianNewsTabContent({
+   785→  loading,
+   786→  error,
+   787→  newsFa,
+   788→  categoryFilter,
+   789→  setCategoryFilter,
+   790→  search,
+   791→  setSearch,
+   792→  filteredArticles,
+   793→  onRetry,
+   794→  tt,
+   795→}: PersianNewsTabContentProps) {
+   796→  // Build category chips from the articles present
+   797→  const categories = React.useMemo(() => {
+   798→    const set = new Set<string>();
+   799→    newsFa?.articles.forEach((a) => { if (a.category) set.add(a.category); });
+   800→    return Array.from(set);
+   801→  }, [newsFa]);
+   802→
+   803→  return (
+   804→    <div className="space-y-4">
+   805→      {/* Filter bar */}
+   806→      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+   807→        <div className="flex flex-wrap items-center gap-1.5">
+   808→          <SourceChip
+   809→            active={categoryFilter === "all"}
+   810→            onClick={() => setCategoryFilter("all")}
+   811→            label={tt("news_fa.allCategories", "همه دسته‌ها")}
+   812→            count={newsFa?.articles.length ?? 0}
+   813→          />
+   814→          {categories.map((cat) => {
+   815→            const count = newsFa?.articles.filter((a) => a.category === cat).length ?? 0;
+   816→            const style = PERSIAN_CATEGORY_STYLES[cat];
+   817→            return (
+   818→              <SourceChip
+   819→                key={cat}
+   820→                active={categoryFilter === cat}
+   821→                onClick={() => setCategoryFilter(cat)}
+   822→                label={style?.label ?? cat}
+   823→                count={count}
+   824→              />
+   825→            );
+   826→          })}
+   827→        </div>
+   828→        <div className="relative w-full sm:w-64">
+   829→          <Search className="absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
+   830→          <Input
+   831→            value={search}
+   832→            onChange={(e) => setSearch(e.target.value)}
+   833→            placeholder={tt("news_fa.searchPlaceholder", "جستجوی مقالات...")}
+   834→            className="h-8 pl-8 pr-8 text-xs"
+   835→          />
+   836→          {search && (
+   837→            <button
+   838→              onClick={() => setSearch("")}
+   839→              className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+   840→            >
+   841→              <X className="size-3.5" />
+   842→            </button>
+   843→          )}
+   844→        </div>
+   845→      </div>
+   846→
+   847→      {/* Loading skeleton */}
+   848→      {loading && (
+   849→        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+   850→          {Array.from({ length: 6 }).map((_, i) => (
+   851→            <ArticleCardSkeleton key={i} />
+   852→          ))}
+   853→        </div>
+   854→      )}
+   855→
+   856→      {/* Error */}
+   857→      {error && !loading && (
+   858→        <Alert variant="destructive">
+   859→          <AlertCircle className="size-4" />
+   860→          <AlertTitle>{tt("news_fa.errorTitle", "خطا")}</AlertTitle>
+   861→          <AlertDescription className="flex items-center justify-between">
+   862→            <span>{error}</span>
+   863→            <Button size="sm" variant="outline" onClick={onRetry} className="h-7 text-xs">
+   864→              {tt("news_fa.retry", "تلاش مجدد")}
+   865→            </Button>
+   866→          </AlertDescription>
+   867→        </Alert>
+   868→      )}
+   869→
+   870→      {/* Empty state */}
+   871→      {!loading && !error && filteredArticles.length === 0 && (
+   872→        <Card className="border-dashed">
+   873→          <CardContent className="flex flex-col items-center gap-2 py-12 text-center">
+   874→            <Newspaper className="size-8 text-muted-foreground/50" />
+   875→            <p className="text-sm text-muted-foreground">
+   876→              {tt("news_fa.noArticles", "مقاله‌ای یافت نشد")}
+   877→            </p>
+   878→            {(categoryFilter !== "all" || search) && (
+   879→              <Button
+   880→                size="sm"
+   881→                variant="outline"
+   882→                onClick={() => { setCategoryFilter("all"); setSearch(""); }}
+   883→                className="h-7 text-xs"
+   884→              >
+   885→                {tt("news_fa.clearFilters", "پاک کردن فیلترها")}
+   886→              </Button>
+   887→            )}
+   888→          </CardContent>
+   889→        </Card>
+   890→      )}
+   891→
+   892→      {/* Articles grid */}
+   893→      {!loading && !error && filteredArticles.length > 0 && (
+   894→        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+   895→          {filteredArticles.map((a, i) => (
+   896→            <PersianArticleCard key={`${a.url}-${i}`} article={a} />
+   897→          ))}
+   898→        </div>
+   899→      )}
+   900→    </div>
+   901→  );
+   902→}
+   903→
+   904→interface TelegramTabContentProps {
+   905→  loading: boolean;
+   906→  error: string | null;
+   907→  telegram: TelegramResponse | null;
+   908→  autoRefresh: boolean;
+   909→  setAutoRefresh: (v: boolean) => void;
+   910→  onRetry: () => void;
+   911→  tt: (key: string, fallback: string) => string;
+   912→}
+   913→
+   914→function TelegramTabContent({
+   915→  loading,
+   916→  error,
+   917→  telegram,
+   918→  autoRefresh,
+   919→  setAutoRefresh,
+   920→  onRetry,
+   921→  tt,
+   922→}: TelegramTabContentProps) {
+   923→  const messages = telegram?.messages ?? [];
+   924→  const channelUrl = telegram?.channel_url ?? "https://t.me/Mastersharkcrypto";
+   925→  const channelName = telegram?.channel ?? "Mastersharkcrypto";
+   926→
+   927→  return (
+   928→    <div className="space-y-4">
+   929→      {/* Channel header (always visible) */}
+   930→      <Card className="border-border/60 bg-gradient-to-br from-amber-500/5 via-card/40 to-sky-500/5 backdrop-blur-sm">
+   931→        <CardContent className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between">
+   932→          <div className="flex items-center gap-3">
+   933→            <div className="flex size-10 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-amber-500/30 to-sky-500/30 text-amber-600 dark:text-amber-400">
+   934→              <Send className="size-5" />
+   935→            </div>
+   936→            <div className="min-w-0">
+   937→              <div className="flex items-center gap-2">
+   938→                <h3 className="truncate text-base font-semibold">@{channelName}</h3>
+   939→                {telegram && (
+   940→                  <Badge
+   941→                    variant="outline"
+   942→                    className="shrink-0 border-amber-500/30 bg-amber-500/10 text-amber-600 dark:text-amber-400"
+   943→                  >
+   944→                    <Radio className="size-3" />
+   945→                    {tt("telegram.live", "Live")}
+   946→                  </Badge>
+   947→                )}
+   948→              </div>
+   949→              <p className="truncate text-xs text-muted-foreground">
+   950→                {telegram
+   951→                  ? `${telegram.message_count} ${tt("telegram.messages", "messages")} · ${tt(
+   952→                      "telegram.updated",
+   953→                      "updated",
+   954→                    )} ${timeAgo(telegram.fetched_at)}`
+   955→                  : tt("telegram.loadingChannel", "Loading channel…")}
+   956→              </p>
+   957→            </div>
+   958→          </div>
+   959→          <div className="flex items-center gap-3">
+   960→            <label className="flex items-center gap-2 text-xs text-muted-foreground">
+   961→              {tt("telegram.autoRefresh", "Auto-refresh")}
+   962→              <Switch
+   963→                checked={autoRefresh}
+   964→                onCheckedChange={setAutoRefresh}
+   965→                aria-label="Auto-refresh every 60 seconds"
+   966→              />
+   967→            </label>
+   968→            {telegram ? (
+   969→              <Button
+   970→                asChild
+   971→                size="sm"
+   972→                className="bg-amber-500/90 text-white hover:bg-amber-500"
+   973→              >
+   974→                <a href={channelUrl} target="_blank" rel="noopener noreferrer">
+   975→                  <ExternalLink className="size-3.5" />
+   976→                  <span className="hidden sm:inline">
+   977→                    {tt("telegram.joinChannel", "Join Channel")}
+   978→                  </span>
+   979→                  <span className="sm:hidden">Join</span>
+   980→                </a>
+   981→              </Button>
+   982→            ) : (
+   983→              <Button
+   984→                size="sm"
+   985→                disabled
+   986→                className="bg-amber-500/90 text-white hover:bg-amber-500"
+   987→              >
+   988→                <ExternalLink className="size-3.5" />
+   989→                <span className="hidden sm:inline">
+   990→                  {tt("telegram.joinChannel", "Join Channel")}
+   991→                </span>
+   992→                <span className="sm:hidden">Join</span>
+   993→              </Button>
+   994→            )}
+   995→          </div>
+   996→        </CardContent>
+   997→      </Card>
+   998→
+   999→      {/* Loading state */}
+  1000→      {loading && (
+  1001→        <div className="mx-auto max-w-2xl space-y-3">
+  1002→          {Array.from({ length: 4 }).map((_, i) => (
+  1003→            <MessageSkeleton key={i} />
+  1004→          ))}
+  1005→        </div>
+  1006→      )}
+  1007→
+  1008→      {/* Error state */}
+  1009→      {error && !loading && (
+  1010→        <Alert variant="destructive">
+  1011→          <AlertCircle className="size-4" />
+  1012→          <AlertTitle>{tt("telegram.errorTitle", "Failed to load Telegram feed")}</AlertTitle>
+  1013→          <AlertDescription className="flex items-center justify-between gap-3">
+  1014→            <span className="break-all text-xs">{error}</span>
+  1015→            <Button size="sm" variant="outline" onClick={onRetry} className="shrink-0">
+  1016→              <RefreshCw className="size-3.5" />
+  1017→              {tt("telegram.retry", "Retry")}
+  1018→            </Button>
+  1019→          </AlertDescription>
+  1020→        </Alert>
+  1021→      )}
+  1022→
+  1023→      {/* Empty state */}
+  1024→      {!loading && !error && messages.length === 0 && (
+  1025→        <Card className="border-dashed border-border/60 bg-card/40">
+  1026→          <CardContent className="flex flex-col items-center justify-center gap-3 p-12 text-center">
+  1027→            <div className="flex size-14 items-center justify-center rounded-full bg-muted/60">
+  1028→              <MessageCircle className="size-6 text-muted-foreground/60" />
+  1029→            </div>
+  1030→            <div>
+  1031→              <p className="font-medium">{tt("telegram.noMessages", "No messages")}</p>
+  1032→              <p className="text-sm text-muted-foreground">
+  1033→                {tt("telegram.noMessagesDesc", "The channel feed is empty.")}
+  1034→              </p>
+  1035→            </div>
+  1036→          </CardContent>
+  1037→        </Card>
+  1038→      )}
+  1039→
+  1040→      {/* Messages feed — centered narrow column like Telegram web */}
+  1041→      {!loading && !error && messages.length > 0 && (
+  1042→        <div className="mx-auto max-w-2xl space-y-3">
+  1043→          {messages.map((m) => (
+  1044→            <MessageBubble key={m.id} msg={m} />
+  1045→          ))}
+  1046→        </div>
+  1047→      )}
+  1048→    </div>
+  1049→  );
+  1050→}
+  1051→
+  1052→// --------------------------------------------------------------------------- //
+  1053→//  Main component
+  1054→// --------------------------------------------------------------------------- //
+  1055→
+  1056→export function NewsFeedView({ initialTab = "news" }: NewsFeedViewProps) {
+  1057→  const { t } = useLanguage();
+  1058→
+  1059→  // tt(key, fallback) — returns the translated string if present, else fallback.
+  1060→  const tt = React.useCallback(
+  1061→    (key: string, fallback: string) => {
+  1062→      const val = t(key);
+  1063→      return typeof val === "string" && val !== key ? val : fallback;
+  1064→    },
+  1065→    [t],
+  1066→  );
+  1067→
+  1068→  // ----- Tab state -----
+  1069→  const [tab, setTab] = React.useState<"news" | "news_fa" | "telegram">(initialTab);
+  1070→
+  1071→  // ----- News state (English) -----
+  1072→  const [news, setNews] = React.useState<NewsResponse | null>(null);
+  1073→  const [newsLoading, setNewsLoading] = React.useState(false);
+  1074→  const [newsRefreshing, setNewsRefreshing] = React.useState(false);
+  1075→  const [newsError, setNewsError] = React.useState<string | null>(null);
+  1076→  const [sourceFilter, setSourceFilter] = React.useState<string>("all");
+  1077→  const [search, setSearch] = React.useState("");
+  1078→
+  1079→  // ----- Persian news state -----
+  1080→  const [newsFa, setNewsFa] = React.useState<PersianNewsResponse | null>(null);
+  1081→  const [newsFaLoading, setNewsFaLoading] = React.useState(false);
+  1082→  const [newsFaRefreshing, setNewsFaRefreshing] = React.useState(false);
+  1083→  const [newsFaError, setNewsFaError] = React.useState<string | null>(null);
+  1084→  const [categoryFilter, setCategoryFilter] = React.useState<string>("all");
+  1085→  const [searchFa, setSearchFa] = React.useState("");
+  1086→
+  1087→  // ----- Telegram state -----
+  1088→  const [telegram, setTelegram] = React.useState<TelegramResponse | null>(null);
+  1089→  const [tgLoading, setTgLoading] = React.useState(false);
+  1090→  const [tgRefreshing, setTgRefreshing] = React.useState(false);
+  1091→  const [tgError, setTgError] = React.useState<string | null>(null);
+  1092→  const [autoRefresh, setAutoRefresh] = React.useState(false);
+  1093→
+  1094→  // ----- Sources state -----
+  1095→  const [sources, setSources] = React.useState<DataSourceInfo[]>([]);
+  1096→
+  1097→  // ----- Cache age display tick (re-render every 1s for smooth "Xs ago") -----
+  1098→  const [, setTick] = React.useState(0);
+  1099→  React.useEffect(() => {
+  1100→    const id = setInterval(() => setTick((x) => x + 1), 1000);
+  1101→    return () => clearInterval(id);
+  1102→  }, []);
+  1103→
+  1104→  // ----- Fetchers -----
+  1105→  const fetchNews = React.useCallback(async (refresh: boolean) => {
+  1106→    if (refresh) setNewsRefreshing(true);
+  1107→    else setNewsLoading(true);
+  1108→    setNewsError(null);
+  1109→    try {
+  1110→      const res = await fetch("/api/scanner/news?limit=40");
+  1111→      if (!res.ok) throw new Error(`HTTP ${res.status} ${res.statusText}`);
+  1112→      const data = (await res.json()) as NewsResponse;
+  1113→      if (!data || !Array.isArray(data.articles)) {
+  1114→        throw new Error("Invalid response shape");
+  1115→      }
+  1116→      setNews(data);
+  1117→    } catch (e) {
+  1118→      setNewsError(e instanceof Error ? e.message : "Failed to load news");
+  1119→    } finally {
+  1120→      setNewsLoading(false);
+  1121→      setNewsRefreshing(false);
+  1122→    }
+  1123→  }, []);
+  1124→
+  1125→  const fetchNewsFa = React.useCallback(async (refresh: boolean) => {
+  1126→    if (refresh) setNewsFaRefreshing(true);
+  1127→    else setNewsFaLoading(true);
+  1128→    setNewsFaError(null);
+  1129→    try {
+  1130→      const res = await fetch("/api/scanner/news/fa?limit=40");
+  1131→      if (!res.ok) throw new Error(`HTTP ${res.status} ${res.statusText}`);
+  1132→      const data = (await res.json()) as PersianNewsResponse;
+  1133→      if (!data || !Array.isArray(data.articles)) {
+  1134→        throw new Error("Invalid response shape");
+  1135→      }
+  1136→      setNewsFa(data);
+  1137→    } catch (e) {
+  1138→      setNewsFaError(e instanceof Error ? e.message : "Failed to load Persian news");
+  1139→    } finally {
+  1140→      setNewsFaLoading(false);
+  1141→      setNewsFaRefreshing(false);
+  1142→    }
+  1143→  }, []);
+  1144→
+  1145→  const fetchTelegram = React.useCallback(async (refresh: boolean) => {
+  1146→    if (refresh) setTgRefreshing(true);
+  1147→    else setTgLoading(true);
+  1148→    setTgError(null);
+  1149→    try {
+  1150→      const res = await fetch(
+  1151→        "/api/scanner/telegram?channel=Mastersharkcrypto&limit=20",
+  1152→      );
+  1153→      if (!res.ok) throw new Error(`HTTP ${res.status} ${res.statusText}`);
+  1154→      const data = (await res.json()) as TelegramResponse;
+  1155→      if (data?.error) throw new Error(data.error);
+  1156→      if (!data || !Array.isArray(data.messages)) {
+  1157→        throw new Error("Invalid response shape");
+  1158→      }
+  1159→      setTelegram(data);
+  1160→    } catch (e) {
+  1161→      setTgError(e instanceof Error ? e.message : "Failed to load telegram feed");
+  1162→    } finally {
+  1163→      setTgLoading(false);
+  1164→      setTgRefreshing(false);
+  1165→    }
+  1166→  }, []);
+  1167→
+  1168→  const fetchSources = React.useCallback(async () => {
+  1169→    try {
+  1170→      const res = await fetch("/api/scanner/sources");
+  1171→      if (!res.ok) return;
+  1172→      const data = (await res.json()) as SourcesStatus;
+  1173→      if (data?.sources) setSources(data.sources);
+  1174→    } catch {
+  1175→      // Non-critical — silently ignore.
+  1176→    }
+  1177→  }, []);
+  1178→
+  1179→  // ----- Initial load (sources + active tab) -----
+  1180→  React.useEffect(() => {
+  1181→    fetchSources();
+  1182→  }, [fetchSources]);
+  1183→
+  1184→  React.useEffect(() => {
+  1185→    if (tab === "news" && !news && !newsLoading) fetchNews(false);
+  1186→    else if (tab === "news_fa" && !newsFa && !newsFaLoading) fetchNewsFa(false);
+  1187→    else if (tab === "telegram" && !telegram && !tgLoading) fetchTelegram(false);
+  1188→  }, [tab, news, newsFa, telegram, newsLoading, newsFaLoading, tgLoading, fetchNews, fetchNewsFa, fetchTelegram]);
+  1189→
+  1190→  // ----- Auto-refresh telegram every 60s when toggle is on -----
+  1191→  React.useEffect(() => {
+  1192→    if (!autoRefresh) return;
+  1193→    const id = setInterval(() => fetchTelegram(true), 60_000);
+  1194→    return () => clearInterval(id);
+  1195→  }, [autoRefresh, fetchTelegram]);
+  1196→
+  1197→  // ----- Derived: news sources list for filter chips -----
+  1198→  const newsSources = React.useMemo(() => {
+  1199→    const set = new Set<string>();
+  1200→    news?.articles.forEach((a) => set.add(a.source));
+  1201→    return Array.from(set);
+  1202→  }, [news]);
+  1203→
+  1204→  // ----- Derived: filtered news articles (English) -----
+  1205→  const filteredArticles = React.useMemo(() => {
+  1206→    if (!news) return [];
+  1207→    const q = search.trim().toLowerCase();
+  1208→    return news.articles.filter((a) => {
+  1209→      if (sourceFilter !== "all" && a.source !== sourceFilter) return false;
+  1210→      if (q) {
+  1211→        const hay = `${a.title} ${a.summary}`.toLowerCase();
+  1212→        if (!hay.includes(q)) return false;
+  1213→      }
+  1214→      return true;
+  1215→    });
+  1216→  }, [news, sourceFilter, search]);
+  1217→
+  1218→  // ----- Derived: filtered Persian news articles -----
+  1219→  const filteredFaArticles = React.useMemo(() => {
+  1220→    if (!newsFa) return [];
+  1221→    const q = searchFa.trim().toLowerCase();
+  1222→    return newsFa.articles.filter((a) => {
+  1223→      if (categoryFilter !== "all" && a.category !== categoryFilter) return false;
+  1224→      if (q) {
+  1225→        const hay = `${a.title} ${a.summary}`.toLowerCase();
+  1226→        if (!hay.includes(q)) return false;
+  1227→      }
+  1228→      return true;
+  1229→    });
+  1230→  }, [newsFa, categoryFilter, searchFa]);
+  1231→
+  1232→  // ----- Derived: cache age for the active tab -----
+  1233→  const activeFetchedAt =
+  1234→    tab === "news" ? news?.fetched_at
+  1235→    : tab === "news_fa" ? newsFa?.fetched_at
+  1236→    : telegram?.fetched_at;
+  1237→  // secondsSince recomputes on every render (tick state forces re-render every 1s).
+  1238→  void secondsSince(activeFetchedAt ?? null);
+  1239→
+  1240→  // ----- Refresh handler for the current tab -----
+  1241→  const handleRefresh = React.useCallback(() => {
+  1242→    if (tab === "news") fetchNews(true);
+  1243→    else if (tab === "news_fa") fetchNewsFa(true);
+  1244→    else fetchTelegram(true);
+  1245→  }, [tab, fetchNews, fetchNewsFa, fetchTelegram]);
+  1246→
+  1247→  const isRefreshing =
+  1248→    tab === "news" ? newsRefreshing
+  1249→    : tab === "news_fa" ? newsFaRefreshing
+  1250→    : tgRefreshing;
+  1251→  const isLoading =
+  1252→    tab === "news" ? newsLoading
+  1253→    : tab === "news_fa" ? newsFaLoading
+  1254→    : tgLoading;
+  1255→  const activeError =
+  1256→    tab === "news" ? newsError
+  1257→    : tab === "news_fa" ? newsFaError
+  1258→    : tgError;
+  1259→  const onRetry =
+  1260→    tab === "news" ? () => fetchNews(false)
+  1261→    : tab === "news_fa" ? () => fetchNewsFa(false)
+  1262→    : () => fetchTelegram(false);
+  1263→
+  1264→  // ----------------------------------------------------------------------- //
+  1265→  //  Render
+  1266→  // ----------------------------------------------------------------------- //
+  1267→
+  1268→  return (
+  1269→    <TooltipProvider>
+  1270→      <div className="space-y-4">
+  1271→        {/* ===== Header ===== */}
+  1272→        <Card className="border-border/60 bg-card/40 backdrop-blur-sm">
+  1273→          <CardContent className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between">
+  1274→            <div className="flex items-center gap-3">
+  1275→              <div className="flex size-10 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-emerald-500/20 to-teal-500/20 text-emerald-600 dark:text-emerald-400">
+  1276→                <Newspaper className="size-5" />
+  1277→              </div>
+  1278→              <div>
+  1279→                <h2 className="text-lg font-semibold leading-tight">
+  1280→                  {tt("news.title", "News & Signals")}
+  1281→                </h2>
+  1282→                <p className="text-xs text-muted-foreground">
+  1283→                  {tt("news.subtitle", "Crypto news + Telegram channel, unified.")}
+  1284→                </p>
+  1285→              </div>
+  1286→            </div>
+  1287→            <div className="flex items-center gap-3">
+  1288→              {activeFetchedAt && (
+  1289→                <span className="hidden items-center gap-1 text-xs text-muted-foreground sm:flex">
+  1290→                  <Clock className="size-3" />
+  1291→                  {tt("news.updated", "Updated")} {timeAgo(activeFetchedAt)}
+  1292→                </span>
+  1293→              )}
+  1294→              <Button
+  1295→                size="sm"
+  1296→                variant="outline"
+  1297→                onClick={handleRefresh}
+  1298→                disabled={isRefreshing || isLoading}
+  1299→              >
+  1300→                <RefreshCw className={`size-3.5 ${isRefreshing ? "animate-spin" : ""}`} />
+  1301→                <span className="hidden sm:inline">{tt("news.refresh", "Refresh")}</span>
+  1302→              </Button>
+  1303→            </div>
+  1304→          </CardContent>
+  1305→        </Card>
+  1306→
+  1307→        {/* ===== Data sources badge row ===== */}
+  1308→        <SourcesBadgeRow sources={sources} />
+  1309→
+  1310→        {/* ===== Tabs ===== */}
+  1311→        <Tabs
+  1312→          value={tab}
+  1313→          onValueChange={(v) => setTab(v as "news" | "news_fa" | "telegram")}
+  1314→          className="w-full"
+  1315→        >
+  1316→          <TabsList className="w-full sm:w-auto">
+  1317→            <TabsTrigger value="news" className="flex-1 sm:flex-initial">
+  1318→              <Newspaper className="size-4" />
+  1319→              {tt("news.tab", "Crypto News")}
+  1320→              {news && news.articles.length > 0 && (
+  1321→                <Badge variant="secondary" className="ml-1 px-1.5 py-0 text-[10px]">
+  1322→                  {news.articles.length}
+  1323→                </Badge>
+  1324→              )}
+  1325→            </TabsTrigger>
+  1326→            <TabsTrigger value="news_fa" className="flex-1 sm:flex-initial">
+  1327→              <BookOpen className="size-4" />
+  1328→              {tt("news_fa.tab", "اخبار فارسی")}
+  1329→              {newsFa && newsFa.articles.length > 0 && (
+  1330→                <Badge variant="secondary" className="ml-1 px-1.5 py-0 text-[10px]">
+  1331→                  {newsFa.articles.length}
+  1332→                </Badge>
+  1333→              )}
+  1334→            </TabsTrigger>
+  1335→            <TabsTrigger value="telegram" className="flex-1 sm:flex-initial">
+  1336→              <Send className="size-4" />
+  1337→              {tt("telegram.tab", "Telegram Channel")}
+  1338→              {telegram && telegram.messages.length > 0 && (
+  1339→                <Badge variant="secondary" className="ml-1 px-1.5 py-0 text-[10px]">
+  1340→                  {telegram.messages.length}
+  1341→                </Badge>
+  1342→              )}
+  1343→            </TabsTrigger>
+  1344→          </TabsList>
+  1345→
+  1346→          {/* ----- English news tab ----- */}
+  1347→          <TabsContent value="news" className="space-y-4">
+  1348→            <NewsTabContent
+  1349→              loading={newsLoading}
+  1350→              error={newsError}
+  1351→              news={news}
+  1352→              sources={newsSources}
+  1353→              sourceFilter={sourceFilter}
+  1354→              setSourceFilter={setSourceFilter}
+  1355→              search={search}
+  1356→              setSearch={setSearch}
+  1357→              filteredArticles={filteredArticles}
+  1358→              onRetry={onRetry}
+  1359→              tt={tt}
+  1360→            />
+  1361→          </TabsContent>
+  1362→
+  1363→          {/* ----- Persian news tab ----- */}
+  1364→          <TabsContent value="news_fa" className="space-y-4">
+  1365→            <PersianNewsTabContent
+  1366→              loading={newsFaLoading}
+  1367→              error={newsFaError}
+  1368→              newsFa={newsFa}
+  1369→              categoryFilter={categoryFilter}
+  1370→              setCategoryFilter={setCategoryFilter}
+  1371→              search={searchFa}
+  1372→              setSearch={setSearchFa}
+  1373→              filteredArticles={filteredFaArticles}
+  1374→              onRetry={onRetry}
+  1375→              tt={tt}
+  1376→            />
+  1377→          </TabsContent>
+  1378→
+  1379→          {/* ----- Telegram tab ----- */}
+  1380→          <TabsContent value="telegram" className="space-y-4">
+  1381→            <TelegramTabContent
+  1382→              loading={tgLoading}
+  1383→              error={tgError}
+  1384→              telegram={telegram}
+  1385→              autoRefresh={autoRefresh}
+  1386→              setAutoRefresh={setAutoRefresh}
+  1387→              onRetry={onRetry}
+  1388→              tt={tt}
+  1389→            />
+  1390→          </TabsContent>
+  1391→        </Tabs>
+  1392→      </div>
+  1393→    </TooltipProvider>
+  1394→  );
+  1395→}
+  1396→
+  1397→export default NewsFeedView;
+  1398→

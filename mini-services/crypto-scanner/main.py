@@ -629,11 +629,16 @@ async def get_cmc_airdrops(limit: int = 50, status: str = "ONGOING"):
 
     Status: ONGOING | UPCOMING | ENDED
     Returns cmc_pro_required=True when no API key is set.
+    Returns plan_not_supported=True when the key's plan doesn't include airdrops (403).
     """
     if not sources.is_cmc_available():
         return {"cmc_pro_required": True, "airdrops": [], "count": 0,
                 "message": "Set CMC_API_KEY env var to unlock airdrop data"}
-    airdrops = await sources.fetch_cmc_airdrops(limit=limit, status=status)
+    try:
+        airdrops = await sources.fetch_cmc_airdrops(limit=limit, status=status)
+    except sources.CmcPlanNotSupported:
+        return {"plan_not_supported": True, "airdrops": [], "count": 0,
+                "message": "Your CMC API key plan doesn't support the airdrops endpoint. Upgrade to a higher tier."}
     return {"airdrops": airdrops or [], "count": len(airdrops or []),
             "status_filter": status, "fetched_at": datetime.now(timezone.utc).isoformat()}
 
@@ -664,6 +669,21 @@ async def get_cmc_exchanges(limit: int = 50):
     exchanges = await sources.fetch_cmc_exchange_map(limit=limit)
     return {"exchanges": exchanges or [], "count": len(exchanges or []),
             "fetched_at": datetime.now(timezone.utc).isoformat()}
+
+
+@app.get("/cmc/global-metrics")
+async def get_cmc_global_metrics():
+    """Fetch global crypto market metrics from CMC Pro (cross-verification).
+
+    Provides CMC's own BTC dominance, total mcap, and 24h volume — used to
+    cross-verify CoinGecko's global data. Available with Basic plan.
+    Returns cmc_pro_required=True when no API key is set.
+    """
+    if not sources.is_cmc_available():
+        return {"cmc_pro_required": True, "metrics": None,
+                "message": "Set CMC_API_KEY env var to unlock CMC global metrics"}
+    metrics = await sources.fetch_cmc_global_metrics()
+    return {"metrics": metrics, "fetched_at": datetime.now(timezone.utc).isoformat()}
 
 
 if __name__ == "__main__":

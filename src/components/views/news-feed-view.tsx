@@ -155,6 +155,18 @@ function sourceStyle(name: string): SourceStyle {
   return SOURCE_STYLES[name] ?? SOURCE_STYLES[normalizeSourceName(name)] ?? DEFAULT_SOURCE_STYLE;
 }
 
+/** Translate-with-fallback helper, reusable by any sub-component. */
+function useTt() {
+  const { t } = useLanguage();
+  return React.useCallback(
+    (key: string, fallback: string, vars?: Record<string, string | number>): string => {
+      const v = t(key, vars);
+      return typeof v === "string" && v !== key ? v : fallback;
+    },
+    [t],
+  );
+}
+
 // Sources shown in the data-sources badge row (news + telegram relevant only).
 const RELEVANT_SOURCE_PATTERNS = [
   /RSS$/i,
@@ -253,6 +265,7 @@ function ArticleImage({ src, alt }: { src: string | null; alt: string }) {
 
 /** A single news article card. The whole card is a link. */
 function ArticleCard({ article }: { article: NewsArticle }) {
+  const tt = useTt();
   const st = sourceStyle(article.source);
   return (
     <a
@@ -274,11 +287,11 @@ function ArticleCard({ article }: { article: NewsArticle }) {
               {timeAgo(article.published_at)}
             </span>
           </div>
-          <h3 className="line-clamp-2 font-semibold leading-snug text-foreground">
+          <h3 className="line-clamp-2 font-semibold leading-snug text-foreground" dir="auto">
             {article.title}
           </h3>
           {article.summary && (
-            <p className="line-clamp-3 text-sm text-muted-foreground">{article.summary}</p>
+            <p className="line-clamp-3 text-sm text-muted-foreground" dir="auto">{article.summary}</p>
           )}
           {article.categories.length > 0 && (
             <div className="flex flex-wrap gap-1 pt-1">
@@ -286,6 +299,7 @@ function ArticleCard({ article }: { article: NewsArticle }) {
                 <span
                   key={c}
                   className="rounded bg-muted/60 px-1.5 py-0.5 text-[10px] text-muted-foreground"
+                  dir="auto"
                 >
                   {c}
                 </span>
@@ -294,9 +308,9 @@ function ArticleCard({ article }: { article: NewsArticle }) {
           )}
         </div>
         <CardFooter className="border-t border-border/40 px-4 py-2">
-          <span className="flex items-center gap-1 text-xs text-muted-foreground transition-colors group-hover:text-primary">
+          <span className="flex items-center gap-1 text-xs text-muted-foreground transition-colors group-hover:text-primary" dir="auto">
             <ExternalLink className="size-3" />
-            Read article
+            {tt("news.readArticle", "Read article")}
           </span>
         </CardFooter>
       </Card>
@@ -381,6 +395,7 @@ function MessageSkeleton() {
 
 /** A single telegram message bubble. */
 function MessageBubble({ msg }: { msg: TelegramMessage }) {
+  const tt = useTt();
   // Derive per-message deep link: t.me/<channel>/<messageId>
   const msgNum = msg.id.split("/")[1] ?? "";
   const deepLink =
@@ -401,6 +416,7 @@ function MessageBubble({ msg }: { msg: TelegramMessage }) {
             target="_blank"
             rel="noopener noreferrer"
             className="truncate text-sm font-medium text-foreground hover:text-primary"
+            dir="auto"
           >
             @{msg.channel}
           </a>
@@ -416,12 +432,12 @@ function MessageBubble({ msg }: { msg: TelegramMessage }) {
               target="_blank"
               rel="noopener noreferrer"
               className="flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-              aria-label="Open message on Telegram"
+              aria-label={tt("telegram.openMessageAria", "Open message on Telegram")}
             >
               <ExternalLink className="size-3.5" />
             </a>
           </TooltipTrigger>
-          <TooltipContent>Open on Telegram</TooltipContent>
+          <TooltipContent>{tt("telegram.openOnTelegram", "Open on Telegram")}</TooltipContent>
         </Tooltip>
       </div>
 
@@ -435,7 +451,7 @@ function MessageBubble({ msg }: { msg: TelegramMessage }) {
         >
           <img
             src={msg.media_url as string}
-            alt="Telegram media"
+            alt={tt("telegram.mediaAlt", "Telegram media")}
             loading="lazy"
             className="max-h-80 w-full rounded-lg object-cover"
           />
@@ -453,7 +469,7 @@ function MessageBubble({ msg }: { msg: TelegramMessage }) {
             >
               <img
                 src={url}
-                alt={`Telegram media ${i + 1}`}
+                alt={tt("telegram.mediaAltN", "Telegram media {n}", { n: i + 1 })}
                 loading="lazy"
                 className="h-32 w-full object-cover transition-transform hover:scale-105 sm:h-40"
               />
@@ -503,9 +519,9 @@ function MessageBubble({ msg }: { msg: TelegramMessage }) {
           {timeClock(msg.published_at)}
         </span>
         {msg.views != null && (
-          <span className="flex items-center gap-1">
+          <span className="flex items-center gap-1" dir="auto">
             <Eye className="size-3" />
-            {msg.views} views
+            {msg.views} {tt("telegram.views", "views")}
           </span>
         )}
       </div>
@@ -518,6 +534,7 @@ function MessageBubble({ msg }: { msg: TelegramMessage }) {
 // --------------------------------------------------------------------------- //
 
 function SourcesBadgeRow({ sources }: { sources: DataSourceInfo[] }) {
+  const tt = useTt();
   const relevant = React.useMemo(
     () => sources.filter(isNewsOrTelegramSource),
     [sources],
@@ -525,9 +542,9 @@ function SourcesBadgeRow({ sources }: { sources: DataSourceInfo[] }) {
   if (relevant.length === 0) return null;
   return (
     <div className="flex flex-wrap items-center gap-1.5">
-      <span className="flex items-center gap-1 text-xs text-muted-foreground">
+      <span className="flex items-center gap-1 text-xs text-muted-foreground" dir="auto">
         <Radio className="size-3.5" />
-        Data sources:
+        {tt("common.dataSources", "Data sources:")}
       </span>
       {relevant.map((s) => {
         const displayName = s.name.replace(/\s+RSS$/i, "");
@@ -547,7 +564,7 @@ function SourcesBadgeRow({ sources }: { sources: DataSourceInfo[] }) {
                     s.available ? "bg-emerald-500" : "bg-muted-foreground/40"
                   }`}
                 />
-                {displayName}
+                <span dir="auto">{displayName}</span>
                 <span
                   className={`ml-0.5 rounded px-1 py-px text-[9px] ${
                     s.type === "free"
@@ -555,15 +572,15 @@ function SourcesBadgeRow({ sources }: { sources: DataSourceInfo[] }) {
                       : "bg-amber-500/15 text-amber-600 dark:text-amber-400"
                   }`}
                 >
-                  {s.type === "free" ? "free" : "key"}
+                  {s.type === "free" ? tt("common.free", "free") : tt("common.key", "key")}
                 </span>
               </div>
             </TooltipTrigger>
             <TooltipContent className="max-w-[240px] text-left">
-              <div className="font-semibold">{s.name}</div>
-              <div className="text-xs opacity-90">{s.description}</div>
-              <div className="mt-1 text-[10px] opacity-70">
-                {s.available ? "Available" : "Unavailable"} · {s.type}
+              <div className="font-semibold" dir="auto">{s.name}</div>
+              <div className="text-xs opacity-90" dir="auto">{s.description}</div>
+              <div className="mt-1 text-[10px] opacity-70" dir="auto">
+                {s.available ? tt("common.available", "Available") : tt("common.unavailable", "Unavailable")} · {s.type}
               </div>
             </TooltipContent>
           </Tooltip>
@@ -634,14 +651,14 @@ function NewsTabContent({
             onChange={(e) => setSearch(e.target.value)}
             placeholder={tt("news.searchPlaceholder", "Search articles…")}
             className="h-8 pl-8 text-sm"
-            aria-label="Search articles"
+            aria-label={tt("news.searchAria", "Search articles")}
           />
           {search && (
             <button
               type="button"
               onClick={() => setSearch("")}
               className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground transition-colors hover:text-foreground"
-              aria-label="Clear search"
+              aria-label={tt("news.clearSearchAria", "Clear search")}
             >
               <X className="size-3.5" />
             </button>
@@ -962,7 +979,7 @@ function TelegramTabContent({
               <Switch
                 checked={autoRefresh}
                 onCheckedChange={setAutoRefresh}
-                aria-label="Auto-refresh every 60 seconds"
+                aria-label={tt("telegram.autoRefreshAria", "Auto-refresh every 60 seconds")}
               />
             </label>
             {telegram ? (
@@ -976,7 +993,7 @@ function TelegramTabContent({
                   <span className="hidden sm:inline">
                     {tt("telegram.joinChannel", "Join Channel")}
                   </span>
-                  <span className="sm:hidden">Join</span>
+                  <span className="sm:hidden">{tt("telegram.join", "Join")}</span>
                 </a>
               </Button>
             ) : (
@@ -989,7 +1006,7 @@ function TelegramTabContent({
                 <span className="hidden sm:inline">
                   {tt("telegram.joinChannel", "Join Channel")}
                 </span>
-                <span className="sm:hidden">Join</span>
+                <span className="sm:hidden">{tt("telegram.join", "Join")}</span>
               </Button>
             )}
           </div>

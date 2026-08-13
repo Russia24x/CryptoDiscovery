@@ -543,13 +543,13 @@ export default function Home() {
               const avgQ = reports.reduce((s, r) => s + r.project_quality, 0) / reports.length;
               const topProject = reports.reduce((best, r) => r.project_quality > best.project_quality ? r : best, reports[0]);
               toast({
-                title: "✅ Scan completed",
-                description: `${reports.length} projects analyzed · Avg quality ${avgQ.toFixed(1)} · Top: ${topProject.name} (${topProject.project_quality.toFixed(0)})`,
+                title: t("toast.scanCompleted"),
+                description: t("toast.scanCompletedDesc", { count: reports.length, q: avgQ.toFixed(1), name: topProject.name, score: topProject.project_quality.toFixed(0) }),
               });
             } else if (data.status === "failed") {
               toast({
-                title: "❌ Scan failed",
-                description: data.error || "Unknown error occurred",
+                title: t("toast.scanFailed"),
+                description: data.error || t("toast.unknownError"),
                 variant: "destructive",
               });
             }
@@ -847,7 +847,7 @@ export default function Home() {
     a.download = `scan-${activeScan.scan_id.slice(0, 12)}-results.csv`;
     a.click();
     URL.revokeObjectURL(url);
-    toast({ title: "✅ CSV exported", description: `${activeScan.reports.length} projects exported to CSV` });
+    toast({ title: t("toast.csvExported"), description: t("toast.csvExportedDesc", { count: activeScan.reports.length }) });
   };
 
   // --- copy report summary to clipboard ---
@@ -860,13 +860,13 @@ export default function Home() {
       `Thesis: ${report.final_thesis}`,
     ].join("\n");
     if (!navigator?.clipboard?.writeText) {
-      toast({ title: "❌ Copy failed", description: "Clipboard API not available", variant: "destructive" });
+      toast({ title: t("toast.copyFailed"), description: t("toast.clipboardNotAvailable"), variant: "destructive" });
       return;
     }
     navigator.clipboard.writeText(summary).then(() => {
-      toast({ title: "📋 Copied to clipboard", description: "Report summary ready to paste" });
+      toast({ title: t("toast.copiedToClipboard"), description: t("toast.reportSummaryReady") });
     }).catch(() => {
-      toast({ title: "❌ Copy failed", description: "Could not copy to clipboard", variant: "destructive" });
+      toast({ title: t("toast.copyFailed"), description: t("toast.couldNotCopy"), variant: "destructive" });
     });
   };
 
@@ -959,17 +959,17 @@ export default function Home() {
   }, [activeScan?.reports]);
   const availableActions = useMemo(() => {
     if (!activeScan?.reports) return [];
-    const set = new Set<string>();
+    const set = new Set<{ value: string; labelKey: string }>();
     activeScan.reports.forEach((r) => {
       const a = r.action.toLowerCase();
-      if (a.includes("high conviction")) set.add("High Conviction");
-      else if (a.includes("core")) set.add("Core");
-      else if (a.includes("small")) set.add("Small");
-      else if (a.includes("research")) set.add("Research");
-      else if (a.includes("watch")) set.add("Watch");
-      else set.add("Ignore");
+      if (a.includes("high conviction")) set.add({ value: "high conviction", labelKey: "actions.highConviction" });
+      else if (a.includes("core")) set.add({ value: "core", labelKey: "actions.coreCandidate" });
+      else if (a.includes("small")) set.add({ value: "small", labelKey: "actions.smallPosition" });
+      else if (a.includes("research")) set.add({ value: "research", labelKey: "actions.deepResearch" });
+      else if (a.includes("watch")) set.add({ value: "watch", labelKey: "actions.watch" });
+      else set.add({ value: "ignore", labelKey: "actions.ignore" });
     });
-    return Array.from(set).sort();
+    return Array.from(set).sort((a, b) => a.value.localeCompare(b.value));
   }, [activeScan?.reports]);
 
   // --- sector distribution data for donut chart ---
@@ -1593,9 +1593,13 @@ export default function Home() {
                         </SelectTrigger>
                         <SelectContent>
                           <SelectItem value="all">{t("results.allActions")}</SelectItem>
-                          {availableActions.map((a) => (
-                            <SelectItem key={a} value={a.toLowerCase()}>{a}</SelectItem>
-                          ))}
+                          {availableActions.map((a) => {
+                            const translated = t(a.labelKey);
+                            const label = typeof translated === "string" && translated !== a.labelKey ? translated : a.value;
+                            return (
+                              <SelectItem key={a.value} value={a.value} dir="auto">{label}</SelectItem>
+                            );
+                          })}
                         </SelectContent>
                       </Select>
                       {availableSectors.length > 0 && (
@@ -1605,9 +1609,13 @@ export default function Home() {
                           </SelectTrigger>
                           <SelectContent>
                             <SelectItem value="all">{t("results.allSectors")}</SelectItem>
-                            {availableSectors.map((s) => (
-                              <SelectItem key={s} value={s}>{s}</SelectItem>
-                            ))}
+                            {availableSectors.map((s) => {
+                              const translated = t(`sectors.${s}`);
+                              const label = typeof translated === "string" && translated !== `sectors.${s}` ? translated : s;
+                              return (
+                                <SelectItem key={s} value={s} dir="auto">{label}</SelectItem>
+                              );
+                            })}
                           </SelectContent>
                         </Select>
                       )}
@@ -1701,7 +1709,7 @@ export default function Home() {
                             setSortBy("quality");
                           }}
                         >
-                          Clear filters
+                          {t("results.clearFilters")}
                         </Button>
                       </div>
                     )}
@@ -1717,17 +1725,17 @@ export default function Home() {
                         <CardHeader className="pb-2">
                           <CardTitle className="flex items-center gap-2 text-sm">
                             <PieChart className="h-4 w-4 text-emerald-500" />
-                            Sector Distribution
+                            {t("analytics.sectorDistribution")}
                           </CardTitle>
                           <CardDescription className="text-xs">
-                            Projects by sector category
+                            {t("analytics.sectorDistributionDesc")}
                           </CardDescription>
                         </CardHeader>
                         <CardContent className="flex justify-center pt-2">
                           {sectorDonutData.length > 0 ? (
                             <SectorDonut
                               data={sectorDonutData}
-                              centerLabel="Projects"
+                              centerLabel={t("analytics.projects")}
                               centerValue={sectorDonutData.reduce((s, d) => s + d.value, 0)}
                               size={200}
                             />
@@ -1741,10 +1749,10 @@ export default function Home() {
                         <CardHeader className="pb-2">
                           <CardTitle className="flex items-center gap-2 text-sm">
                             <Target className="h-4 w-4 text-emerald-500" />
-                            Action Distribution
+                            {t("analytics.actionDistribution")}
                           </CardTitle>
                           <CardDescription className="text-xs">
-                            Investment recommendations breakdown
+                            {t("analytics.actionDistributionDesc")}
                           </CardDescription>
                         </CardHeader>
                         <CardContent className="pt-2">
@@ -1758,10 +1766,10 @@ export default function Home() {
                       <CardHeader className="pb-2">
                         <CardTitle className="flex items-center gap-2 text-sm">
                           <Gauge className="h-4 w-4 text-emerald-500" />
-                          Quality Score Distribution
+                          {t("analytics.qualityScoreDistribution")}
                         </CardTitle>
                         <CardDescription className="text-xs">
-                          Histogram of project quality scores
+                          {t("analytics.qualityScoreDistributionDesc")}
                         </CardDescription>
                       </CardHeader>
                       <CardContent className="pt-2">
@@ -1774,10 +1782,10 @@ export default function Home() {
                       <CardHeader className="pb-2">
                         <CardTitle className="flex items-center gap-2 text-sm">
                           <ShieldAlert className="h-4 w-4 text-rose-500" />
-                          Risk Heatmap
+                          {t("analytics.riskHeatmap")}
                         </CardTitle>
                         <CardDescription className="text-xs">
-                          Severe risk distribution across all scanned projects
+                          {t("analytics.riskHeatmapDesc")}
                         </CardDescription>
                       </CardHeader>
                       <CardContent className="pt-2">
@@ -1796,7 +1804,7 @@ export default function Home() {
                           />
                         ) : (
                           <p className="text-xs text-muted-foreground py-8 text-center">
-                            Loading risk data...
+                            {t("common.loading")}
                           </p>
                         )}
                       </CardContent>
@@ -1873,7 +1881,7 @@ export default function Home() {
       >
         <SheetContent side="right" className="w-full sm:max-w-5xl lg:max-w-6xl p-0 overflow-y-auto">
           <SheetDescription className="sr-only">
-            Side-by-side comparison of selected projects
+            {t("comparison.srDescription")}
           </SheetDescription>
           <ComparisonView reports={compareReports} />
         </SheetContent>
@@ -1888,7 +1896,7 @@ export default function Home() {
       >
         <SheetContent side="right" className="w-full sm:max-w-md lg:max-w-lg p-0 overflow-y-auto">
           <SheetDescription className="sr-only">
-            Your saved watchlist of tracked projects
+            {t("watchlist.srDescription")}
           </SheetDescription>
           <WatchlistView
             watchlist={watchlist}
@@ -2049,18 +2057,20 @@ function HealthDot() {
 }
 
 function ScanStatusBadge({ status }: { status: string }) {
-  const map: Record<string, { cls: string; icon: typeof Loader2 }> = {
-    completed: { cls: "bg-emerald-500/15 text-emerald-400 border-emerald-500/30", icon: BadgeCheck },
-    running: { cls: "bg-sky-500/15 text-sky-400 border-sky-500/30", icon: Loader2 },
-    queued: { cls: "bg-slate-500/15 text-slate-300 border-slate-500/30", icon: Clock },
-    failed: { cls: "bg-rose-500/15 text-rose-400 border-rose-500/30", icon: AlertTriangle },
+  const { t } = useLanguage();
+  const map: Record<string, { cls: string; icon: typeof Loader2; key: string }> = {
+    completed: { cls: "bg-emerald-500/15 text-emerald-400 border-emerald-500/30", icon: BadgeCheck, key: "scan.statusCompleted" },
+    running: { cls: "bg-sky-500/15 text-sky-400 border-sky-500/30", icon: Loader2, key: "scan.statusRunning" },
+    queued: { cls: "bg-slate-500/15 text-slate-300 border-slate-500/30", icon: Clock, key: "scan.statusQueued" },
+    failed: { cls: "bg-rose-500/15 text-rose-400 border-rose-500/30", icon: AlertTriangle, key: "scan.statusFailed" },
   };
   const m = map[status] || map.queued;
   const Icon = m.icon;
+  const label = t(m.key);
   return (
-    <Badge variant="outline" className={cn("text-[10px] gap-1 py-0 h-5", m.cls)}>
+    <Badge variant="outline" className={cn("text-[10px] gap-1 py-0 h-5", m.cls)} dir="auto">
       <Icon className={cn("h-2.5 w-2.5", status === "running" && "animate-spin")} />
-      {status}
+      {typeof label === "string" && label !== m.key ? label : status}
     </Badge>
   );
 }
@@ -2115,7 +2125,16 @@ function ScanProgressCard({ scan, onRefresh, scanning }: { scan: ScanStatus; onR
     return phases.findIndex((p) => scan.current_phase.startsWith(p));
   }, [scan.current_phase]);
 
-  const phases = ["Discovery", "Screening", "Evidence", "Evaluation", "Scoring", "Investment", "Decision", "Output"];
+  const phases = [
+    t("scan.phase1"),
+    t("scan.phase2"),
+    t("scan.phase3"),
+    t("scan.phase4"),
+    t("scan.phase5"),
+    t("scan.phase6"),
+    t("scan.phase7"),
+    t("scan.phase8"),
+  ];
 
   return (
     <Card className="border-border/60 bg-card/40 backdrop-blur-sm overflow-hidden">
@@ -2124,11 +2143,11 @@ function ScanProgressCard({ scan, onRefresh, scanning }: { scan: ScanStatus; onR
           <div>
             <CardTitle className="flex items-center gap-2 text-sm">
               <FlaskConical className="h-4 w-4 text-emerald-500" />
-              Scan {scan.scan_id.slice(0, 12)}
+              <span dir="auto">{t("scan.scanLabel")} {scan.scan_id.slice(0, 12)}</span>
               <Badge variant="outline" className="ml-1 text-[10px] capitalize">{t(`personas.${scan.config.persona}`)}</Badge>
             </CardTitle>
-            <CardDescription className="text-xs mt-1 font-mono">
-              {scan.current_phase} · {scan.processed}/{scan.total_candidates} processed
+            <CardDescription className="text-xs mt-1 font-mono" dir="auto">
+              {scan.current_phase} · {scan.processed}/{scan.total_candidates} {t("scan.processed")}
             </CardDescription>
           </div>
           <div className="flex items-center gap-2">
@@ -2157,7 +2176,7 @@ function ScanProgressCard({ scan, onRefresh, scanning }: { scan: ScanStatus; onR
             const done = phaseIndex > i || scan.status === "completed";
             const current = phaseIndex === i && scan.status !== "completed";
             return (
-              <div key={p} className="flex items-center gap-1 flex-shrink-0">
+              <div key={i} className="flex items-center gap-1 flex-shrink-0">
                 <div
                   className={cn(
                     "flex items-center gap-1.5 px-2 py-1 rounded-md text-[10px] font-medium border transition-all",
@@ -2165,6 +2184,7 @@ function ScanProgressCard({ scan, onRefresh, scanning }: { scan: ScanStatus; onR
                     current && "bg-sky-500/15 text-sky-400 border-sky-500/40 shadow-sm shadow-sky-500/20",
                     !done && !current && "bg-muted/30 text-muted-foreground border-border/40",
                   )}
+                  dir="auto"
                 >
                   {done ? (
                     <BadgeCheck className="h-3 w-3" />
@@ -2190,7 +2210,7 @@ function ScanProgressCard({ scan, onRefresh, scanning }: { scan: ScanStatus; onR
               {scan.phase_log.slice(-8).map((l, i) => (
                 <div key={i} className="text-muted-foreground flex gap-2">
                   <span className="text-emerald-500/70">›</span>
-                  <span className="truncate">{l}</span>
+                  <span className="truncate" dir="auto">{l}</span>
                 </div>
               ))}
             </div>
@@ -2198,7 +2218,7 @@ function ScanProgressCard({ scan, onRefresh, scanning }: { scan: ScanStatus; onR
         )}
 
         {scan.error && (
-          <p className="text-xs text-rose-400 flex items-center gap-1.5">
+          <p className="text-xs text-rose-400 flex items-center gap-1.5" dir="auto">
             <AlertTriangle className="h-3 w-3" /> {scan.error}
           </p>
         )}
@@ -3058,11 +3078,11 @@ function ComparisonView({ reports }: { reports: FullReport[] }) {
     { label: t("detail.riskAdj"), getValue: (r) => r.decision.risk_adjusted_score.toFixed(0) },
     { label: t("results.action"), getValue: (r) => r.decision.action_label },
     { label: t("detail.valuationMultiples") ? t("detail.valuationMultiples") : "Valuation", getValue: (r) => r.valuation_label },
-    { label: "Investment Attr.", getValue: (r) => r.investment_attractiveness_score?.toFixed(0) ?? "—" },
+    { label: t("comparison.investmentAttr"), getValue: (r) => r.investment_attractiveness_score?.toFixed(0) ?? "—" },
     { label: t("detail.evidence"), getValue: (r) => r.evidence_grade.split(" - ")[0] },
     { label: t("detail.cyclePhase"), getValue: (r) => r.cycle_phase.replace("Phase ", "P") },
-    { label: "Category", getValue: (r) => r.candidate.category },
-    { label: "Sector", getValue: (r) => r.candidate.sector },
+    { label: t("comparison.category"), getValue: (r) => r.candidate.category },
+    { label: t("comparison.sector"), getValue: (r) => r.candidate.sector },
     { label: t("metrics.tvl"), getValue: (r) => fmtUsd(r.economic_engine.tvl) },
     { label: t("metrics.revenue24h"), getValue: (r) => fmtUsd(r.economic_engine.revenue) },
     { label: t("metrics.fees24h"), getValue: (r) => fmtUsd(r.economic_engine.fees) },
@@ -3080,11 +3100,11 @@ function ComparisonView({ reports }: { reports: FullReport[] }) {
       <SheetHeader className="px-6 pt-6 pb-4 border-b border-border/60 sticky top-0 bg-background/95 backdrop-blur z-10">
         <SheetTitle className="flex items-center gap-2 text-base">
           <GitCompare className="h-5 w-5 text-violet-400" />
-          Project Comparison
+          {t("comparison.title")}
           <Badge variant="secondary" className="font-mono text-[10px]">{reports.length}</Badge>
         </SheetTitle>
         <p className="text-xs text-muted-foreground">
-          Side-by-side comparison across {rows.length + axisRows.length} metrics
+          {t("comparison.description", { n: rows.length + axisRows.length })}
         </p>
       </SheetHeader>
 
@@ -3324,18 +3344,19 @@ function reportToMarkdown(r: FullReport): string {
 // --------------------------------------------------------------------------- //
 function ActionDistribution({ reports }: { reports: ScanSummaryItem[] }) {
   const { t } = useLanguage();
-  const counts: Record<string, { count: number; cls: string }> = {};
+  const counts: Record<string, { count: number; cls: string; key: string }> = {};
   reports.forEach((r) => {
     const a = r.action.toLowerCase();
     let key: string;
     let cls: string;
-    if (a.includes("high conviction")) { key = "High Conviction"; cls = "bg-emerald-500"; }
-    else if (a.includes("core")) { key = "Core Candidate"; cls = "bg-lime-500"; }
-    else if (a.includes("small")) { key = "Small Position"; cls = "bg-amber-500"; }
-    else if (a.includes("research")) { key = "Deep Research"; cls = "bg-sky-500"; }
-    else if (a.includes("watch")) { key = "Watch"; cls = "bg-slate-400"; }
-    else { key = "Ignore"; cls = "bg-rose-500"; }
-    if (!counts[key]) counts[key] = { count: 0, cls };
+    let i18nKey: string;
+    if (a.includes("high conviction")) { key = "High Conviction"; cls = "bg-emerald-500"; i18nKey = "actions.highConviction"; }
+    else if (a.includes("core")) { key = "Core Candidate"; cls = "bg-lime-500"; i18nKey = "actions.coreCandidate"; }
+    else if (a.includes("small")) { key = "Small Position"; cls = "bg-amber-500"; i18nKey = "actions.smallPosition"; }
+    else if (a.includes("research")) { key = "Deep Research"; cls = "bg-sky-500"; i18nKey = "actions.deepResearch"; }
+    else if (a.includes("watch")) { key = "Watch"; cls = "bg-slate-400"; i18nKey = "actions.watch"; }
+    else { key = "Ignore"; cls = "bg-rose-500"; i18nKey = "actions.ignore"; }
+    if (!counts[key]) counts[key] = { count: 0, cls, key: i18nKey };
     counts[key].count++;
   });
 
@@ -3349,22 +3370,26 @@ function ActionDistribution({ reports }: { reports: ScanSummaryItem[] }) {
 
   return (
     <div className="space-y-2.5">
-      {entries.map(([label, { count, cls }]) => (
-        <div key={label} className="space-y-1">
-          <div className="flex items-center justify-between text-[11px]">
-            <span className="font-medium">{label}</span>
-            <span className="text-muted-foreground font-mono">
-              {count} <span className="opacity-60">({((count / total) * 100).toFixed(0)}%)</span>
-            </span>
+      {entries.map(([label, { count, cls, key: i18nKey }]) => {
+        const translated = t(i18nKey);
+        const displayLabel = typeof translated === "string" && translated !== i18nKey ? translated : label;
+        return (
+          <div key={label} className="space-y-1">
+            <div className="flex items-center justify-between text-[11px]">
+              <span className="font-medium" dir="auto">{displayLabel}</span>
+              <span className="text-muted-foreground font-mono">
+                {count} <span className="opacity-60">({((count / total) * 100).toFixed(0)}%)</span>
+              </span>
+            </div>
+            <div className="h-2.5 rounded-full bg-muted/30 overflow-hidden">
+              <div
+                className={cn("h-full rounded-full transition-all duration-700", cls)}
+                style={{ width: `${(count / max) * 100}%` }}
+              />
+            </div>
           </div>
-          <div className="h-2.5 rounded-full bg-muted/30 overflow-hidden">
-            <div
-              className={cn("h-full rounded-full transition-all duration-700", cls)}
-              style={{ width: `${(count / max) * 100}%` }}
-            />
-          </div>
-        </div>
-      ))}
+        );
+      })}
     </div>
   );
 }
@@ -3473,7 +3498,7 @@ function WatchlistView({
       <SheetHeader className="px-6 pt-6 pb-4 border-b border-border/60 sticky top-0 bg-background/95 backdrop-blur z-10">
         <SheetTitle className="flex items-center gap-2 text-base">
           <Star className="h-5 w-5 text-amber-400 fill-current" />
-          Watchlist
+          {t("watchlist.title")}
           <Badge variant="secondary" className="font-mono text-[10px]">
             {watchlist.size}
           </Badge>
@@ -3758,22 +3783,22 @@ function MarketSentimentBanner({
   let bgGradient: string;
   let icon: typeof Gauge;
   if (clampedSentiment >= 70) {
-    label = "Bullish";
+    label = t("sentiment.bullish");
     color = "text-emerald-400";
     bgGradient = "from-emerald-500/15 via-teal-500/10 to-transparent";
     icon = TrendingUp;
   } else if (clampedSentiment >= 50) {
-    label = "Cautiously Optimistic";
+    label = t("sentiment.cautiouslyOptimistic");
     color = "text-lime-400";
     bgGradient = "from-lime-500/15 via-amber-500/5 to-transparent";
     icon = Activity;
   } else if (clampedSentiment >= 30) {
-    label = "Neutral";
+    label = t("sentiment.neutral");
     color = "text-amber-400";
     bgGradient = "from-amber-500/15 via-orange-500/5 to-transparent";
     icon = Gauge;
   } else {
-    label = "Bearish";
+    label = t("sentiment.bearish");
     color = "text-rose-400";
     bgGradient = "from-rose-500/15 via-red-500/5 to-transparent";
     icon = TrendingDown;
@@ -3791,7 +3816,7 @@ function MarketSentimentBanner({
           <div>
             <div className="flex items-center gap-2">
               <span className="text-[10px] text-muted-foreground uppercase tracking-wide font-semibold">{t("sentiment.title")}</span>
-              <Badge className={cn("text-[10px] border-transparent", color.replace("text-", "bg-").replace("-400", "-500/20"))}>
+              <Badge className={cn("text-[10px] border-transparent", color.replace("text-", "bg-").replace("-400", "-500/20"))} dir="auto">
                 {label}
               </Badge>
             </div>
@@ -3799,8 +3824,8 @@ function MarketSentimentBanner({
               <span className={cn("text-3xl font-bold tabular-nums", color)}>{clampedSentiment}</span>
               <span className="text-sm text-muted-foreground">/ 100</span>
             </div>
-            <p className="text-[11px] text-muted-foreground mt-0.5">
-              Based on {stats.total} projects · {stats.highCount} high-score · {stats.vetoCount} vetoed
+            <p className="text-[11px] text-muted-foreground mt-0.5" dir="auto">
+              {t("sentiment.basedOn", { total: stats.total, high: stats.highCount, veto: stats.vetoCount })}
             </p>
           </div>
         </div>
@@ -4186,10 +4211,10 @@ function HelpView() {
       <SheetHeader className="px-6 pt-6 pb-4 border-b border-border/60 sticky top-0 bg-background/95 backdrop-blur z-10">
         <SheetTitle className="flex items-center gap-2 text-base">
           <HelpCircle className="h-5 w-5 text-emerald-400" />
-          How It Works
+          {t("help.title")}
         </SheetTitle>
         <p className="text-xs text-muted-foreground">
-          A quick guide to the Crypto Discovery Framework
+          {t("help.description")}
         </p>
       </SheetHeader>
 
@@ -4207,9 +4232,8 @@ function HelpView() {
             {" · "}
             <span className="font-mono font-semibold">Adoption &gt; Attention</span>
           </p>
-          <p className="text-[11px] text-muted-foreground mt-2">
-            This framework evaluates crypto projects by verifiable evidence — not social media buzz.
-            Scores are intentionally conservative when data is missing.
+          <p className="text-[11px] text-muted-foreground mt-2" dir="auto">
+            {t("help.corePrincipleDesc")}
           </p>
         </div>
 
@@ -4220,13 +4244,13 @@ function HelpView() {
             <div key={section.title}>
               <div className="flex items-center gap-2 mb-2">
                 <Icon className={cn("h-4 w-4", section.color)} />
-                <h3 className="text-sm font-semibold">{section.title}</h3>
+                <h3 className="text-sm font-semibold" dir="auto">{section.title}</h3>
               </div>
               <ul className="space-y-1.5 ml-6">
                 {section.items.map((item, i) => (
                   <li key={i} className="text-xs text-muted-foreground flex gap-2">
                     <span className="text-emerald-500/50 flex-shrink-0">•</span>
-                    <span>{item}</span>
+                    <span dir="auto">{item}</span>
                   </li>
                 ))}
               </ul>
@@ -4238,7 +4262,7 @@ function HelpView() {
         <div className="rounded-xl border border-border/50 bg-card/30 p-4">
           <h3 className="text-sm font-semibold mb-3 flex items-center gap-2">
             <Zap className="h-4 w-4 text-amber-400" />
-            Keyboard Shortcuts
+            {t("help.keyboardShortcuts")}
           </h3>
           <div className="grid grid-cols-2 gap-2">
             {shortcuts.map((s) => (
@@ -4246,7 +4270,7 @@ function HelpView() {
                 <kbd className="px-2 py-1 rounded bg-muted/40 border border-border/40 font-mono text-[10px] font-semibold min-w-[28px] text-center">
                   {s.key}
                 </kbd>
-                <span className="text-muted-foreground">{s.desc}</span>
+                <span className="text-muted-foreground" dir="auto">{s.desc}</span>
               </div>
             ))}
           </div>
@@ -4256,28 +4280,27 @@ function HelpView() {
         <div className="rounded-xl border border-border/50 bg-muted/10 p-4">
           <h3 className="text-sm font-semibold mb-2 flex items-center gap-2">
             <Activity className="h-4 w-4 text-sky-400" />
-            Data Sources
+            {t("help.dataSources")}
           </h3>
           <div className="space-y-1 text-xs text-muted-foreground">
             <div className="flex items-center gap-2">
               <Badge variant="outline" className="text-[10px]">CoinGecko</Badge>
-              <span>{t("help.coinGeckoDesc")}</span>
+              <span dir="auto">{t("help.coinGeckoDesc")}</span>
             </div>
             <div className="flex items-center gap-2">
               <Badge variant="outline" className="text-[10px]">DeFiLlama</Badge>
-              <span>TVL, fees, revenue, protocol metadata</span>
+              <span dir="auto">{t("help.defiLlamaDesc")}</span>
             </div>
           </div>
-          <p className="text-[10px] text-muted-foreground/70 mt-2">
-            All data from public APIs. No API key required. CoinGecko rate limits may cause some data to be missing.
+          <p className="text-[10px] text-muted-foreground/70 mt-2" dir="auto">
+            {t("help.dataSourcesNote")}
           </p>
         </div>
 
         {/* Disclaimer */}
         <div className="rounded-lg bg-rose-500/5 border border-rose-500/20 p-3">
-          <p className="text-[11px] text-rose-300/80">
-            <strong>{t("help.disclaimer").split(":")[0]}:</strong> This framework is a research and analysis tool, not personalized financial advice.
-            Always do your own research (DYOR) before making investment decisions.
+          <p className="text-[11px] text-rose-300/80" dir="auto">
+            {t("help.disclaimer")}
           </p>
         </div>
       </div>

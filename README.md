@@ -102,7 +102,7 @@ Project Quality ≠ Token Quality ≠ Investment Attractiveness
 #### Optional API-Key Sources (unlock exclusive data)
 | Source | Key Env Var | Exclusive Data |
 |--------|------------|----------------|
-| **CoinMarketCap Pro** | `CMC_API_KEY` | **Airdrops** (total value, participants, requirements) · **Categories** (per-category mcap, 24h/7d change, top coins) · **Exchange rankings** · Cross-verification of price/mcap/supply |
+| **CoinMarketCap Pro** | `CMC_API_KEY` | **Categories** (350 categories with per-category mcap, 24h/7d change, top coins) · **Global metrics** (CMC's own BTC dominance + total mcap for cross-verification) · **Exchange map** · **Quotes/info** (metadata, logo, links) · Cross-verification of price/mcap/supply. *Note: Airdrops & exchange volume require a higher tier plan.* |
 | **CryptoPanic** | `CRYPTOPANIC_TOKEN` | Curated crypto news feed |
 | **CryptoCompare** | `CRYPTOCOMPARE_KEY` | Crypto news + price data |
 
@@ -297,9 +297,10 @@ bun run dev
 ### CMC Pro Exclusive (require `CMC_API_KEY`)
 | Method | Path | Description |
 |--------|------|-------------|
-| GET | `/api/scanner/cmc/airdrops?status=` | Crypto airdrops (ONGOING/UPCOMING/ENDED) |
-| GET | `/api/scanner/cmc/categories` | Market cap by CMC category |
-| GET | `/api/scanner/cmc/exchanges?limit=` | Exchange rankings by volume |
+| GET | `/api/scanner/cmc/airdrops?status=` | Crypto airdrops (returns `plan_not_supported` if key tier doesn't include it) |
+| GET | `/api/scanner/cmc/categories` | 350 CMC categories with market cap, 24h/7d change, top coins |
+| GET | `/api/scanner/cmc/exchanges?limit=` | Exchange map (active exchanges list) |
+| GET | `/api/scanner/cmc/global-metrics` | CMC global metrics (BTC dominance, total mcap — cross-verifies CoinGecko) |
 
 ## Documentation
 
