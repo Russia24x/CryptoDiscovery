@@ -905,12 +905,13 @@ def cache_info():
 
 #### ۲. بهبود فریمورک
 - [x] **Historical scoring**: ذخیره امتیاز پروژه در SQLite برای trend analysis ✓
-- [ ] **Alert system**: هشدار زمانی که امتیاز یک پروژه تغییر قابل‌توجه می‌کند
-- [ ] **Custom persona**: اجازه تعریف وزن‌های شخصی‌سازی‌شده توسط کاربر
-- [ ] **Backtesting**: مقایسه پیش‌بینی‌های فریمورک با عملکرد واقعی قیمت
+- [x] **Alert system**: هشدار درون‌برنامه‌ای (toast + browser notification) برای تغییرات امتیاز ✓
+- [x] **Custom persona**: اجازه تعریف وزن‌های شخصی‌سازی‌شده توسط کاربر ✓
+- [x] **Backtesting**: مقایسه پیش‌بینی‌های فریمورک با عملکرد واقعی قیمت ✓
 
 #### ۳. UI/UX
 - [x] **Price charts**: endpoint نمودار قیمت اضافه شد (`/coingecko/chart/{id}`) ✓
+- [x] **Price sparkline در کارت‌ها**: نمودار SVG کوچک + درصد تغییر قیمت ✓
 - [ ] **Dark/Light theme در charts**: نمودارهای SVG به theme واکنش نشان دهند
 - [ ] **Mobile app**: PWA با offline support برای watchlist
 - [ ] **Notifications**: push notification برای اخبار فوری و تغییرات امتیاز
