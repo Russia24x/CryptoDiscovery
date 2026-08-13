@@ -222,6 +222,8 @@ async def _sync_chain_mapping() -> None:
         _CHAIN_NAME_CACHE = name_map
         cache_set(cache_key, {"symbol_map": sym_map, "name_map": name_map})
         log.info("Chain mapping synced: %d symbols, %d names from DeFiLlama", len(sym_map), len(name_map))
+    except asyncio.CancelledError:
+        raise
     except Exception as exc:  # noqa: BLE001
         log.warning("Chain mapping sync failed: %s", exc)
         # Fall back to manual tables only
@@ -841,6 +843,8 @@ async def fetch_dune_query_results(query_id: int | str, limit: int = 100) -> dic
         cache_set(cache_key, out)
         log.info("Dune: query %s returned %d rows (cached=%s)", query_id, len(rows), out["is_cached"])
         return out
+    except asyncio.CancelledError:
+        raise
     except Exception as exc:  # noqa: BLE001
         log.warning("Dune query %s failed: %s", query_id, exc)
         return None
@@ -1572,6 +1576,8 @@ async def _fetch_rss_feed(client: httpx.AsyncClient, name: str, url: str, catego
             log.warning("RSS %s -> %s", name, r.status_code)
             return []
         root = _ET.fromstring(r.text)
+    except asyncio.CancelledError:
+        raise
     except Exception as exc:  # noqa: BLE001
         log.warning("RSS %s failed: %s", name, exc)
         return []
@@ -1683,6 +1689,8 @@ async def fetch_crypto_news(limit: int = 40) -> list[dict[str, Any]]:
                         "image": None,
                         "categories": [p.get("currency", {}).get("code")] if p.get("currency") else [],
                     })
+        except asyncio.CancelledError:
+            raise
         except Exception as exc:  # noqa: BLE001
             log.warning("CryptoPanic fetch failed: %s", exc)
 
@@ -1707,6 +1715,8 @@ async def fetch_crypto_news(limit: int = 40) -> list[dict[str, Any]]:
                         "image": a.get("imageurl"),
                         "categories": [a.get("category")] if a.get("category") else [],
                     })
+        except asyncio.CancelledError:
+            raise
         except Exception as exc:  # noqa: BLE001
             log.warning("CryptoCompare fetch failed: %s", exc)
 
@@ -1920,6 +1930,8 @@ async def fetch_telegram_channel(channel: str, limit: int = 20) -> dict[str, Any
             log.warning("Telegram %s -> %s", channel, r.status_code)
             return {"channel": channel, "channel_url": f"https://t.me/{channel}", "messages": [], "message_count": 0, "error": f"HTTP {r.status_code}", "fetched_at": _datetime.now(_tz.utc).isoformat()}
         messages = _parse_telegram_html(r.text, channel)
+    except asyncio.CancelledError:
+        raise
     except Exception as exc:  # noqa: BLE001
         log.warning("Telegram %s failed: %s", channel, exc)
         return {"channel": channel, "channel_url": f"https://t.me/{channel}", "messages": [], "message_count": 0, "error": str(exc), "fetched_at": _datetime.now(_tz.utc).isoformat()}
@@ -1959,6 +1971,8 @@ async def fetch_price_cross_verified(coin_ids_gecko: list[str], symbols: list[st
                 )
             if isinstance(data, dict):
                 gecko_data = data
+        except asyncio.CancelledError:
+            raise
         except Exception:  # noqa: BLE001
             pass
 

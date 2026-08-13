@@ -660,20 +660,40 @@ def _data_to_verify(ev: EvidenceBundle) -> list[str]:
 #  Framework 3.0: Cross-Verification Engine (PHASE 8)
 # --------------------------------------------------------------------------- #
 def _build_cross_verifications(ev: EvidenceBundle) -> list:
-    """Cross-verify key metrics between CoinGecko and DeFiLlama."""
+    """Cross-verify key metrics between multiple data sources.
+
+    Sources used:
+      - CoinGecko: market_cap, daily_volume, circulating_supply
+      - DeFiLlama: TVL, fees
+      - CoinMarketCap (Pro/Keyless): market_cap, volume, circulating_supply, TVL
+    """
     from models.schemas import CrossVerification
     results = []
 
-    # TVL cross-verification
+    # TVL cross-verification — DeFiLlama vs CMC Keyless (cmc_tvl)
     if ev.economic.tvl and ev.economic.tvl > 0:
-        results.append(CrossVerification(
-            metric="TVL",
-            source_a="DeFiLlama",
-            value_a=ev.economic.tvl,
-            source_b="CoinGecko",
-            value_b=None,  # CoinGecko doesn't provide TVL directly
-            status="single-source",
-        ))
+        cmc_tvl = getattr(ev, 'cmc_tvl', None)
+        if cmc_tvl and cmc_tvl > 0:
+            discrepancy = abs(ev.economic.tvl - cmc_tvl) / max(ev.economic.tvl, cmc_tvl) * 100
+            status = "verified" if discrepancy <= 20 else "discrepancy"
+            results.append(CrossVerification(
+                metric="TVL",
+                source_a="DeFiLlama",
+                value_a=ev.economic.tvl,
+                source_b="CoinMarketCap",
+                value_b=cmc_tvl,
+                discrepancy_pct=round(discrepancy, 1),
+                status=status,
+            ))
+        else:
+            results.append(CrossVerification(
+                metric="TVL",
+                source_a="DeFiLlama",
+                value_a=ev.economic.tvl,
+                source_b="CoinMarketCap",
+                value_b=None,
+                status="single-source",
+            ))
 
     # Market cap cross-verification
     if ev.market_cap_usd and ev.market_cap_usd > 0:
