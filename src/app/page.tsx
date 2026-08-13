@@ -35,6 +35,7 @@ import {
   Search,
   ShieldAlert,
   ShieldCheck,
+  SlidersHorizontal,
   Sparkles,
   Star,
   Sun,
@@ -92,6 +93,8 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { Slider } from "@/components/ui/slider";
+import { Switch } from "@/components/ui/switch";
 import { useToast } from "@/hooks/use-toast";
 import { useIndexedDBSet, useIndexedDBList } from "@/lib/use-indexed-db";
 import { cn } from "@/lib/utils";
@@ -403,6 +406,15 @@ export default function Home() {
   const [mcMax, setMcMax] = useState("50000");
   const [maxProjects, setMaxProjects] = useState("12");
   const [sectors, setSectors] = useState<string[]>([]);
+  // Custom persona weights (0-100 each, normalized to 1.0 before sending)
+  const [useCustomWeights, setUseCustomWeights] = useState(false);
+  const [customWeights, setCustomWeights] = useState({
+    "Invisible Utility": 20,
+    "Economic Engine": 30,
+    "Moat": 20,
+    "Token & Market Structure": 15,
+    "Governance / Legal / Security": 15,
+  });
 
   const [activeScan, setActiveScan] = useState<ScanStatus | null>(null);
   const [scans, setScans] = useState<ScanListItem[]>([]);
@@ -626,6 +638,15 @@ export default function Home() {
           sectors,
           max_projects: Number(maxProjects) || 12,
           lang,
+          ...(useCustomWeights ? {
+            custom_weights: {
+              "Invisible Utility": customWeights["Invisible Utility"] / 100,
+              "Economic Engine": customWeights["Economic Engine"] / 100,
+              "Moat": customWeights["Moat"] / 100,
+              "Token & Market Structure": customWeights["Token & Market Structure"] / 100,
+              "Governance / Legal / Security": customWeights["Governance / Legal / Security"] / 100,
+            }
+          } : {}),
         }),
       });
       if (!r.ok) throw new Error(`scan start failed: ${r.status}`);
@@ -1355,6 +1376,49 @@ export default function Home() {
                   </p>
                 )}
 
+                {/* Custom Persona Weights */}
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <Label className="text-xs font-medium flex items-center gap-1.5">
+                      <SlidersHorizontal className="h-3 w-3 text-violet-400" /> Custom Weights
+                    </Label>
+                    <Switch
+                      checked={useCustomWeights}
+                      onCheckedChange={setUseCustomWeights}
+                      className="scale-75"
+                    />
+                  </div>
+                  {useCustomWeights && (
+                    <div className="space-y-2 p-2 rounded-lg border border-violet-500/20 bg-violet-500/5">
+                      {(Object.keys(customWeights) as (keyof typeof customWeights)[]).map((axis) => (
+                        <div key={axis} className="space-y-0.5">
+                          <div className="flex items-center justify-between text-[10px]">
+                            <span className="text-muted-foreground truncate">{t(`axes.${axis === "Invisible Utility" ? "invisibleUtility" : axis === "Economic Engine" ? "economicEngine" : axis === "Moat" ? "moat" : axis === "Token & Market Structure" ? "tokenMarket" : "governance"}`)}</span>
+                            <span className="font-mono font-semibold text-violet-400">{customWeights[axis]}%</span>
+                          </div>
+                          <Slider
+                            value={[customWeights[axis]]}
+                            onValueChange={(v) => setCustomWeights(prev => ({ ...prev, [axis]: v[0] }))}
+                            min={0}
+                            max={100}
+                            step={5}
+                            className="h-1.5"
+                          />
+                        </div>
+                      ))}
+                      <div className="flex items-center justify-between pt-1 border-t border-border/40">
+                        <span className="text-[9px] text-muted-foreground">Total</span>
+                        <span className={cn(
+                          "text-[10px] font-mono font-bold",
+                          Object.values(customWeights).reduce((a, b) => a + b, 0) === 100 ? "text-emerald-400" : "text-amber-400"
+                        )}>
+                          {Object.values(customWeights).reduce((a, b) => a + b, 0)}%
+                        </span>
+                      </div>
+                    </div>
+                  )}
+                </div>
+
                 {/* Scan Presets */}
                 <div className="space-y-1.5">
                   <Label className="text-xs font-medium flex items-center gap-1.5">
@@ -1493,6 +1557,9 @@ export default function Home() {
                 </ScrollArea>
               </CardContent>
             </Card>
+
+            {/* Backtest Results */}
+            <BacktestView />
           </aside>
 
           {/* ============ Results area ============ */}
@@ -4402,6 +4469,99 @@ function ScanDiffView({ scanA, scanB }: { scanA: ScanStatus | null; scanB: ScanS
         </Card>
       </div>
     </div>
+  );
+}
+
+// --------------------------------------------------------------------------- //
+//  BacktestView — compare framework predictions with price performance
+// --------------------------------------------------------------------------- //
+function BacktestView() {
+  const [data, setData] = useState<any>(null);
+  const [loading, setLoading] = useState(false);
+
+  const fetchBacktest = useCallback(async () => {
+    setLoading(true);
+    try {
+      const res = await fetch("/api/scanner/backtest");
+      if (res.ok) setData(await res.json());
+    } catch {}
+    setLoading(false);
+  }, []);
+
+  useEffect(() => {
+    const ctrl = new AbortController();
+    fetch(`/api/scanner/backtest`, { signal: ctrl.signal })
+      .then((r) => r.ok ? r.json() : null)
+      .then((d) => { if (d) setData(d); })
+      .catch(() => {});
+    return () => ctrl.abort();
+  }, []);
+
+  if (loading) return <Card className="border-border/60 bg-card/40 backdrop-blur-sm"><CardContent className="p-6"><Loader2 className="h-5 w-5 animate-spin text-muted-foreground" /></CardContent></Card>;
+  if (!data) return null;
+
+  const s = data.summary || {};
+  return (
+    <Card className="border-border/60 bg-card/40 backdrop-blur-sm">
+      <CardHeader className="pb-3">
+        <CardTitle className="flex items-center gap-2 text-sm">
+          <Target className="h-4 w-4 text-violet-500" /> Backtest Results
+        </CardTitle>
+        <CardDescription className="text-xs">
+          Comparing framework scores with 30d price performance
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        {s.total_compared > 0 ? (
+          <>
+            <div className="grid grid-cols-3 gap-2">
+              <div className="p-2 rounded-lg border border-border/40 bg-card/20 text-center">
+                <div className="text-[9px] text-muted-foreground uppercase">Accuracy</div>
+                <div className={cn("text-lg font-bold", s.accuracy_pct >= 60 ? "text-emerald-400" : s.accuracy_pct >= 40 ? "text-amber-400" : "text-rose-400")}>
+                  {s.accuracy_pct}%
+                </div>
+              </div>
+              <div className="p-2 rounded-lg border border-border/40 bg-card/20 text-center">
+                <div className="text-[9px] text-muted-foreground uppercase">Avg Score (↑)</div>
+                <div className="text-lg font-bold text-emerald-400">{s.avg_score_price_up}</div>
+              </div>
+              <div className="p-2 rounded-lg border border-border/40 bg-card/20 text-center">
+                <div className="text-[9px] text-muted-foreground uppercase">Avg Score (↓)</div>
+                <div className="text-lg font-bold text-rose-400">{s.avg_score_price_down}</div>
+              </div>
+            </div>
+            <div className="max-h-48 overflow-y-auto space-y-1">
+              {(data.results || []).filter((r: any) => r.change_pct !== null).map((r: any, i: number) => (
+                <div key={i} className="flex items-center gap-2 p-1.5 rounded-md border border-border/30 bg-card/10 text-[11px]">
+                  <span className="font-mono font-semibold w-12">{r.symbol}</span>
+                  <span className="text-muted-foreground">score={r.score?.toFixed(0)}</span>
+                  <span className={cn("font-mono ml-auto", r.change_pct >= 0 ? "text-emerald-400" : "text-rose-400")}>
+                    {r.change_pct >= 0 ? "+" : ""}{r.change_pct}%
+                  </span>
+                  {r.correct !== null && (
+                    <Badge variant="outline" className={cn("text-[8px] h-4", r.correct ? "text-emerald-400 border-emerald-500/30" : "text-rose-400 border-rose-500/30")}>
+                      {r.correct ? "✓" : "✗"}
+                    </Badge>
+                  )}
+                </div>
+              ))}
+            </div>
+          </>
+        ) : (
+          <div className="text-center py-4">
+            <p className="text-xs text-muted-foreground">
+              Not enough data yet. Run more analyses to accumulate score history.
+            </p>
+            <p className="text-[10px] text-muted-foreground mt-1">
+              {data.count} symbols in history, {data.valid_count} with price data
+            </p>
+          </div>
+        )}
+        <Button size="sm" variant="outline" onClick={fetchBacktest} className="w-full h-7 text-xs gap-1.5">
+          <RefreshCw className="h-3 w-3" /> Refresh
+        </Button>
+      </CardContent>
+    </Card>
   );
 }
 
