@@ -31,6 +31,7 @@ class ScanConfig(BaseModel):
     max_projects: int = 20
     lang: str = "en"  # "en" or "fa" — controls language of generated text
     data_cutoff: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    custom_weights: dict[str, float] | None = None  # overrides persona weights
 
 
 # --------------------------------------------------------------------------- #

@@ -94,6 +94,16 @@ class ScanRequest(BaseModel):
     sectors: list[str] = []
     max_projects: int = 15
     lang: str = "en"  # "en" or "fa" — controls language of generated text
+    # Custom persona weights (optional — overrides the preset persona weights)
+    # All 5 weights must sum to 1.0. If provided, takes priority over `persona`.
+    custom_weights: dict[str, float] | None = None
+
+
+class AnalyzeRequest(BaseModel):
+    gecko_id: str
+    persona: Persona = Persona.INVESTOR
+    lang: str = "en"
+    custom_weights: dict[str, float] | None = None
 
 
 # --------------------------------------------------------------------------- #
@@ -173,6 +183,7 @@ async def start_scan(req: ScanRequest):
         sectors=req.sectors,
         max_projects=req.max_projects,
         lang=req.lang,
+        custom_weights=req.custom_weights,
     )
     progress = ScanProgress(
         scan_id=scan_id,
@@ -432,10 +443,7 @@ async def search_coins(q: str = ""):
     return {"query": q, "count": len(results), "results": results}
 
 
-class AnalyzeRequest(BaseModel):
-    gecko_id: str
-    persona: Persona = Persona.INVESTOR
-    lang: str = "en"
+# AnalyzeRequest is defined above (with custom_weights support)
 
 
 @app.post("/analyze")
@@ -519,7 +527,7 @@ async def analyze_single_coin(req: AnalyzeRequest):
     )
 
     ev = await evidence.collect(cand, llama_overview=llama_entry, fees_overview=fees_entry)
-    config = ScanConfig(persona=req.persona, lang=req.lang)
+    config = ScanConfig(persona=req.persona, lang=req.lang, custom_weights=req.custom_weights)
     report = analysis.build_report(cand, ev, config, scan_id="manual")
     REPORTS[report.id] = report
     # Persist to SQLite

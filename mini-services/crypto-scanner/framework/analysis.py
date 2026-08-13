@@ -145,7 +145,23 @@ def build_report(
     axes = [a1, a2, a3, a4, a5]
 
     # --- PHASE 5: Weighted scoring ---
-    weights = PERSONA_WEIGHTS[config.persona]
+    # Use custom weights if provided, otherwise fall back to persona preset
+    custom_w = getattr(config, "custom_weights", None)
+    if custom_w and isinstance(custom_w, dict):
+        # Validate: all 5 axes must be present and sum to ~1.0
+        required_axes = {"Invisible Utility", "Economic Engine", "Moat",
+                         "Token & Market Structure", "Governance / Legal / Security"}
+        if set(custom_w.keys()) == required_axes:
+            total = sum(custom_w.values())
+            if 0.8 <= total <= 1.2:  # Allow slight deviation
+                # Normalize to 1.0
+                weights = {k: v / total for k, v in custom_w.items()}
+            else:
+                weights = PERSONA_WEIGHTS[config.persona]
+        else:
+            weights = PERSONA_WEIGHTS[config.persona]
+    else:
+        weights = PERSONA_WEIGHTS[config.persona]
     raw = sum(weights[a.name] * a.score * 10.0 for a in axes)  # 0-100
 
     min_axis = min(a.score for a in axes)
