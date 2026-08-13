@@ -260,10 +260,24 @@ async def _run_scan(scan_id: str):
             progress.phase_log.append(f"[{i+1}/{len(candidates)}] {cand.symbol} — collecting evidence")
 
             try:
+                # Match fees by symbol OR name (many fee protocols lack symbol field)
+                fees_entry = fees_by_symbol.get(cand.symbol)
+                if not fees_entry:
+                    # Try name-based matching (e.g. "Aave" matches "Aave V3")
+                    cand_name = cand.name.lower()
+                    for f in fees_by_symbol.values():
+                        fname = (f.get("name") or "").lower()
+                        if fname and (fname.startswith(cand_name + " ") or
+                                      fname.startswith(cand_name + "-") or
+                                      fname == cand_name or
+                                      cand_name.startswith(fname + " ") or
+                                      cand_name.startswith(fname + "-")):
+                            fees_entry = f
+                            break
                 ev = await evidence.collect(
                     cand,
                     llama_overview=llama_by_symbol.get(cand.symbol),
-                    fees_overview=fees_by_symbol.get(cand.symbol),
+                    fees_overview=fees_entry,
                 )
                 report = analysis.build_report(cand, ev, config, scan_id)
                 REPORTS[report.id] = report

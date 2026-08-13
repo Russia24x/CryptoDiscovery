@@ -91,8 +91,9 @@ def score_economic_engine(
 ) -> AxisScore:
     subs: dict[str, float] = {}
 
-    # Revenue scale (annualized from 24h fees/revenue where available)
-    daily_rev = (econ.revenue or 0.0)
+    # Revenue scale — use revenue if available, otherwise use fees as proxy
+    # (many DeFi protocols don't separate revenue from fees in DeFiLlama)
+    daily_rev = (econ.revenue or econ.fees or 0.0)
     annual_rev = daily_rev * 365.0
     if annual_rev >= 500_000_000:
         subs["Revenue Scale"] = 9.5

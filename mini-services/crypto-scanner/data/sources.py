@@ -34,7 +34,15 @@ TIMEOUT = 15.0
 async def _get_json(client: httpx.AsyncClient, url: str, **params: Any) -> Any:
     try:
         r = await client.get(url, params=params, timeout=TIMEOUT)
-        if r.status_code != 200:
+        if r.status_code == 429:
+            # Rate limited — wait and retry once
+            log.warning("GET %s -> 429 (rate limited), retrying in 2s...", url)
+            await asyncio.sleep(2)
+            r = await client.get(url, params=params, timeout=TIMEOUT)
+            if r.status_code != 200:
+                log.warning("GET %s -> %s after retry", url, r.status_code)
+                return None
+        elif r.status_code != 200:
             log.warning("GET %s -> %s", url, r.status_code)
             return None
         return r.json()
@@ -69,17 +77,40 @@ async def fetch_protocol_detail(slug: str) -> dict[str, Any] | None:
 
 
 async def fetch_fees_overview() -> list[dict[str, Any]]:
-    """Protocols with fees/revenue (24h, 7d, 30d, cumulative) — slimmed."""
+    """Protocols with fees/revenue (24h, 7d, 30d, cumulative) — slimmed.
+
+    The /overview/fees endpoint returns a dict with a 'protocols' key
+    containing the list of protocol fee data. Field names are:
+    total24h, total7d, total30d (NOT fees_24h etc.)
+    """
     async with httpx.AsyncClient() as c:
         data = await _get_json(c, DEFILLAMA_FEES)
-    if not isinstance(data, list):
+    # Handle both dict (new API) and list (old API) formats
+    if isinstance(data, dict):
+        protos = data.get("protocols", [])
+    elif isinstance(data, list):
+        protos = data
+    else:
         return []
-    keep = ("name", "slug", "id", "symbol", "category",
-            "fees_24h", "revenue_24h", "fees_7d", "revenue_7d",
-            "fees_30d", "revenue_30d")
+    # Map the actual DeFiLlama fee field names to our schema
     slim: list[dict[str, Any]] = []
-    for p in data:
-        slim.append({k: p.get(k) for k in keep})
+    for p in protos:
+        if not isinstance(p, dict):
+            continue
+        slim.append({
+            "name": p.get("name") or p.get("displayName"),
+            "slug": p.get("slug"),
+            "id": str(p.get("defillamaId") or p.get("id") or ""),
+            "symbol": p.get("symbol", ""),
+            "category": p.get("category", ""),
+            "fees_24h": p.get("total24h") or p.get("fees_24h"),
+            "revenue_24h": p.get("revenue_24h"),
+            "fees_7d": p.get("total7d") or p.get("fees_7d"),
+            "revenue_7d": p.get("revenue_7d"),
+            "fees_30d": p.get("total30d") or p.get("fees_30d"),
+            "revenue_30d": p.get("revenue_30d"),
+            "chains": p.get("chains", []),
+        })
     return slim
 
 
@@ -87,6 +118,25 @@ async def fetch_protocol_fees(slug: str) -> dict[str, Any] | None:
     """Detailed fees/revenue breakdown for one protocol."""
     async with httpx.AsyncClient() as c:
         return await _get_json(c, f"{DEFILLAMA_FEES}/{slug}")
+
+
+# --------------------------------------------------------------------------- #
+#  DexScreener — free alternative API for token prices/volume (no key needed)
+# --------------------------------------------------------------------------- #
+DEXSCREENER_BASE = "https://api.dexscreener.com/latest/dex"
+
+async def fetch_dexscreener_token(symbol: str) -> dict[str, Any] | None:
+    """Fetch token data from DexScreener as a fallback for CoinGecko."""
+    async with httpx.AsyncClient() as c:
+        data = await _get_json(c, f"{DEXSCREENER_BASE}/search", q=symbol)
+    if not isinstance(data, dict):
+        return None
+    pairs = data.get("pairs") or []
+    if not pairs:
+        return None
+    # Return the first pair with the most liquidity
+    pairs.sort(key=lambda p: float(p.get("liquidity", {}).get("usd") or 0), reverse=True)
+    return pairs[0] if pairs else None
 
 
 # --------------------------------------------------------------------------- #

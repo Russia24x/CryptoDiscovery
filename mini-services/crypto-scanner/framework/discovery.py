@@ -116,15 +116,53 @@ async def discover_candidates(
         sym = (p.get("symbol") or "").upper()
         if sym and sym not in llama_by_symbol:
             llama_by_symbol[sym] = p
+    # Build fees lookup by both symbol AND name (many fee protocols lack symbol)
     fees_by_symbol: dict[str, dict[str, Any]] = {}
+    fees_by_name: dict[str, dict[str, Any]] = {}
     for f in fees_list:
         sym = (f.get("symbol") or "").upper()
         if sym and sym not in fees_by_symbol:
             fees_by_symbol[sym] = f
+        name = (f.get("name") or "").lower()
+        if name and name not in fees_by_name:
+            fees_by_name[name] = f
+
+    # Helper: find fees entry by matching symbol or name, including versioned names (e.g. "Aave V3" matches "Aave")
+    def find_fees(sym: str, name: str) -> dict[str, Any] | None:
+        # Direct symbol match
+        if sym in fees_by_symbol:
+            return fees_by_symbol[sym]
+        # Direct name match
+        nm = name.lower()
+        if nm in fees_by_name:
+            return fees_by_name[nm]
+        # Try matching base name without version suffix (e.g. "Aave" matches "Aave V3")
+        # Collect all matches and pick the one with highest fees (usually the active version)
+        matches: list[tuple[float, dict[str, Any]]] = []
+        for fname, fentry in fees_by_name.items():
+            if fname.startswith(nm + " ") or fname.startswith(nm + "-") or fname == nm:
+                fees_val = fentry.get("fees_24h") or 0
+                matches.append((fees_val, fentry))
+            elif nm.startswith(fname + " ") or nm.startswith(fname + "-"):
+                fees_val = fentry.get("fees_24h") or 0
+                matches.append((fees_val, fentry))
+        if matches:
+            # Sort by fees descending and return the highest
+            matches.sort(key=lambda x: x[0], reverse=True)
+            return matches[0][1]
+        return None
 
     if not markets:
         log.warning("Discovery: no CoinGecko data returned — using llama-only pool")
         cands = _llama_only_pool(llama_protos, fees_list, max_projects)
+        # Also match fees for llama-only candidates
+        for cand in cands:
+            if cand.symbol not in fees_by_symbol:
+                matched = find_fees(cand.symbol, cand.name)
+                if matched:
+                    fees_by_symbol[cand.symbol] = matched
+                    log.info("Discovery: matched fees for %s via name -> %s (fees_24h=%s)",
+                             cand.symbol, matched.get("name"), matched.get("fees_24h"))
         return cands, llama_by_symbol, fees_by_symbol
 
     candidates: list[tuple[CandidateInfo, float]] = []
@@ -147,7 +185,7 @@ async def discover_candidates(
                 continue
 
         llama_entry = llama_by_symbol.get(symbol) or sources.match_llama_protocol(symbol, name, llama_protos)
-        fees_entry = fees_by_symbol.get(symbol)
+        fees_entry = find_fees(symbol, name)
 
         # composite discovery signal
         signal = (
@@ -195,6 +233,17 @@ async def discover_candidates(
         out.append(c)
         if len(out) >= max_projects:
             break
+
+    # Post-process: add name-matched fees entries to fees_by_symbol
+    # so that main.py can look them up by candidate symbol
+    for cand in out:
+        if cand.symbol not in fees_by_symbol:
+            matched = find_fees(cand.symbol, cand.name)
+            if matched:
+                fees_by_symbol[cand.symbol] = matched
+                log.info("Discovery: matched fees for %s via name -> %s (fees_24h=%s)",
+                         cand.symbol, matched.get("name"), matched.get("fees_24h"))
+
     log.info("Discovery: %d candidates after ranking & dedup", len(out))
     return out, llama_by_symbol, fees_by_symbol
 
@@ -221,16 +270,42 @@ def _llama_only_pool(
     fees: list[dict[str, Any]],
     max_projects: int,
 ) -> list[CandidateInfo]:
+    # Build fees lookup by name for matching
+    fees_by_name: dict[str, dict[str, Any]] = {}
+    for f in fees:
+        name = (f.get("name") or "").lower()
+        if name and name not in fees_by_name:
+            fees_by_name[name] = f
+
     out: list[CandidateInfo] = []
     for p in sorted(protos, key=lambda x: x.get("tvl") or 0, reverse=True)[:max_projects * 3]:
+        name = p.get("name") or "Unknown"
+        symbol = (p.get("symbol") or "").upper()
+        tvl = p.get("tvl") or 0
+        # Try to find matching fees entry
+        fees_entry = None
+        nm = name.lower()
+        if nm in fees_by_name:
+            fees_entry = fees_by_name[nm]
+        else:
+            for fname, fentry in fees_by_name.items():
+                if fname.startswith(nm + " ") or fname.startswith(nm + "-") or nm.startswith(fname + " "):
+                    fees_entry = fentry
+                    break
+
+        fees_24h = fees_entry.get("fees_24h") if fees_entry else None
+        signal_parts = [f"TVL ${tvl/1e6:.1f}M"]
+        if fees_24h:
+            signal_parts.append(f"Fees ${fees_24h/1e3:.0f}K/day")
+
         out.append(CandidateInfo(
-            name=p.get("name") or "Unknown",
-            symbol=(p.get("symbol") or "").upper(),
+            name=name,
+            symbol=symbol,
             category=p.get("category") or "Unknown",
             sector=_sector_for(p.get("category") or ""),
-            description=p.get("description") or "",
-            key_signal=f"TVL ${((p.get('tvl') or 0)/1e6):.1f}M",
-            initial_priority="Medium",
+            description=" · ".join(signal_parts),
+            key_signal=" · ".join(signal_parts),
+            initial_priority="High" if fees_24h else "Medium",
             llama_id=p.get("slug"),
         ))
         if len(out) >= max_projects:
