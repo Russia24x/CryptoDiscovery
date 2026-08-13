@@ -736,16 +736,41 @@ def _build_cross_verifications(ev: EvidenceBundle) -> list:
                 status=status,
             ))
 
-    # Fees cross-verification
+    # Fees cross-verification — DeFiLlama vs Dune (if available)
     if ev.economic.fees and ev.economic.fees > 0:
-        results.append(CrossVerification(
-            metric="Fees 24h",
-            source_a="DeFiLlama Fees",
-            value_a=ev.economic.fees,
-            source_b="Protocol Dashboard",
-            value_b=None,
-            status="single-source",
-        ))
+        dune_rev = getattr(ev, 'dune_real_revenue', None)
+        if dune_rev and isinstance(dune_rev, dict):
+            dune_fees = dune_rev.get('total_fees_24h')
+            if dune_fees and dune_fees > 0:
+                discrepancy = abs(ev.economic.fees - dune_fees) / max(ev.economic.fees, dune_fees) * 100
+                status = "verified" if discrepancy <= 25 else "discrepancy"
+                results.append(CrossVerification(
+                    metric="Fees 24h",
+                    source_a="DeFiLlama Fees",
+                    value_a=ev.economic.fees,
+                    source_b="Dune Analytics",
+                    value_b=dune_fees,
+                    discrepancy_pct=round(discrepancy, 1),
+                    status=status,
+                ))
+            else:
+                results.append(CrossVerification(
+                    metric="Fees 24h",
+                    source_a="DeFiLlama Fees",
+                    value_a=ev.economic.fees,
+                    source_b="Dune Analytics",
+                    value_b=None,
+                    status="single-source",
+                ))
+        else:
+            results.append(CrossVerification(
+                metric="Fees 24h",
+                source_a="DeFiLlama Fees",
+                value_a=ev.economic.fees,
+                source_b="Dune Analytics",
+                value_b=None,
+                status="single-source (Dune not configured)",
+            ))
 
     # Supply cross-verification
     if ev.tokenomics.circulating_supply and ev.cmc_circulating_supply:
