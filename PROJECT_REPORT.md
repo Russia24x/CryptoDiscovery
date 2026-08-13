@@ -60,7 +60,7 @@ Never guess missing data      ← اگر Evidence کافی نیست، Confidence
 │                                                                  │
 │  ┌──────────────────────────────────────┐                        │
 │  │  15 Data Sources (11 free + 4 key)   │                        │
-│  │  SQLite Persistence + Cache (500 max)│                        │
+│  │  SQLite Persistence + Cache (300 max)│                        │
 │  └──────────────────────────────────────┘                        │
 └─────────────────────────────────────────────────────────────────┘
 ```
@@ -335,12 +335,44 @@ src/
 ### Process Management
 - Scanner watchdog: double-fork daemon، auto-restart
 - Next.js watchdog: double-fork daemon، auto-restart
-- Memory: کش با eviction (max 500 entries)
+- Memory: کش با proactive cleanup هر ۵ دقیقه + eviction (max 300 entries)
 
 ### Data Integrity
-- Cross-verification بین CoinGecko و CMC
+- Cross-verification بین CoinGecko و CMC (منطق برای هر ۵ متریک فعال است)
 - ۷ bias check خودکار
 - Evidence Grade: A (Primary Verified) → D (Unverified)
+
+### Test Suite
+- **۲۴ تست** (۲۲ تست منطق + ۲ تست رگرسیون) — همه passing
+- تست‌های رگرسیون: concurrent `save_report` (race condition) + cache unbounded growth (memory leak)
+- اجرا: `cd mini-services/crypto-scanner && python tests/test_framework.py`
+
+---
+
+## ۹ب. REVIEW-1 Fixes & Verification
+
+### Race Condition (SQLite concurrent writes)
+- **باگ**: `save_report`/`save_scan` بدون قفل از async routeها صدا زده می‌شدند → تداخل `execute()`+`commit()` روی connection مشترک
+- **رفع**: `threading.Lock` (`_db_lock`) دور تمام writeها
+- **WAL mode**: `PRAGMA journal_mode=WAL` در `_get_conn()` تنظیم شده — تأیید شد با `PRAGMA journal_mode` که `wal` برمی‌گرداند
+- **Tradeoff صادقانه**: قفل event loop را ~۱ms در هر نوشتن بلاک می‌کند (۱۲ نوشتن/اسکن = ~۱۲ms). در مقیاس فعلی ناچیز، ولی اگر چند کاربر هم‌زمان اسکن بزنند باید به `asyncio.to_thread` مهاجرت شود (در watch-list)
+- **تست رگرسیون**: ۵۰ thread × ۲ write روی shared connection — بدون قفل ۳۳ خطا + ۱۹ data loss، با قفل ۱۰۰/۱۰۰ موفق
+
+### Memory Leak (Cache unbounded growth)
+- **باگ**: eviction فقط lazy در `cache_get` بود → write-only entries برای همیشه باقی می‌ماندند
+- **رفع**: `cache_set` هر ۳۰۰ ثانیه `_cleanup_expired()` را proactive صدا می‌زند
+- **تست رگرسیون**: ۲۰۰ write-only entry → expire → ۱ write جدید → فقط ۱ entry باقی می‌ماند (بدون fix: ۲۰۱ entry)
+
+### Cross-verification (منطق vs کامل بودن داده)
+| متریک | منطق | داده واقعی |
+|-------|------|------------|
+| Market Cap | ✅ verified (CoinGecko ↔ CMC) | ✅ هر دو منبع فعال |
+| Volume | ✅ verified (CoinGecko ↔ CMC) | ✅ هر دو منبع فعال |
+| Circulating Supply | ✅ verified (CoinGecko ↔ CMC) | ✅ هر دو منبع فعال |
+| TVL | ✅ verified (DeFiLlama ↔ CMC Keyless) | ⚠️ CMC TVL پروتکل‌محور نمی‌دهد |
+| Fees | ✅ verified (DeFiLlama ↔ Dune) | ⚠️ وابسته به تنظیم Dune query IDs |
+
+**نکته مهم**: منطق cross-verification برای هر ۵ متریک درست است (هیچ‌کدام `value_b=None` هاردکد نیستند). اما کامل بودن داده برای TVL و Fees به شرایط بیرونی وابسته است (Dune query IDs هنوز کانفیگ نشده). این تمایز بین «منطق درست» و «داده کامل» در جدول بالا مشخص شده است.
 
 ---
 

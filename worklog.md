@@ -2120,3 +2120,42 @@ Stage Summary:
 - All 5 sources online ✓
 - 140 blockchain tokens auto-detected ✓
 - Lint clean, no scanner errors ✓
+
+---
+Task ID: regression-tests
+Agent: main
+Task: Add 2 regression tests (concurrent save_report + cache unbounded growth) requested by advisor review, and correct the cross-verification summary in PROJECT_REPORT.md to distinguish "logic complete" from "data completeness dependent on Dune".
+
+Work Log:
+- Read existing test_framework.py (22 tests), db.py (lock + WAL), sources.py cache (proactive cleanup)
+- Confirmed baseline: 22/22 passing
+- Designed test_concurrent_save_report_no_corruption:
+  - Initial attempt (30 threads, thread-local conns) did NOT catch the regression — WAL + separate connections handle cross-thread writes gracefully even without the lock
+  - Root cause: the _db_lock protects against interleaved execute()+commit() on a SHARED connection (the actual production scenario where all async tasks on the event loop share one thread-local connection)
+  - Redesigned: override _get_conn() to return a single shared connection, 50 threads × 2 writes = 100 total operations
+  - Verified WITH lock: 0 errors, 100/100 persisted ✓
+  - Verified WITHOUT lock (noop lock): 33 errors (InterfaceError/SystemError/OperationalError) + 19 silent data losses — test reliably catches regression ✓
+  - Added structural guard (inspect.getsource asserts "with _db_lock" in save_report/save_scan) as a deterministic safety net
+  - Pre-creates scan records so FK constraint (scan_id REFERENCES scans) is satisfied
+- Designed test_cache_does_not_grow_unbounded_with_write_only_entries:
+  - Patches _CACHE_TTL_DEFAULT=0.5s + _CACHE_CLEANUP_INTERVAL=0.0 for fast deterministic test
+  - Writes 200 write-only entries, sleeps past TTL, writes 1 trigger
+  - Verified WITH proactive cleanup: 1 entry remains (200 expired evicted) ✓
+  - Verified WITHOUT cleanup (regressed cache_set): 201 entries remain — test catches regression ✓
+  - Restores all original state in finally block
+- Ran full suite: 24/24 passing (was 22/22)
+- Updated PROJECT_REPORT.md:
+  - Fixed stale cache limit (500 → 300)
+  - Added proactive cleanup mention
+  - Added Test Suite section (24 tests)
+  - Added section "۹ب. REVIEW-1 Fixes & Verification" with:
+    - Race condition: bug → fix → WAL verification → honest tradeoff → regression test stats
+    - Memory leak: bug → fix → regression test stats
+    - Cross-verification table separating "logic" (✅ all 5) from "data completeness" (⚠️ 2 of 5 depend on Dune query IDs) — directly addressing advisor's feedback that the summary was more optimistic than the table
+
+Stage Summary:
+- 2 regression tests added and validated (both catch their respective bugs when the fix is removed)
+- Test suite: 22/22 → 24/24
+- Cross-verification summary in PROJECT_REPORT.md now accurately distinguishes "logic correct for all 5 metrics" from "data completeness depends on Dune for TVL/Fees" — matching the advisor's feedback
+- Dev server healthy (health/alerts endpoints returning 200, no errors in dev.log)
+- Remaining open items (from advisor): page.tsx refactor, CORS allow_origins restriction, Dune query IDs manual setup
