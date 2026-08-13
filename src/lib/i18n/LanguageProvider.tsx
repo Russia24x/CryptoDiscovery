@@ -80,9 +80,9 @@ export function LanguageProvider({ children }: { children: React.ReactNode }) {
     [lang],
   );
 
-  const dir = lang === "fa" ? "rtl" : "ltr";
+  const dir: "ltr" | "rtl" = lang === "fa" ? "rtl" : "ltr";
 
-  const value = React.useMemo(
+  const value = React.useMemo<LanguageContextValue>(
     () => ({ lang, setLang, toggleLang, t, dir }),
     [lang, setLang, toggleLang, t, dir],
   );
