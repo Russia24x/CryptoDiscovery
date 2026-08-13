@@ -446,6 +446,55 @@ async def search_coins(q: str = ""):
 # AnalyzeRequest is defined above (with custom_weights support)
 
 
+@app.get("/alerts")
+async def get_alerts(threshold: float = 10.0):
+    """Check for significant score changes in score_history.
+
+    Returns alerts for symbols whose project_quality changed by more than
+    `threshold` points between consecutive scans.
+
+    Designed to be polled by the frontend every 60s for in-app notifications.
+    """
+    conn = db._get_conn()
+    # Find symbols with multiple score entries
+    rows = conn.execute("""
+        SELECT symbol, COUNT(*) as cnt
+        FROM score_history
+        GROUP BY symbol
+        HAVING cnt >= 2
+        ORDER BY MAX(timestamp) DESC
+        LIMIT 20
+    """).fetchall()
+
+    alerts = []
+    for row in rows:
+        symbol = row["symbol"]
+        history = db.get_score_history(symbol, limit=5)
+        if len(history) < 2:
+            continue
+        latest = history[0]
+        previous = history[1]
+        delta = latest["project_quality"] - previous["project_quality"]
+        if abs(delta) >= threshold:
+            alerts.append({
+                "symbol": symbol,
+                "type": "score_increase" if delta > 0 else "score_decrease",
+                "delta": round(delta, 1),
+                "current_score": latest["project_quality"],
+                "previous_score": previous["project_quality"],
+                "action": latest.get("action"),
+                "timestamp": latest["timestamp"],
+                "message": f"{symbol} score {'increased' if delta > 0 else 'decreased'} by {abs(delta):.1f} points ({previous['project_quality']:.0f} → {latest['project_quality']:.0f})",
+            })
+
+    return {
+        "alerts": alerts,
+        "count": len(alerts),
+        "threshold": threshold,
+        "fetched_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+
 @app.post("/analyze")
 async def analyze_single_coin(req: AnalyzeRequest):
     """Run the full 8-phase framework on a single coin selected by gecko_id.

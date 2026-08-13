@@ -470,6 +470,52 @@ export default function Home() {
     // IndexedDB hooks auto-load on mount, no manual loading needed
   }, [refreshScans]);
 
+  // Alert system — poll for score changes every 60s and show browser notifications
+  const lastAlertKey = useRef<string>("");
+  useEffect(() => {
+    const checkAlerts = async () => {
+      try {
+        const res = await fetch("/api/scanner/alerts?threshold=10");
+        if (!res.ok) return;
+        const data = await res.json();
+        if (data.alerts && data.alerts.length > 0) {
+          // Use the most recent alert as the key to avoid duplicate notifications
+          const latest = data.alerts[0];
+          const key = `${latest.symbol}-${latest.timestamp}`;
+          if (key !== lastAlertKey.current) {
+            lastAlertKey.current = key;
+            // Show toast notification
+            toast({
+              title: `📊 ${latest.symbol} Score Alert`,
+              description: latest.message,
+              variant: latest.type === "score_increase" ? "default" : "destructive",
+            });
+            // Show browser notification if permitted
+            if (typeof Notification !== "undefined" && Notification.permission === "granted") {
+              new Notification(`📊 ${latest.symbol} Score Alert`, { body: latest.message });
+            }
+          }
+        }
+      } catch {}
+    };
+    // Check immediately, then every 60s
+    checkAlerts();
+    const id = setInterval(checkAlerts, 60_000);
+    return () => clearInterval(id);
+  }, [toast]);
+
+  // Request notification permission on first user interaction
+  const requestNotificationPermission = useCallback(() => {
+    if (typeof Notification !== "undefined" && Notification.permission === "default") {
+      Notification.requestPermission();
+    }
+  }, []);
+  useEffect(() => {
+    const handler = () => { requestNotificationPermission(); document.removeEventListener("click", handler); };
+    document.addEventListener("click", handler);
+    return () => document.removeEventListener("click", handler);
+  }, [requestNotificationPermission]);
+
   // Ref to always have latest startScan (avoids stale closure in keyboard handler)
   const startScanRef = useRef<() => void>(() => {});
 
