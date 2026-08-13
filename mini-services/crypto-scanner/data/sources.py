@@ -1,18 +1,24 @@
 """
-Data source integrations — public, no-API-key endpoints.
+Data source integrations — multi-source with optional API key support.
 
 Uses:
-  - CoinGecko public API  (prices, market cap, supply, volume)
+  - CoinGecko public API  (prices, market cap, supply, volume, links)
   - DeFiLlama public API  (TVL, fees, revenue, protocol metadata)
+  - CoinMarketCap Pro API (optional, with key — cross-verification)
 
 All network calls go through httpx with a sane timeout and graceful
 degradation: if a source is unreachable, we return None-shaped payloads
 so the framework can still run (with lower confidence).
+
+CoinMarketCap API key is optional. If CMC_API_KEY environment variable
+is set, CMC data is used for cross-verification of market cap, price,
+and supply data, increasing confidence scores.
 """
 from __future__ import annotations
 
 import asyncio
 import logging
+import os
 from typing import Any
 
 import httpx
@@ -24,6 +30,11 @@ DEFILLAMA_BASE = "https://api.llama.fi"
 DEFILLAMA_PROTOCOLS = "https://api.llama.fi/protocols"
 DEFILLAMA_FEES = "https://api.llama.fi/overview/fees"
 DEFILLAMA_STABLECOINS = "https://api.llama.fi/stablecoins"
+
+# CoinMarketCap Pro API (optional — requires API key)
+CMC_PRO_BASE = "https://pro-api.coinmarketcap.com"
+CMC_API_KEY = os.environ.get("CMC_API_KEY", "")
+CMC_AVAILABLE = bool(CMC_API_KEY)
 
 TIMEOUT = 15.0
 
@@ -175,3 +186,121 @@ def match_llama_protocol(
         if nm and pname and (nm in pname or pname in nm):
             return p
     return None
+
+
+# --------------------------------------------------------------------------- #
+#  CoinMarketCap Pro API (optional — requires CMC_API_KEY env var)
+# --------------------------------------------------------------------------- #
+
+async def _cmc_get(client: httpx.AsyncClient, path: str, **params: Any) -> Any:
+    """Fetch from CMC Pro API with API key header."""
+    if not CMC_AVAILABLE:
+        return None
+    try:
+        r = await client.get(
+            f"{CMC_PRO_BASE}{path}",
+            params=params,
+            headers={"X-CMC_Pro_API_Key": CMC_API_KEY},
+            timeout=TIMEOUT,
+        )
+        if r.status_code != 200:
+            log.warning("CMC GET %s -> %s", path, r.status_code)
+            return None
+        return r.json()
+    except (httpx.HTTPError, ValueError) as exc:
+        log.warning("CMC GET %s failed: %s", path, exc)
+        return None
+
+
+async def fetch_cmc_quotes(symbols: list[str]) -> dict[str, dict[str, Any]] | None:
+    """Fetch market data (price, MC, FDV, volume, supply) for multiple symbols.
+
+    Returns dict keyed by symbol uppercase.
+    """
+    if not CMC_AVAILABLE or not symbols:
+        return None
+    sym_str = ",".join(symbols[:100])  # CMC allows up to 100 symbols
+    async with httpx.AsyncClient() as c:
+        data = await _cmc_get(c, "/v2/cryptocurrency/quotes/latest", symbol=sym_str, convert="USD")
+    if not isinstance(data, dict) or "data" not in data:
+        return None
+    result: dict[str, dict[str, Any]] = {}
+    for sym, entries in (data.get("data") or {}).items():
+        if not isinstance(entries, list) or not entries:
+            continue
+        item = entries[0]
+        q = (item.get("quote") or {}).get("USD") or {}
+        result[sym.upper()] = {
+            "name": item.get("name"),
+            "symbol": item.get("symbol"),
+            "cmc_rank": item.get("cmc_rank"),
+            "price": q.get("price"),
+            "market_cap": q.get("market_cap"),
+            "fdv": q.get("fully_diluted_market_cap"),
+            "volume_24h": q.get("volume_24h"),
+            "circulating_supply": item.get("circulating_supply"),
+            "total_supply": item.get("total_supply"),
+            "max_supply": item.get("max_supply"),
+            "percent_change_24h": q.get("percent_change_24h"),
+            "percent_change_7d": q.get("percent_change_7d"),
+            "percent_change_30d": q.get("percent_change_30d"),
+        }
+    log.info("CMC: fetched quotes for %d/%d symbols", len(result), len(symbols))
+    return result
+
+
+async def fetch_cmc_metadata(symbol: str) -> dict[str, Any] | None:
+    """Fetch metadata (logo, links, category) for a single symbol."""
+    if not CMC_AVAILABLE:
+        return None
+    async with httpx.AsyncClient() as c:
+        data = await _cmc_get(c, "/v2/cryptocurrency/info", symbol=symbol)
+    if not isinstance(data, dict) or "data" not in data:
+        return None
+    entries = (data.get("data") or {}).get(symbol.upper()) or []
+    if not entries:
+        return None
+    info = entries[0]
+    urls = info.get("urls") or {}
+    return {
+        "name": info.get("name"),
+        "logo": info.get("logo"),
+        "category": info.get("category"),
+        "website": (urls.get("website") or [None])[0],
+        "twitter": (urls.get("twitter") or [None])[0],
+        "source_code": (urls.get("source_code") or [None])[0],
+        "reddit": (urls.get("reddit") or [None])[0],
+        "description": info.get("description"),
+    }
+
+
+async def fetch_cmc_listings(limit: int = 100) -> list[dict[str, Any]] | None:
+    """Fetch top cryptocurrencies by market cap (for discovery)."""
+    if not CMC_AVAILABLE:
+        return None
+    async with httpx.AsyncClient() as c:
+        data = await _cmc_get(c, "/v1/cryptocurrency/listings/latest", limit=limit, convert="USD")
+    if not isinstance(data, dict) or "data" not in data:
+        return None
+    result = []
+    for item in (data.get("data") or []):
+        q = (item.get("quote") or {}).get("USD") or {}
+        result.append({
+            "name": item.get("name"),
+            "symbol": item.get("symbol"),
+            "cmc_rank": item.get("cmc_rank"),
+            "market_cap": q.get("market_cap"),
+            "price": q.get("price"),
+            "volume_24h": q.get("volume_24h"),
+            "circulating_supply": item.get("circulating_supply"),
+            "total_supply": item.get("total_supply"),
+            "percent_change_24h": q.get("percent_change_24h"),
+            "platform": item.get("platform"),
+        })
+    log.info("CMC: fetched %d listings", len(result))
+    return result
+
+
+def is_cmc_available() -> bool:
+    """Check if CMC API key is configured."""
+    return CMC_AVAILABLE

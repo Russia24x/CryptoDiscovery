@@ -51,9 +51,10 @@ Project Quality ≠ Token Quality ≠ Investment Attractiveness
 - **Project Score History**: Track score changes across scans
 - **Social Links**: Website, Twitter/X, GitHub, Discord, Blockchain Explorer
 
-### Data Sources (No API Key Required)
-- **CoinGecko**: Market data, prices, tokenomics, social links
-- **DeFiLlama**: TVL, fees (7d/30d), revenue, protocol metadata
+### Data Sources
+- **CoinGecko** (free, no key): Market data, prices, tokenomics, social links
+- **DeFiLlama** (free, no key): TVL, fees (7d/30d), revenue, protocol metadata
+- **CoinMarketCap Pro** (optional, with key): Cross-verification of market cap, volume, supply; backup data when CoinGecko is rate-limited; metadata (logo, links, description)
 
 ## Architecture
 
@@ -117,6 +118,10 @@ bun install
 
 # Install Python dependencies
 pip install fastapi uvicorn httpx pydantic
+
+# Optional: Configure CoinMarketCap API key for cross-verification
+# Get a free key at: https://pro.coinmarketcap.com/signup
+echo "CMC_API_KEY=your_key_here" > mini-services/crypto-scanner/.env
 
 # Start Python scanner service
 bash mini-services/crypto-scanner/start.sh

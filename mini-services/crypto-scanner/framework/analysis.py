@@ -604,14 +604,44 @@ def _build_cross_verifications(ev: EvidenceBundle) -> list:
 
     # Market cap cross-verification
     if ev.market_cap_usd and ev.market_cap_usd > 0:
-        results.append(CrossVerification(
-            metric="Market Cap",
-            source_a="CoinGecko",
-            value_a=ev.market_cap_usd,
-            source_b="DeFiLlama",
-            value_b=None,  # DeFiLlama doesn't provide MC directly
-            status="single-source",
-        ))
+        cmc_mc = ev.cmc_market_cap
+        if cmc_mc and cmc_mc > 0:
+            discrepancy = abs(ev.market_cap_usd - cmc_mc) / max(ev.market_cap_usd, cmc_mc) * 100
+            status = "verified" if discrepancy <= 15 else "discrepancy"
+            results.append(CrossVerification(
+                metric="Market Cap",
+                source_a="CoinGecko",
+                value_a=ev.market_cap_usd,
+                source_b="CoinMarketCap",
+                value_b=cmc_mc,
+                discrepancy_pct=round(discrepancy, 1),
+                status=status,
+            ))
+        else:
+            results.append(CrossVerification(
+                metric="Market Cap",
+                source_a="CoinGecko" if ev.market_cap_usd else "CoinMarketCap",
+                value_a=ev.market_cap_usd,
+                source_b="DeFiLlama",
+                value_b=None,
+                status="single-source",
+            ))
+
+    # Volume cross-verification
+    if ev.market.daily_volume and ev.market.daily_volume > 0:
+        cmc_vol = ev.cmc_volume_24h
+        if cmc_vol and cmc_vol > 0:
+            discrepancy = abs(ev.market.daily_volume - cmc_vol) / max(ev.market.daily_volume, cmc_vol) * 100
+            status = "verified" if discrepancy <= 20 else "discrepancy"
+            results.append(CrossVerification(
+                metric="Volume 24h",
+                source_a="CoinGecko",
+                value_a=ev.market.daily_volume,
+                source_b="CoinMarketCap",
+                value_b=cmc_vol,
+                discrepancy_pct=round(discrepancy, 1),
+                status=status,
+            ))
 
     # Fees cross-verification
     if ev.economic.fees and ev.economic.fees > 0:
@@ -620,8 +650,22 @@ def _build_cross_verifications(ev: EvidenceBundle) -> list:
             source_a="DeFiLlama Fees",
             value_a=ev.economic.fees,
             source_b="Protocol Dashboard",
-            value_b=None,  # Would need direct protocol dashboard
+            value_b=None,
             status="single-source",
+        ))
+
+    # Supply cross-verification
+    if ev.tokenomics.circulating_supply and ev.cmc_circulating_supply:
+        discrepancy = abs(ev.tokenomics.circulating_supply - ev.cmc_circulating_supply) / max(ev.tokenomics.circulating_supply, ev.cmc_circulating_supply) * 100
+        status = "verified" if discrepancy <= 5 else "discrepancy"
+        results.append(CrossVerification(
+            metric="Circulating Supply",
+            source_a="CoinGecko",
+            value_a=ev.tokenomics.circulating_supply,
+            source_b="CoinMarketCap",
+            value_b=ev.cmc_circulating_supply,
+            discrepancy_pct=round(discrepancy, 1),
+            status=status,
         ))
 
     return results

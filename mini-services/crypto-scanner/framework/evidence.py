@@ -99,6 +99,12 @@ class EvidenceBundle:
         self.github_url: str | None = None
         self.discord_url: str | None = None
         self.blockchain_explorer: str | None = None
+        # CoinMarketCap cross-verification data
+        self.cmc_market_cap: float | None = None
+        self.cmc_price: float | None = None
+        self.cmc_rank: int | None = None
+        self.cmc_volume_24h: float | None = None
+        self.cmc_circulating_supply: float | None = None
 
 
 async def collect(
@@ -131,6 +137,56 @@ async def collect(
             if detail:
                 _apply_gecko_detail(b, detail)
                 b.sources += 1
+        except Exception:  # noqa: BLE001
+            pass
+
+    # 3b) CoinMarketCap cross-verification (optional — requires API key)
+    if sources.is_cmc_available():
+        try:
+            cmc_quotes = await sources.fetch_cmc_quotes([candidate.symbol])
+            if cmc_quotes and candidate.symbol.upper() in cmc_quotes:
+                cmc_data = cmc_quotes[candidate.symbol.upper()]
+                b.cmc_market_cap = cmc_data.get("market_cap")
+                b.cmc_price = cmc_data.get("price")
+                b.cmc_rank = cmc_data.get("cmc_rank")
+                b.cmc_volume_24h = cmc_data.get("volume_24h")
+                b.cmc_circulating_supply = cmc_data.get("circulating_supply")
+                b.sources += 1
+                log.info("CMC cross-verification: %s MC=$%s (rank #%s)",
+                         candidate.symbol, b.cmc_market_cap, b.cmc_rank)
+
+                # If CoinGecko didn't provide data, use CMC as fallback
+                if not b.market_cap_usd and b.cmc_market_cap:
+                    b.market_cap_usd = b.cmc_market_cap
+                if not b.fdv_usd and cmc_data.get("fdv"):
+                    b.fdv_usd = cmc_data["fdv"]
+                if not b.tokenomics.market_cap and b.cmc_market_cap:
+                    b.tokenomics.market_cap = b.cmc_market_cap
+                if not b.tokenomics.fdv and cmc_data.get("fdv"):
+                    b.tokenomics.fdv = cmc_data["fdv"]
+                if not b.tokenomics.circulating_supply and b.cmc_circulating_supply:
+                    b.tokenomics.circulating_supply = b.cmc_circulating_supply
+                if not b.tokenomics.total_supply and cmc_data.get("total_supply"):
+                    b.tokenomics.total_supply = cmc_data["total_supply"]
+                if not b.tokenomics.max_supply and cmc_data.get("max_supply"):
+                    b.tokenomics.max_supply = cmc_data["max_supply"]
+                if not b.market.daily_volume and b.cmc_volume_24h:
+                    b.market.daily_volume = b.cmc_volume_24h
+
+                # Fetch metadata if image/links missing
+                if not b.image_url or not b.homepage:
+                    cmc_meta = await sources.fetch_cmc_metadata(candidate.symbol)
+                    if cmc_meta:
+                        if not b.image_url and cmc_meta.get("logo"):
+                            b.image_url = cmc_meta["logo"]
+                        if not b.homepage and cmc_meta.get("website"):
+                            b.homepage = cmc_meta["website"]
+                        if not b.twitter_handle and cmc_meta.get("twitter"):
+                            # Extract handle from URL
+                            tw_url = cmc_meta["twitter"]
+                            b.twitter_handle = tw_url.rstrip("/").split("/")[-1]
+                        if not b.github_url and cmc_meta.get("source_code"):
+                            b.github_url = cmc_meta["source_code"]
         except Exception:  # noqa: BLE001
             pass
 
