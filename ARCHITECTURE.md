@@ -742,6 +742,44 @@ export async function scannerFetch(path, init?: ScannerFetchInit) {
 
 ---
 
+## 7.5. سیستم Health Check و نگهداری خودکار
+
+### Endpoint بررسی سلامت (`GET /system/health-check`)
+
+سیستم به‌طور خودکار یکپارچگی خط لوله داده را بررسی می‌کند:
+
+```json
+{
+  "sources": {"coingecko": true, "defillama": true, "cmc_keyless": true, ...},
+  "blockchain_detection": {"auto_synced_symbols": 140, "manual_overrides": 40},
+  "data_gaps": [
+    {"symbol": "BNB", "issues": ["Blockchain token but TVL=$0"]},
+    {"symbol": "USDT", "issues": ["CMC Keyless: no data (slug mismatch)"]}
+  ],
+  "summary": {"status": "needs_attention", "data_gaps_found": 10}
+}
+```
+
+### همگام‌سازی خودکار زنجیره‌ها
+
+به‌جای نگهداری دستی جدول توکن‌های بلاک‌چین، سیستم به‌طور خودکار از DeFiLlama `/chains` endpoint (۴۶۱+ زنجیره) بارگذاری می‌کند:
+
+```python
+await _sync_chain_mapping()  # هر ۱ ساعت کش می‌شود
+# پوشش: ۱۴۰ نماد (در مقابل ۴۰ دستی قبلی) — ۳.۵ برابر بهبود
+```
+
+### Cron Job خودکار (هر ۳۰ دقیقه)
+
+یک تسک زمان‌بندی‌شده به‌طور خودکار:
+1. بررسی سلامت را اجرا می‌کند
+2. شکاف‌های داده را تحلیل می‌کند
+3. مشکلات slug و نام زنجیره را برطرف می‌کند
+4. اسکنر را ری‌استارت و تأیید می‌کند
+5. تغییرات را commit و worklog را به‌روزرسانی می‌کند
+
+---
+
 ## 8. سیستم i18n دوزبانه
 
 ### ساختار
