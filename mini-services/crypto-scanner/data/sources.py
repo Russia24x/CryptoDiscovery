@@ -641,22 +641,27 @@ async def fetch_dune_execute(query_id: int | str, params: dict[str, Any] | None 
             if not execution_id:
                 return None
 
-            # Step 2: poll for results (max 3 retries with 2s delay)
-            for _ in range(3):
-                await asyncio.sleep(2)
+            # Step 2: poll for results (max 10 retries with 3s delay = 30s total)
+            for attempt in range(10):
+                await asyncio.sleep(3)
                 results = await _dune_get(c, f"/execution/{execution_id}/results")
-                if isinstance(results, dict) and results.get("state") == "QUERY_STATE_COMPLETED":
-                    result = results.get("result") or {}
-                    rows = result.get("rows") or []
-                    return {
-                        "query_id": str(query_id),
-                        "execution_id": execution_id,
-                        "rows": rows,
-                        "row_count": len(rows),
-                        "is_cached": False,
-                        "fetched_at": _datetime.now(_tz.utc).isoformat(),
-                    }
-            log.warning("Dune execute %s: timed out waiting for results", query_id)
+                if isinstance(results, dict):
+                    state = results.get("state", "")
+                    if state == "QUERY_STATE_COMPLETED":
+                        result = results.get("result") or {}
+                        rows = result.get("rows") or []
+                        return {
+                            "query_id": str(query_id),
+                            "execution_id": execution_id,
+                            "rows": rows,
+                            "row_count": len(rows),
+                            "is_cached": False,
+                            "fetched_at": _datetime.now(_tz.utc).isoformat(),
+                        }
+                    elif state in ("QUERY_STATE_FAILED", "QUERY_STATE_CANCELLED"):
+                        log.warning("Dune execute %s: execution %s", query_id, state)
+                        return None
+            log.warning("Dune execute %s: timed out after 30s waiting for results", query_id)
             return None
     except (httpx.HTTPError, ValueError) as exc:
         log.warning("Dune execute %s failed: %s", query_id, exc)
@@ -890,13 +895,41 @@ async def fetch_cmc_keyless_detail(slug: str) -> dict[str, Any] | None:
 
 
 async def fetch_cmc_keyless_by_symbol(symbol: str) -> dict[str, Any] | None:
-    """Try to fetch CMC keyless detail by trying the slug = symbol.lower().
+    """Fetch CMC keyless detail by symbol, resolving to the correct slug.
 
-    CMC keyless API uses slug (e.g. 'aave', 'bitcoin') not symbol.
-    We try the lowercase symbol as slug, which works for most projects.
+    CMC keyless API uses slugs (e.g. 'solana', 'bitcoin') not symbols (e.g. 'sol', 'btc').
+    We try multiple strategies:
+      1. Common symbol→slug overrides (BTC→bitcoin, ETH→ethereum, etc.)
+      2. The lowercase symbol as slug (works for some: aave→aave, link→link)
+      3. CoinGecko coin detail lookup to find the CMC-compatible slug
     """
-    slug = symbol.lower().replace(" ", "-")
-    return await fetch_cmc_keyless_detail(slug)
+    # Common symbol → slug mappings (CMC slugs differ from symbols for major coins)
+    _SYMBOL_TO_SLUG: dict[str, str] = {
+        "BTC": "bitcoin", "ETH": "ethereum", "SOL": "solana", "BNB": "binance-coin",
+        "XRP": "xrp", "ADA": "cardano", "AVAX": "avalanche", "DOT": "polkadot",
+        "MATIC": "matic-network", "LINK": "chainlink", "UNI": "uniswap",
+        "ATOM": "cosmos", "LTC": "litecoin", "BCH": "bitcoin-cash", "NEAR": "near",
+        "FTM": "fantom", "ALGO": "algorand", "VET": "vechain", "ICP": "internet-computer",
+        "FIL": "filecoin", "APT": "aptos", "OP": "optimism", "ARB": "arbitrum",
+        "INJ": "injective-protocol", "SUI": "sui", "SEI": "sei-network",
+        "TIA": "celestia", "STX": "blockstack", "RUNE": "thorchain",
+        "AAVE": "aave", "MKR": "maker", "LDO": "lido", "RNDR": "render-token",
+        "IMX": "immutable-x", "GRT": "the-graph", "SAND": "the-sandbox",
+        "MANA": "decentraland", "AXS": "axie-infinity", "FTM": "fantom",
+    }
+    sym_upper = symbol.upper().strip()
+    slug = _SYMBOL_TO_SLUG.get(sym_upper, symbol.lower().replace(" ", "-"))
+    result = await fetch_cmc_keyless_detail(slug)
+    if result and result.get("name"):
+        return result
+
+    # Fallback: if the slug guess failed, try the lowercase symbol directly
+    if slug != symbol.lower():
+        alt_result = await fetch_cmc_keyless_detail(symbol.lower().replace(" ", "-"))
+        if alt_result and alt_result.get("name"):
+            return alt_result
+
+    return result
 
 
 # --------------------------------------------------------------------------- #
