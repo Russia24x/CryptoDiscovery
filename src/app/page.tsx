@@ -77,6 +77,8 @@ import { AxisRadarChart } from "@/components/dashboard/axis-radar-chart";
 import { SectorDonut } from "@/components/dashboard/sector-donut";
 import { RiskHeatmap } from "@/components/dashboard/risk-heatmap";
 import { ThemeToggle } from "@/components/theme-toggle";
+import { LanguageToggle } from "@/components/language-toggle";
+import { useLanguage } from "@/lib/i18n/LanguageProvider";
 import {
   Tooltip,
   TooltipContent,
@@ -321,6 +323,7 @@ const SECTOR_OPTIONS = [
 //  Main page
 // --------------------------------------------------------------------------- //
 export default function Home() {
+  const { t, lang, dir } = useLanguage();
   const [persona, setPersona] = useState<Persona>("investor");
   const [mcMin, setMcMin] = useState("100");
   const [mcMax, setMcMax] = useState("50000");
@@ -932,10 +935,10 @@ export default function Home() {
               </div>
               <div>
                 <h1 className="text-base font-bold tracking-tight sm:text-lg">
-                  Crypto Discovery Framework
+                  {t("header.title")}
                 </h1>
                 <p className="text-[11px] text-muted-foreground hidden sm:block">
-                  Evidence-first market scanning · v1.0
+                  {t("header.subtitle")}
                 </p>
               </div>
             </div>
@@ -943,7 +946,7 @@ export default function Home() {
               <HealthDot />
               <Badge variant="outline" className="hidden md:flex gap-1.5 font-mono text-[11px]">
                 <Activity className="h-3 w-3 text-emerald-500" />
-                {scans.length} scans
+                {scans.length} {t("header.scans")}
               </Badge>
               {/* Global search button */}
               <Button
@@ -953,7 +956,7 @@ export default function Home() {
                 className="h-9 gap-1.5"
               >
                 <Search className="h-4 w-4 text-muted-foreground" />
-                <span className="hidden lg:inline">Search all</span>
+                <span className="hidden lg:inline">{t("header.searchAll")}</span>
               </Button>
               {/* History button */}
               <Button
@@ -966,7 +969,7 @@ export default function Home() {
                 className="h-9 gap-1.5"
               >
                 <History className="h-4 w-4 text-sky-400" />
-                <span className="hidden sm:inline">History</span>
+                <span className="hidden sm:inline">{t("header.history")}</span>
               </Button>
               {/* Watchlist button */}
               <Button
@@ -976,7 +979,7 @@ export default function Home() {
                 className="h-9 gap-1.5"
               >
                 <Star className="h-4 w-4 text-amber-400" />
-                <span className="hidden sm:inline">Watchlist</span>
+                <span className="hidden sm:inline">{t("header.watchlist")}</span>
                 {watchlist.size > 0 && (
                   <Badge className="ml-0.5 bg-amber-500/20 text-amber-400 text-[9px] px-1.5 py-0">
                     {watchlist.size}
@@ -991,8 +994,9 @@ export default function Home() {
                 className="h-9 w-9 hover:bg-muted/40"
               >
                 <HelpCircle className="h-4 w-4 text-muted-foreground" />
-                <span className="sr-only">Help & Guide</span>
+                <span className="sr-only">{t("header.help")}</span>
               </Button>
+              <LanguageToggle />
               <ThemeToggle />
             </div>
           </div>
@@ -1010,10 +1014,10 @@ export default function Home() {
               <CardHeader className="pb-3">
                 <CardTitle className="flex items-center gap-2 text-sm">
                   <Crosshair className="h-4 w-4 text-emerald-500" />
-                  Scan Configuration
+                  {t("config.title")}
                 </CardTitle>
                 <CardDescription className="text-xs">
-                  Configure discovery lenses & persona weights
+                  {t("config.description")}
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
@@ -1104,11 +1108,11 @@ export default function Home() {
                 >
                   {scanning ? (
                     <>
-                      <Loader2 className="h-4 w-4 mr-2 animate-spin" /> Scanning…
+                      <Loader2 className="h-4 w-4 mr-2 animate-spin" /> {t("config.scanning")}
                     </>
                   ) : (
                     <>
-                      <Zap className="h-4 w-4 mr-2" /> Scan Market
+                      <Zap className="h-4 w-4 mr-2" /> {t("config.scanMarket")}
                     </>
                   )}
                 </Button>
@@ -1275,37 +1279,37 @@ export default function Home() {
                 <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
                   <StatCard
                     icon={ChartNoAxesColumn}
-                    label="Total Scanned"
+                    label={t("stats.totalScanned")}
                     value={marketStats.total.toString()}
                     color="text-sky-400"
                   />
                   <StatCard
                     icon={Gauge}
-                    label="Avg Quality"
+                    label={t("stats.avgQuality")}
                     value={marketStats.avgQ.toFixed(1)}
                     color={scoreColor(marketStats.avgQ)}
                   />
                   <StatCard
                     icon={BadgeCheck}
-                    label="Avg Confidence"
+                    label={t("stats.avgConfidence")}
                     value={`${marketStats.avgConf.toFixed(0)}%`}
                     color="text-emerald-400"
                   />
                   <StatCard
                     icon={Target}
-                    label="High Score (70+)"
+                    label={t("stats.highScore")}
                     value={marketStats.highCount.toString()}
                     color="text-lime-400"
                   />
                   <StatCard
                     icon={ShieldAlert}
-                    label="Vetoed"
+                    label={t("stats.vetoed")}
                     value={marketStats.vetoCount.toString()}
                     color={marketStats.vetoCount > 0 ? "text-rose-400" : "text-muted-foreground"}
                   />
                   <StatCard
                     icon={Layers}
-                    label="Top Sector"
+                    label={t("stats.topSector")}
                     value={marketStats.topSector}
                     color="text-amber-400"
                   />
@@ -1352,7 +1356,7 @@ export default function Home() {
                           )}
                         >
                           <Grid3x3 className="h-3.5 w-3.5" />
-                          Grid
+                          {t("results.grid")}
                         </button>
                         <button
                           onClick={() => setViewMode("analytics")}
@@ -1364,7 +1368,7 @@ export default function Home() {
                           )}
                         >
                           <PieChart className="h-3.5 w-3.5" />
-                          Analytics
+                          {t("results.analytics")}
                         </button>
                       </div>
                       {/* Compare mode toggle */}
@@ -1411,7 +1415,7 @@ export default function Home() {
                         <Filter className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
                         <Input
                           ref={searchInputRef}
-                          placeholder="Search name, symbol, category..."
+                          placeholder={t("results.searchPlaceholder")}
                           value={searchQuery}
                           onChange={(e) => setSearchQuery(e.target.value)}
                           className="h-8 pl-8 text-xs"
@@ -1481,7 +1485,7 @@ export default function Home() {
                         <div className="flex items-center gap-2 mb-2">
                           <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-md bg-gradient-to-r from-amber-500/15 to-yellow-500/10 border border-amber-500/30">
                             <Sparkles className="h-3 w-3 text-amber-400" />
-                            <span className="text-[11px] font-semibold text-amber-400">Top Performers</span>
+                            <span className="text-[11px] font-semibold text-amber-400">{t("results.topPerformers")}</span>
                           </div>
                           <span className="text-[11px] text-muted-foreground">Highest quality scores from this scan</span>
                         </div>
@@ -1509,7 +1513,7 @@ export default function Home() {
                       {filteredReports.length > 0 && !searchQuery && actionFilter === "all" && sectorFilter === "all" && (
                         <div className="flex items-center gap-2 mb-3 mt-4">
                           <div className="flex-1 h-px bg-border/40" />
-                          <span className="text-[11px] text-muted-foreground font-medium">All Candidates</span>
+                          <span className="text-[11px] text-muted-foreground font-medium">{t("results.allCandidates")}</span>
                           <div className="flex-1 h-px bg-border/40" />
                         </div>
                       )}
@@ -1531,7 +1535,7 @@ export default function Home() {
                     {filteredReports.length === 0 && (
                       <div className="col-span-full flex flex-col items-center justify-center py-12 text-center">
                         <ListFilter className="h-8 w-8 text-muted-foreground/50 mb-2" />
-                        <p className="text-sm text-muted-foreground">No projects match your filters</p>
+                        <p className="text-sm text-muted-foreground">{t("results.noProjectsMatch")}</p>
                         <Button
                           variant="outline"
                           size="sm"
@@ -1658,28 +1662,28 @@ export default function Home() {
         <div className="mx-auto max-w-[1600px] px-4 sm:px-6 lg:px-8 py-3 flex flex-col sm:flex-row items-center justify-between gap-3">
           <div className="flex items-center gap-4 flex-wrap">
             <p className="text-[11px] text-muted-foreground">
-              Crypto Discovery Framework · Evidence &gt; Narrative
+              {t("footer.evidenceNarrative")}
             </p>
             <div className="hidden md:flex items-center gap-2 text-[10px] text-muted-foreground">
               <kbd className="px-1.5 py-0.5 rounded bg-muted/40 border border-border/40 font-mono text-[9px]">S</kbd>
-              <span>scan</span>
+              <span>{t("footer.scan")}</span>
               <kbd className="px-1.5 py-0.5 rounded bg-muted/40 border border-border/40 font-mono text-[9px] ml-1">/</kbd>
-              <span>search</span>
+              <span>{t("footer.search")}</span>
               <kbd className="px-1.5 py-0.5 rounded bg-muted/40 border border-border/40 font-mono text-[9px] ml-1">G</kbd>
               <kbd className="px-1.5 py-0.5 rounded bg-muted/40 border border-border/40 font-mono text-[9px]">A</kbd>
-              <span>views</span>
+              <span>{t("footer.views")}</span>
               <kbd className="px-1.5 py-0.5 rounded bg-muted/40 border border-border/40 font-mono text-[9px] ml-1">C</kbd>
-              <span>compare</span>
+              <span>{t("footer.compare")}</span>
               <kbd className="px-1.5 py-0.5 rounded bg-muted/40 border border-border/40 font-mono text-[9px] ml-1">W</kbd>
-              <span>watchlist</span>
+              <span>{t("footer.watchlist")}</span>
               <kbd className="px-1.5 py-0.5 rounded bg-muted/40 border border-border/40 font-mono text-[9px] ml-1">⌘K</kbd>
-              <span>search</span>
+              <span>{t("footer.search")}</span>
               <kbd className="px-1.5 py-0.5 rounded bg-muted/40 border border-border/40 font-mono text-[9px] ml-1">Esc</kbd>
-              <span>close</span>
+              <span>{t("footer.close")}</span>
             </div>
           </div>
           <p className="text-[11px] text-muted-foreground">
-            Data: CoinGecko + DeFiLlama · Not financial advice
+            {t("footer.dataSources")}
           </p>
         </div>
       </footer>
@@ -1907,6 +1911,7 @@ function ScanStatusBadge({ status }: { status: string }) {
 }
 
 function EmptyState() {
+  const { t } = useLanguage();
   return (
     <Card className="border-dashed border-2 border-border/60 bg-card/20">
       <CardContent className="flex flex-col items-center justify-center text-center py-16 px-6">
@@ -1916,18 +1921,16 @@ function EmptyState() {
             <Radar className="h-10 w-10 text-emerald-400" />
           </div>
         </div>
-        <h2 className="text-xl font-bold mb-2">Ready to scan the market</h2>
+        <h2 className="text-xl font-bold mb-2">{t("empty.title")}</h2>
         <p className="text-sm text-muted-foreground max-w-md mb-6">
-          Configure your discovery lenses and persona on the left, then trigger a market scan.
-          The framework will discover, screen, evaluate and rank crypto projects by real evidence
-          — not narratives.
+          {t("empty.description")}
         </p>
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 max-w-2xl w-full">
           {[
-            { icon: Crosshair, label: "5 Discovery Lenses", color: "text-sky-400" },
-            { icon: ShieldAlert, label: "Hard Veto Gates", color: "text-rose-400" },
-            { icon: Gauge, label: "5 Fundamental Axes", color: "text-emerald-400" },
-            { icon: Target, label: "Decision & Kill Rules", color: "text-amber-400" },
+            { icon: Crosshair, label: t("empty.lens1"), color: "text-sky-400" },
+            { icon: ShieldAlert, label: t("empty.lens2"), color: "text-rose-400" },
+            { icon: Gauge, label: t("empty.lens3"), color: "text-emerald-400" },
+            { icon: Target, label: t("empty.lens4"), color: "text-amber-400" },
           ].map((f) => (
             <div key={f.label} className="flex flex-col items-center gap-2 p-3 rounded-lg border border-border/40 bg-muted/20">
               <f.icon className={cn("h-5 w-5", f.color)} />
