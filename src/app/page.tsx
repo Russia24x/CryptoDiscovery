@@ -76,6 +76,8 @@ import { ScoreRadial } from "@/components/dashboard/score-radial";
 import { AxisRadarChart } from "@/components/dashboard/axis-radar-chart";
 import { SectorDonut } from "@/components/dashboard/sector-donut";
 import { RiskHeatmap } from "@/components/dashboard/risk-heatmap";
+import { CoinExplorerView } from "@/components/views/coin-explorer-view";
+import { MarketIntelligenceView } from "@/components/views/market-intelligence-view";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { LanguageToggle } from "@/components/language-toggle";
 import { useLanguage } from "@/lib/i18n/LanguageProvider";
@@ -441,6 +443,10 @@ export default function Home() {
   const [diffScanB, setDiffScanB] = useState<ScanStatus | null>(null);
   // help dialog
   const [showHelp, setShowHelp] = useState(false);
+  // main view tab: discovery (scan) | explorer (manual coin analysis) | market (intelligence)
+  const [mainView, setMainView] = useState<"discovery" | "explorer" | "market">("discovery");
+  // when set, Coin Explorer auto-loads this coin (triggered from Market Intelligence click)
+  const [explorerInitialId, setExplorerInitialId] = useState<string | null>(null);
   // search input ref for keyboard shortcut
   const searchInputRef = useRef<HTMLInputElement>(null);
   const pollRef = useRef<NodeJS.Timeout | null>(null);
@@ -1074,6 +1080,70 @@ export default function Home() {
       {/*  Main                                                              */}
       {/* ----------------------------------------------------------------- */}
       <main className="flex-1 mx-auto w-full max-w-[1600px] px-4 sm:px-6 lg:px-8 py-6">
+        {/* ============ Main view tab navigation ============ */}
+        <div className="mb-6 flex items-center gap-1.5 rounded-xl border border-border/60 bg-card/40 backdrop-blur-sm p-1.5 overflow-x-auto">
+          <button
+            onClick={() => setMainView("discovery")}
+            className={cn(
+              "flex items-center gap-2 px-3.5 py-2 rounded-lg text-xs font-medium transition-all whitespace-nowrap",
+              mainView === "discovery"
+                ? "bg-emerald-500/15 text-emerald-400 shadow-sm"
+                : "text-muted-foreground hover:text-foreground hover:bg-muted/40",
+            )}
+          >
+            <Radar className="h-4 w-4" />
+            <span>{t("nav.discovery")}</span>
+            {mainView === "discovery" && (
+              <span className="ml-1 h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse" />
+            )}
+          </button>
+          <button
+            onClick={() => setMainView("explorer")}
+            className={cn(
+              "flex items-center gap-2 px-3.5 py-2 rounded-lg text-xs font-medium transition-all whitespace-nowrap",
+              mainView === "explorer"
+                ? "bg-amber-500/15 text-amber-400 shadow-sm"
+                : "text-muted-foreground hover:text-foreground hover:bg-muted/40",
+            )}
+          >
+            <Crosshair className="h-4 w-4" />
+            <span>{t("nav.explorer")}</span>
+          </button>
+          <button
+            onClick={() => setMainView("market")}
+            className={cn(
+              "flex items-center gap-2 px-3.5 py-2 rounded-lg text-xs font-medium transition-all whitespace-nowrap",
+              mainView === "market"
+                ? "bg-sky-500/15 text-sky-400 shadow-sm"
+                : "text-muted-foreground hover:text-foreground hover:bg-muted/40",
+            )}
+          >
+            <Globe className="h-4 w-4" />
+            <span>{t("nav.market")}</span>
+          </button>
+        </div>
+
+        {/* ============ Coin Explorer view ============ */}
+        {mainView === "explorer" && (
+          <CoinExplorerView
+            initialGeckoId={explorerInitialId}
+            onClearInitial={() => setExplorerInitialId(null)}
+            onReport={(report) => setSelectedReport(report)}
+          />
+        )}
+
+        {/* ============ Market Intelligence view ============ */}
+        {mainView === "market" && (
+          <MarketIntelligenceView
+            onAnalyzeCoin={(geckoId, _name) => {
+              setExplorerInitialId(geckoId);
+              setMainView("explorer");
+            }}
+          />
+        )}
+
+        {/* ============ Discovery view (default) ============ */}
+        {mainView === "discovery" && (
         <div className="grid grid-cols-1 lg:grid-cols-[360px_1fr] gap-6">
           {/* ============ Config sidebar ============ */}
           <aside className="lg:sticky lg:top-[88px] lg:self-start space-y-4">
@@ -1720,6 +1790,7 @@ export default function Home() {
             )}
           </section>
         </div>
+        )}
       </main>
 
       {/* ----------------------------------------------------------------- */}

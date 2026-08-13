@@ -420,3 +420,200 @@ async def fetch_cmc_keyless_by_symbol(symbol: str) -> dict[str, Any] | None:
     """
     slug = symbol.lower().replace(" ", "-")
     return await fetch_cmc_keyless_detail(slug)
+
+
+# --------------------------------------------------------------------------- #
+#  In-memory TTL cache — avoids hammering public APIs on repeated dashboard loads
+# --------------------------------------------------------------------------- #
+import time as _time
+
+_CACHE: dict[str, tuple[float, Any]] = {}
+_CACHE_TTL_DEFAULT = 90.0  # seconds
+
+
+def cache_get(key: str, ttl: float = _CACHE_TTL_DEFAULT) -> Any | None:
+    entry = _CACHE.get(key)
+    if entry is None:
+        return None
+    ts, val = entry
+    if _time.time() - ts > ttl:
+        return None
+    return val
+
+
+def cache_set(key: str, value: Any) -> None:
+    _CACHE[key] = (_time.time(), value)
+
+
+def cache_info() -> dict[str, Any]:
+    """Return cache stats for the health endpoint."""
+    now = _time.time()
+    live = 0
+    for key, (ts, _) in _CACHE.items():
+        if now - ts <= _CACHE_TTL_DEFAULT:
+            live += 1
+    return {"entries": len(_CACHE), "live": live, "ttl_seconds": _CACHE_TTL_DEFAULT}
+
+
+# --------------------------------------------------------------------------- #
+#  CoinGecko search (for manual coin explorer)
+# --------------------------------------------------------------------------- #
+async def search_coins(query: str) -> list[dict[str, Any]]:
+    """Search coins by name/symbol via CoinGecko /search endpoint.
+
+    Returns a list of {id, name, symbol, market_cap_rank, thumb, large}.
+    """
+    if not query or len(query.strip()) < 1:
+        return []
+    cache_key = f"search:{query.strip().lower()}"
+    cached = cache_get(cache_key, ttl=120.0)
+    if cached is not None:
+        return cached
+    async with httpx.AsyncClient() as c:
+        data = await _get_json(c, f"{COINGECKO_BASE}/search", query=query.strip())
+    if not isinstance(data, dict):
+        return []
+    coins = data.get("coins") or []
+    out = []
+    for item in coins[:25]:
+        if not isinstance(item, dict):
+            continue
+        out.append({
+            "id": item.get("id"),
+            "name": item.get("name"),
+            "symbol": (item.get("symbol") or "").upper(),
+            "market_cap_rank": item.get("market_cap_rank"),
+            "thumb": item.get("thumb"),
+            "large": item.get("large"),
+            "api_symbol": item.get("api_symbol") or item.get("id"),
+        })
+    cache_set(cache_key, out)
+    return out
+
+
+# --------------------------------------------------------------------------- #
+#  CoinGecko global market data
+# --------------------------------------------------------------------------- #
+async def fetch_global_market() -> dict[str, Any] | None:
+    """Global crypto market stats: total mcap, BTC/ETH dominance, volume, etc."""
+    cached = cache_get("global_market", ttl=120.0)
+    if cached is not None:
+        return cached
+    async with httpx.AsyncClient() as c:
+        data = await _get_json(c, f"{COINGECKO_BASE}/global")
+    if not isinstance(data, dict) or "data" not in data:
+        return None
+    d = data["data"]
+    out = {
+        "total_market_cap_usd": (d.get("total_market_cap") or {}).get("usd"),
+        "total_volume_usd": (d.get("total_volume") or {}).get("usd"),
+        "market_cap_change_percentage_24h_usd": d.get("market_cap_change_percentage_24h_usd"),
+        "btc_dominance": d.get("market_cap_percentage", {}).get("btc"),
+        "eth_dominance": d.get("market_cap_percentage", {}).get("eth"),
+        "active_cryptocurrencies": d.get("active_cryptocurrencies"),
+        "markets": d.get("markets"),
+    }
+    cache_set("global_market", out)
+    return out
+
+
+# --------------------------------------------------------------------------- #
+#  CoinGecko trending
+# --------------------------------------------------------------------------- #
+async def fetch_trending() -> list[dict[str, Any]]:
+    """Trending coins (top-7 most searched in last 24h on CoinGecko)."""
+    cached = cache_get("trending", ttl=180.0)
+    if cached is not None:
+        return cached
+    async with httpx.AsyncClient() as c:
+        data = await _get_json(c, f"{COINGECKO_BASE}/search/trending")
+    if not isinstance(data, dict):
+        return []
+    coins = data.get("coins") or []
+    out = []
+    for item in coins[:15]:
+        if not isinstance(item, dict):
+            continue
+        ic = item.get("item") or {}
+        out.append({
+            "id": ic.get("id"),
+            "name": ic.get("name"),
+            "symbol": (ic.get("symbol") or "").upper(),
+            "market_cap_rank": ic.get("market_cap_rank"),
+            "thumb": ic.get("thumb"),
+            "small": ic.get("small"),
+            "large": ic.get("large"),
+            "score": ic.get("score"),
+            "price_btc": ic.get("price_btc"),
+        })
+    cache_set("trending", out)
+    return out
+
+
+# --------------------------------------------------------------------------- #
+#  Fear & Greed Index (alternative.me — free, no key)
+# --------------------------------------------------------------------------- #
+async def fetch_fear_greed() -> dict[str, Any] | None:
+    cached = cache_get("fear_greed", ttl=300.0)
+    if cached is not None:
+        return cached
+    try:
+        async with httpx.AsyncClient() as c:
+            r = await c.get("https://api.alternative.me/fng/?limit=1", timeout=TIMEOUT)
+            if r.status_code != 200:
+                return None
+            data = r.json()
+        d = (data.get("data") or [{}])[0]
+        out = {
+            "value": int(d.get("value") or 0),
+            "classification": d.get("value_classification") or "Unknown",
+            "timestamp": d.get("timestamp"),
+        }
+        cache_set("fear_greed", out)
+        return out
+    except (httpx.HTTPError, ValueError, IndexError):
+        return None
+
+
+# --------------------------------------------------------------------------- #
+#  Top markets with extended price-change windows (for gainers/losers)
+# --------------------------------------------------------------------------- #
+async def fetch_top_markets_extended(per_page: int = 250) -> list[dict[str, Any]]:
+    """Fetch a larger market snapshot for gainers/losers/sector aggregation.
+
+    Cached for 90s. Returns the raw CoinGecko market objects (filtered to the
+    fields we need) so the caller can sort/aggregate as required.
+    """
+    cached = cache_get("markets_extended", ttl=90.0)
+    if cached is not None:
+        return cached
+    out: list[dict[str, Any]] = []
+    async with httpx.AsyncClient() as c:
+        data = await _get_json(
+            c,
+            f"{COINGECKO_BASE}/coins/markets",
+            vs_currency="usd",
+            order="market_cap_desc",
+            per_page=per_page,
+            page=1,
+            sparkline="false",
+            price_change_percentage="1h,24h,7d,30d",
+        )
+    if isinstance(data, list):
+        keep = (
+            "id", "symbol", "name", "image", "current_price", "market_cap",
+            "market_cap_rank", "total_volume", "high_24h", "low_24h",
+            "price_change_percentage_1h_in_currency",
+            "price_change_percentage_24h", "price_change_percentage_24h_in_currency",
+            "price_change_percentage_7d_in_currency",
+            "price_change_percentage_30d_in_currency",
+            "circulating_supply", "total_supply", "max_supply",
+            "ath", "ath_change_percentage", "atl", "atl_change_percentage",
+            "fully_diluted_valuation",
+        )
+        for m in data:
+            if not isinstance(m, dict):
+                continue
+            out.append({k: m.get(k) for k in keep})
+    cache_set("markets_extended", out)
+    return out

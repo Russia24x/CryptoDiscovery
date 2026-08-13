@@ -1272,3 +1272,198 @@ Stage Summary:
 - **Documentation**: README.md + DEVELOPMENT.md created (professional quality)
 - **Performance**: All benchmarks passing (page load <500ms, scan ~25s)
 - **Production readiness**: Code quality verified, documentation complete
+
+---
+Task ID: 1
+Agent: main (orchestrator)
+Task: Backend — add manual coin search, single-coin analysis, and comprehensive market intelligence endpoints to the Python FastAPI scanner service, plus a watchdog for reliability.
+
+Work Log:
+- Added in-memory TTL cache (cache_get/cache_set/cache_info) to data/sources.py with per-key TTLs (90-300s) to avoid hammering public APIs on repeated dashboard loads.
+- Added data source functions: search_coins (CoinGecko /search), fetch_global_market (/global), fetch_trending (/search/trending), fetch_fear_greed (alternative.me), fetch_top_markets_extended (250 coins with 1h/24h/7d/30d price changes).
+- Added 3 new endpoints to main.py:
+  - GET  /search?q=<query>           — CoinGecko coin search
+  - POST /analyze {gecko_id, persona, lang} — full 8-phase framework on a single coin, reuses evidence+analysis pipeline, stores report under "manual" bucket
+  - GET  /market/overview            — one-shot comprehensive snapshot: global stats, fear&greed, trending, top-50 coins, gainers/losers, top-50 DeFi protocols by TVL, top-30 fee generators, sector breakdown. All 6 upstream calls fire in parallel (asyncio.gather).
+- Updated /health to include cache stats.
+- Created scanner-watchdog.py — double-fork daemon that auto-restarts uvicorn if it crashes (same pattern as the Next.js watchdog).
+- Updated scanner-client.ts to support a per-call timeoutMs override (for /analyze=90s, /market/overview=60s).
+- Added Next.js proxy routes: /api/scanner/search, /api/scanner/analyze, /api/scanner/market/overview.
+
+Stage Summary:
+- Backend fully working and verified end-to-end through the Next.js proxy.
+- /search returns 25 results for "bitcoin"/"ethereum" in ~0.3s.
+- /market/overview returns 80KB JSON in ~1s (warm) / ~10s (cold) with: total mcap $2.27T, BTC dom 56.3%, Fear&Greed 29, 15 trending coins, top-50 coins, gainers/losers, top-50 DeFi protocols ($493B total TVL), top-30 fee generators, 7-sector breakdown.
+- /analyze successfully ran the full framework on Chainlink (LINK): 5 axes, quality score, action label, 98% confidence, 12KB report in 1.7s.
+- Scanner watchdog running; scanner auto-restarts if killed.
+- API contract for frontend subagents is stable and documented below.
+
+---
+Task ID: 3-b
+Agent: full-stack-developer (Market Intelligence)
+Task: Build a standalone React component at `/home/z/my-project/src/components/views/market-intelligence-view.tsx` that replaces the need to visit CoinMarketCap + DeFiLlama. Fetches `GET /api/scanner/market/overview` and renders a comprehensive crypto market overview with global banner, Fear & Greed gauge, DeFi TVL total, 7 tabbed data tables (Top Coins / Gainers / Losers / Trending / Top DeFi / Top Fees / Sectors), refresh button, and auto-updating cache age.
+
+Work Log:
+- Read `/home/z/my-project/worklog.md` to absorb project context (Task 1 backend built & verified the `/market/overview` endpoint returning: global stats, fear&greed, 15 trending, top-50 coins, gainers/losers, top-50 DeFi protocols, top-30 fee generators, 7-sector breakdown, ~80KB JSON in ~1s warm).
+- Inspected existing infrastructure:
+  - `src/lib/scanner-types.ts` — confirmed all 8 types are exported (`MarketOverview`, `GlobalMarketData`, `FearGreedData`, `TrendingCoin`, `TopCoin`, `TopDefiProtocol`, `TopFeeProtocol`, `SectorBreakdown`).
+  - `src/components/ui/*` — confirmed available shadcn components (card, button, badge, table, tabs, tooltip, skeleton, alert, separator, scroll-area, etc.) and inspected their exact prop signatures.
+  - `src/lib/i18n/LanguageProvider.tsx` — confirmed `useLanguage()` returns `t()` which returns the key path string when a translation is missing (so we built a `tt()` wrapper that falls back to an inline English default).
+  - `src/app/page.tsx` (lines 260-290) — inspected existing `fmtUsd`, `fmtPct`, `scoreColor`, `scoreBg` helpers and the `border-border/60 bg-card/40 backdrop-blur-sm` Card style convention.
+  - Verified the API live: `curl /api/scanner/market/overview` returned real data (mcap $2.27T, BTC dom 56.3%, Fear&Greed 29, etc.).
+- Created `/home/z/my-project/src/components/views/` directory (it didn't exist).
+- Wrote `market-intelligence-view.tsx` (~1100 lines, fully `"use client"`):
+  1. **Helpers**: `fmtUsd` (T/B/M/K with 4-decimal sub-$1 fallback), `fmtPrice` (token-price tuned), `fmtPct` (signed `+1.20%`), `fmtNum` (comma thousands), `pctColor` (emerald/rose/muted), `fearGreedTier` (5-tier color/label map matching the canonical F&G thresholds: 0-24 Extreme Fear rose, 25-44 Fear orange, 45-55 Neutral amber, 56-75 Greed lime, 76-100 Extreme Greed emerald).
+  2. **Hooks**: `useMarketOverview` (fetch with 60s AbortController timeout, separate `loading` vs `refreshing` states, structured error messages including AbortError); `useCacheAge` (parses `cached_at` ISO timestamp, re-ticks every 10s via setInterval); `formatAge` ("12s ago" / "3m 24s ago" / "1h 5m ago").
+  3. **Sub-components**:
+     - `StatCard` — 6-accent color variants (emerald/rose/amber/sky/teal/violet/default), icon chip + label + big tabular-nums value + sub-text, dedicated skeleton variant.
+     - `FearGreedGauge` — gradient bar (rose→orange→amber→lime→emerald) with absolutely-positioned circular marker + tick label row; tier badge in header; giant color-coded value number.
+     - `DefiTvlPanel` — teal headline number + protocol count.
+     - `CoinRow` — 8 columns (rank, name+image+symbol, price, mcap, volume, 24h/7d/30d %); clickable row + explicit "Analyze" button with Eye icon, both call `onAnalyzeCoin(coin.id, coin.name)`; uses Tooltip "Run framework analysis"; % changes color-coded with ArrowUpRight/ArrowDownRight glyphs.
+     - `TrendingRow` — rank, name+image+symbol, mkt-cap rank, price-btc; clickable same pattern.
+     - `DefiRow` — logo (with onError fallback to a 2-letter monogram badge), name+symbol, TVL (teal), chain badge (truncated), category badge (sky), external-link icon to `p.url`.
+     - `FeeRow` — name+symbol, 24h fees (foreground), 24h revenue (emerald), 30d fees (muted), category badge.
+     - `SectorsChart` — pure-CSS bar chart: top stacked proportional bar (each sector's % of total mcap, color-coded with 10-color palette, hover dims others, Tooltip shows name+value+%); below: per-sector horizontal bars with color swatch + label + bar + value + count+%.
+     - `CoinTable` / `TrendingTable` / `DefiTable` / `FeesTable` — wrappers with sticky `bg-muted/90 backdrop-blur-sm` headers, `max-h-[640px] overflow-auto`, empty-state.
+     - `LoadingView` — full skeleton (6 stat cards + 2 gauge panels + tabs + 8-row table skeleton).
+     - `ErrorView` — destructive Alert with AlertCircle icon + Retry button.
+  4. **Main `MarketIntelligenceView`** — wraps everything in a `TooltipProvider`; header row with Globe icon + title/subtitle (i18n via `tt()`) + cache-age text + Refresh button (spinning RefreshCw while refreshing); responsive `grid-cols-2 sm:grid-cols-3 lg:grid-cols-6` global stats grid; `md:grid-cols-2` for gauge+TVL; `Tabs` with 7 triggers (each with icon + count badge); each TabsContent is a Card with header + table.
+- Color discipline: NO indigo or blue as primary. Used emerald (positive), rose (negative), amber (neutral/warning), sky (info/category), teal (TVL/DeFi accent), violet (sectors), orange (Fear tier).
+- Responsive: stats grid collapses 6→3→2; gauge + TVL panel stack on mobile (`md:grid-cols-2`); TabsList wraps on narrow screens (`flex-wrap`); all tables have `overflow-auto` + `max-h-[640px]` for both horizontal & vertical scroll; tabular-nums everywhere for clean alignment.
+- Accessibility: every clickable coin row has `cursor-pointer`; the explicit "Analyze" button has a Tooltip "Run framework analysis" and `aria-label`s on external links; images have descriptive `alt={\`${coin.name} logo\`}` and `loading="lazy"`; StatCard icon chips are decorative.
+- i18n: All hardcoded English strings pass through `tt(key, fallback)` so Persian translations can be dropped into `en.json` / `fa.json` under `market.*` later without code changes.
+- Fixed two initial lint issues: (1) added missing `TooltipProvider` import (was using it as wrapper but not importing it); (2) removed 3 unused `eslint-disable-next-line @next/next/no-img-element` directives (the rule isn't enabled in this project, so the disables were flagged as unused).
+- Verified: `npx eslint src/components/views/market-intelligence-view.tsx` → exit 0 (clean, 0 warnings). `npx tsc --noEmit` → 0 errors in the new file (only pre-existing errors in unrelated `examples/` and `skills/` dirs). Dev server log shows `✓ Compiled in 243ms` after the file was created.
+
+Stage Summary:
+- File created: `/home/z/my-project/src/components/views/market-intelligence-view.tsx` (~1100 lines, single self-contained `"use client"` component).
+- Exports: named `MarketIntelligenceView` + default export — drop-in for the dashboard.
+- Props: `{ onAnalyzeCoin?: (geckoId: string, coinName: string) => void }` — every coin row in Top Coins / Gainers / Losers / Trending fires this callback (whole row clickable + explicit "Analyze" button with tooltip).
+- Data source: `GET /api/scanner/market/overview` (built & verified in Task 1) — fetched on mount with 60s timeout, manual refresh button, auto-ticking cache-age indicator (10s interval).
+- UI sections delivered (all 6 from the spec):
+  1. Global market banner — 6 responsive stat cards (mcap / 24h change / BTC dom / volume / active coins / markets).
+  2. Fear & Greed gauge — gradient bar + marker + tier badge + giant colored number.
+  3. DeFi TVL total — large teal headline + protocol count.
+  4. 7 tabbed tables — Top Coins (50), Gainers (10), Losers (10), Trending (15), Top DeFi (50), Top Fees (30), Sectors (7). Each tab shows live count badge. Sectors tab uses a CSS bar chart (stacked proportional bar + per-sector horizontal bars with hover-tooltips).
+  5. Refresh button + cache age — top-right, spinning icon while refreshing, "Updated Xs ago" auto-ticking every 10s.
+  6. Loading + error states — full skeleton grid for loading; destructive Alert with Retry button on fetch failure.
+- Quality bar met: production-ready (no TODOs), TypeScript strict (0 TS errors in file), lint clean (0 errors / 0 warnings in file), responsive (mobile-first 2-col → 6-col desktop), accessible (alt text, ARIA labels, tooltips, keyboard-reachable buttons), visually polished (information-dense but not cluttered, consistent card styling `border-border/60 bg-card/40 backdrop-blur-sm`, tabular-nums alignment, color-coded % changes).
+- Integration notes (for the agent wiring this into the dashboard):
+  - Import: `import { MarketIntelligenceView } from "@/components/views/market-intelligence-view";`
+  - Render: `<MarketIntelligenceView onAnalyzeCoin={(geckoId, name) => { /* switch to Coin Explorer with this coin */ }} />`
+  - The `onAnalyzeCoin` callback receives the CoinGecko `id` (e.g. "bitcoin") and the human-readable `name` (e.g. "Bitcoin") — matches the Coin Explorer's expected input shape (Task 3-a).
+  - No backend changes needed — the API contract from Task 1 is consumed as-is.
+
+---
+Task ID: 3-a
+Agent: full-stack-developer (Coin Explorer)
+Task: Build a standalone "Coin Explorer" React view component that lets the user search any cryptocurrency, pick a persona, and run the full 8-phase framework analysis on that single coin, displaying the resulting report inline.
+
+Work Log:
+- Read worklog.md to absorb project context (Next.js 16 + TS + Tailwind 4 + shadcn/ui dark-themed crypto analyst dashboard; existing ScoreRadial component at `@/components/dashboard/score-radial` with 5-tier color thresholds rose/orange/amber/lime/emerald at 0.40/0.55/0.70/0.85; existing `actionBadge()` colour mapping in `page.tsx` for action labels; `useLanguage` hook from `@/lib/i18n/LanguageProvider` returns the raw key string when translation missing — so I added a `tf()` helper that falls back to inline English if the key equals itself).
+- Inspected existing patterns: `scanner-types.ts` (FullReport + CoinSearchResult shapes; Persona union), `score-radial.tsx` (component prop conventions, color thresholds, animation pattern, `useId` for SVG ids), shadcn `card.tsx`, `button.tsx`, `badge.tsx`, `input.tsx`, `alert.tsx`, `progress.tsx`, `scroll-area.tsx`, `skeleton.tsx`, `tooltip.tsx`, `separator.tsx`, `select.tsx`, `LanguageProvider.tsx`, `package.json` (lucide-react ^0.525 available, framer-motion available but kept to pure CSS for performance).
+- Verified the API contract (already built by Task 1 agent): GET `/api/scanner/search?q=...` returns `{results: CoinSearchResult[]}`, POST `/api/scanner/analyze` body `{gecko_id, persona, lang}` returns full `FullReport`. Confirmed `/api/scanner/analyze/route.ts` has a 90s timeout and 504 on abort.
+- Created `/home/z/my-project/src/components/views/coin-explorer-view.tsx` (1362 lines):
+  - `"use client"` directive; named export `CoinExplorerView` AND default export.
+  - **Props**: `initialGeckoId?`, `onClearInitial?`, `onReport?` — all optional, all wired.
+  - **Helpers**: `fmtUsd` ($1.2B / $340M / $0.034 via K/M/B/T suffixes), `fmtPct` (with optional `+` sign), `scoreTextClass` (5-tier colour from 0–100 score), `actionBadgeClass` (mirrors existing `actionBadge()` mapping in `page.tsx`), `axisBarColor` (0–10 → emerald/lime/amber/orange/rose hex).
+  - **Search bar**: large input with `Search` icon, 300ms debounce via `useEffect` + `setTimeout`. Loader2 spinner while searching. Clear button when query is non-empty. Results dropdown is absolutely positioned under the input, wrapped in a Card with `bg-popover/95 backdrop-blur-md`. ScrollArea with `max-h-96 overflow-y-auto`. Click-outside + Escape key closes the dropdown (event listeners added/removed via useEffect). Skeleton loading state shows 3 placeholder rows. "No results" empty state with Frown icon.
+  - **Search result row**: 32px thumbnail (with letter-avatar fallback when no `thumb`), name (truncated), uppercase symbol Badge, market cap rank or "Not ranked", ArrowUpRight icon on hover. Whole row is a button (accessible, focusable).
+  - **Empty state** (no coin selected): centered Sparkles icon inside a glowing emerald gradient circle, headline + description, 3-step legend (Search → Persona → Analyze).
+  - **Selected coin panel**: 56px large image (with gradient ring + letter-avatar fallback), name, symbol badge, market cap rank. Persona selector as a 2-col/3-col responsive grid of 6 cards — each card shows label + description, gets emerald gradient border + dot indicator when active. Prominent full-width "Run 8-Phase Analysis" button with emerald→teal gradient background, 48px tall, Zap icon, hover glow shadow. Disabled state shows "Analyzing…" + Loader2 spinner.
+  - **Analyzing card**: full-card loading state with a custom animated radar-style spinner (two counter-rotating rings + Brain icon center). Cycles through 8 phase messages every 2.2s (configurable). Phase dots indicator shows current phase with a wider emerald bar. Progress bar uses a decelerating curve that asymptotically approaches 92% (gives motion sense without lying about actual %). "usually 5–30s" hint text.
+  - **Error card**: Alert (destructive variant) with custom rose colouring. Detects timeout/rate-limit patterns in the error message and shows a more specific message ("Analysis timed out — upstream API may be rate-limited"). Retry button calls `runAnalyze` again.
+  - **Report card**: rich summary with —
+    - Top accent bar coloured by score (emerald ≥70, amber ≥50, rose <50)
+    - 132px ScoreRadial for project_quality_score (reuses existing dashboard component for visual consistency) with label "Project Quality" / sublabel "out of 100"
+    - Action label badge (color-coded via `actionBadgeClass`), confidence %, token quality score, evidence grade
+    - Key link icon buttons: Website (Globe), Twitter (Twitter icon), GitHub, Block explorer (Crosshair) — wrapped in Tooltips, open in new tab with `rel="noopener noreferrer"`, auto-prepend `https://` if missing
+    - Valuation multiples tiles (P/R, P/F, P/T) with color tone by value (rose >50, amber >20, emerald otherwise), "N/A" when null
+    - 5 fundamental axes as compact list with horizontal score bars (colored by `axisBarColor`, glow shadow), score in matching color, key_reason as 2-line truncated hint
+    - Executive verdict paragraph
+    - Final thesis in a highlighted emerald-tinted blockquote with Quote icon
+    - Severe risks as rose badges (only shown if any present)
+    - Top 3 catalysts as a list with colored dot (emerald for positive, rose for negative) + eta
+    - "View Full Report" button (only rendered if `onReport` prop provided) — calls `onReport(report)`
+  - **initialGeckoId auto-load**: on mount, if `initialGeckoId` is set, fires a search using the gecko_id as the query, finds the exact `id` match (falls back to first result), and selects it. If search fails or returns nothing, synthesises a minimal CoinSearchResult from the gecko_id so the user can still run an analysis. Calls `onClearInitial()` once after consuming.
+  - **Cleanup**: AbortController on the analyze fetch; aborted on unmount, on coin deselect, and on retry. Prevents state updates after unmount.
+  - **i18n**: All user-facing strings go through `tf(key, fallback)` which uses the existing `useLanguage` `t()` and falls back to inline English when the key is missing. Used `explorer.*` namespace throughout. ~30 keys defined inline (searchPlaceholder, noResults, selectedCoin, personaTitle, runAnalysis, analyzing, analyzingTitle, reportTitle, projectQuality, confidence, tokenQuality, executiveVerdict, fiveAxes, severeRisks, catalysts, viewFullReport, etc.).
+  - **Responsive**: Mobile-first throughout. Search bar full-width. Persona grid is 2-col on mobile, 3-col on `sm+`. Report header stacks vertically on mobile (radial on top, badges/links below), goes side-by-side on `sm+`. Multiples always 3-col. Long lists use ScrollArea with `max-h-96`. All interactive elements ≥32px touch target.
+  - **Accessibility**: semantic HTML (h2/h3/h4 headings, blockquote for thesis, ul/li for lists), aria-labels on icon-only buttons, `role="alert"` via Alert component, Tooltip on every icon-only action, keyboard-navigable (button elements throughout, Escape closes search dropdown, focus-visible rings via shadcn defaults).
+  - **Color discipline**: NO indigo or blue as primary. Emerald/teal gradient on the Analyze button and accents. Amber/rose for warnings. Sky-500 ONLY for the "deep research" action badge (matches existing `actionBadge()` mapping in `page.tsx` — kept for consistency, not used as a primary accent).
+  - **Styling**: All cards use `border-border/60 bg-card/40 backdrop-blur-sm`. Secondary text uses `text-muted-foreground`. Hover states on every clickable element (row hover highlights, persona card hover border, link icon hover bg+text colour change).
+- Fixed lint issues:
+  - Initial run flagged `'Brain' is not defined` (lucide-react) — added `Brain` to the import list.
+  - Removed 3 unused `eslint-disable-next-line` directives (react-hooks/exhaustive-deps was no longer needed once I added `onClearInitial` to the deps array; the two `@next/next/no-img-element` directives weren't needed because the project's ESLint config doesn't flag `<img>` for this case).
+  - Final lint: **0 errors, 0 warnings** (clean). TypeScript check (`npx tsc --noEmit`): **0 errors** in this file.
+- Did NOT modify any existing files (only created the new view component + this worklog append).
+
+Stage Summary:
+- **Files created**:
+  - `/home/z/my-project/src/components/views/coin-explorer-view.tsx` (1362 lines) — production-ready "use client" React component with named + default export `CoinExplorerView`.
+- **Key design decisions**:
+  - **Reused the existing `ScoreRadial`** from `@/components/dashboard/score-radial` for the project quality score gauge — keeps visual consistency with the rest of the dashboard (same 5-tier color thresholds, same ring animation).
+  - **Mirrored the existing `actionBadge()` colour mapping** from `page.tsx` so the action label badge (High Conviction / Core / Small / Research / Watch / Ignore) renders in the same colours the user already sees in the scan results.
+  - **`tf()` translate-with-fallback helper** wraps the existing `useLanguage().t()` — the LanguageProvider returns the raw key path when no translation exists, so I detect that case (`val === key`) and return the inline English fallback. This means the component works correctly out of the box in English, and the next agent can add `explorer.*` keys to en.json/fa.json later without touching this file.
+  - **AbortController on the analyze fetch** — since `/api/scanner/analyze` can take 5–30s, the user might deselect the coin or trigger a retry mid-flight. The controller is stored in a ref and aborted on (a) unmount, (b) coin deselect, (c) retry, preventing dangling state updates.
+  - **Decelerating fake progress bar** in the loading card (asymptotically approaches 92%) — gives the user a sense of forward motion without lying about the actual completion %. The real "done" signal is the report arriving.
+  - **Two-ring radar spinner** (one CW, one CCW, different durations) instead of a plain Loader2 — feels more "premium fintech tool" and visually distinct from the small search spinner.
+  - **initialGeckoId auto-load with graceful degradation** — searches by the gecko_id, picks the exact `id` match, falls back to first result, then to a synthesised minimal CoinSearchResult (so the persona panel still works even if the search endpoint is unreachable).
+  - **Inline `<img>` instead of `next/image`** — coin thumbnails from CoinGecko are external and the project doesn't have `next.config.js` `remotePatterns` configured for them. The existing `page.tsx` uses the same pattern.
+- **Integration notes** (for the next agent that wires this into the dashboard):
+  - Drop into any route as `<CoinExplorerView initialGeckoId={x} onReport={openReportSheet} />`. When the parent's Market Intelligence view clicks "analyze" on a coin, it sets `initialGeckoId`; the Coin Explorer consumes it once and calls `onClearInitial`.
+  - When the user clicks "View Full Report" in the result card, `onReport(report)` is called with the full `FullReport` object — the parent can open its existing report Sheet/drawer with that data.
+  - All i18n keys use the `explorer.*` namespace. Add the following to `src/lib/i18n/en.json` and `fa.json` when ready: `explorer.searchPlaceholder`, `explorer.searchAria`, `explorer.clearSearch`, `explorer.searchFailed`, `explorer.noResults`, `explorer.rank`, `explorer.notRanked`, `explorer.emptyTitle`, `explorer.emptyDesc`, `explorer.step1`, `explorer.step2`, `explorer.step3`, `explorer.selectedCoin`, `explorer.deselectCoin`, `explorer.marketCapRank`, `explorer.unrankedCoin`, `explorer.personaTitle`, `explorer.analyzing`, `explorer.runAnalysis`, `explorer.analyzingTitle`, `explorer.phase`, `explorer.takesSeconds`, `explorer.errorTimeoutTitle`, `explorer.errorTitle`, `explorer.errorTimeoutDesc`, `explorer.retry`, `explorer.reportTitle`, `explorer.reportDesc`, `explorer.vetoTriggered`, `explorer.projectQuality`, `explorer.outOf100`, `explorer.confidence`, `explorer.tokenQuality`, `explorer.evidenceGrade`, `explorer.website`, `explorer.twitter`, `explorer.github`, `explorer.explorer`, `explorer.fiveAxes`, `explorer.executiveVerdict`, `explorer.severeRisks`, `explorer.catalysts`, `explorer.viewFullReport`, `explorer.readyToAnalyze`.
+- **Verification**: `bun run lint` → 0 errors, 0 warnings (clean). `npx tsc --noEmit` → 0 errors in this file. Component is ready to mount but has not yet been wired into `src/app/page.tsx` (parent task).
+
+
+---
+Task ID: 4
+Agent: main (orchestrator)
+Task: Integrate Coin Explorer and Market Intelligence views into page.tsx with main tab navigation, i18n translations, and cross-view wiring.
+
+Work Log:
+- Added imports for CoinExplorerView and MarketIntelligenceView to page.tsx.
+- Added mainView state ("discovery" | "explorer" | "market") and explorerInitialId state.
+- Added a pill-style tab bar below the header with 3 tabs: Discovery (emerald), Coin Explorer (amber), Market Intelligence (sky). Active tab has colored background + pulse indicator.
+- Wired Coin Explorer: onReport → setSelectedReport (opens existing ReportDetail sheet); initialGeckoId → auto-loads coin from Market Intelligence click; onClearInitial → resets.
+- Wired Market Intelligence: onAnalyzeCoin → sets explorerInitialId + switches to explorer tab (seamless cross-view flow).
+- Wrapped the existing discovery 2-column grid in {mainView === "discovery" && (...)} conditional.
+- Created src/lib/scanner-types.ts with shared FullReport, CoinSearchResult, MarketOverview, and all sub-types so view components are type-safe without coupling to page.tsx internals.
+- Added nav.* i18n keys (discovery/explorer/market) to en.json + fa.json.
+- Added explorer.* section (40 keys) and market.* section (50 keys) to both en.json and fa.json with full Persian translations.
+- Ran bun run lint — 0 errors, 0 warnings.
+
+Stage Summary:
+- Full integration complete. The app now has 3 main views accessible via a tab bar:
+  1. Discovery (original scan-based market scanning)
+  2. Coin Explorer (manual search → persona select → single-coin 8-phase analysis)
+  3. Market Intelligence (comprehensive CMC+DeFiLlama replacement: global stats, Fear&Greed, 7 tabbed tables)
+- Cross-view navigation works: click any coin in Market Intelligence → opens in Coin Explorer pre-loaded for analysis.
+- Full Persian (fa) i18n support for all new sections.
+- Browser QA via agent-browser confirmed: page loads, all 3 tabs work, search returns results, analysis produces full report, market data loads with real data (BTC $63.5K, mcap $2.27T, Fear&Greed 29, DeFi TVL $493B, etc.), cross-view click flow works, no runtime errors in logs.
+
+---
+Task ID: 5
+Agent: main (orchestrator)
+Task: Final QA, visual verification, and engineering review.
+
+Work Log:
+- Used agent-browser to verify the full user flow end-to-end:
+  1. Page loads with 3 tabs (دیسکاوری / کاوش ارز / هوش بازار) ✓
+  2. Coin Explorer: typed "chainlink" → 25 results with logos/ranks ✓ → clicked Chainlink → persona grid appeared ✓ → clicked "Run 8-Phase Analysis" → full report rendered (quality 22/100, confidence 98%, 5 axes, valuation multiples, links) ✓
+  3. Market Intelligence: global stats (mcap $2.27T, BTC dom 56.25%, volume $51.86B, 18,404 coins), Fear&Greed gauge (29=Fear), DeFi TVL $493.20B, 7 tabs all populated with real data ✓
+  4. Cross-view: clicked "Analyze" on Bitcoin in Top Coins table → switched to Coin Explorer with Bitcoin pre-selected (rank #1) ✓
+  5. Top DeFi tab: 50 protocols (Binance CEX $138.80B, OKX $26.20B, Lido $17.74B...) with logos, chains, categories, external links ✓
+  6. Sectors tab: bar chart with 7 sectors (Payments/Stablecoins $1.55T/68.8%, Other $450.67B/20.1%, L1/L2 $238.48B...) ✓
+- Used VLM (z-ai vision) to analyze screenshots: confirmed professional dark-theme glassmorphism UI, high contrast, clean icons, proper RTL layout for Persian.
+- Checked dev.log and scanner.log: zero errors, all API calls returning 200, market overview served from cache in ~700ms.
+- Scanner watchdog running; scanner auto-restarts if killed.
+
+Stage Summary:
+- The system is fully functional and production-ready. All user-requested features are implemented and verified:
+  - Manual coin search & selection with multiple personas ✓
+  - Comprehensive market intelligence replacing CoinMarketCap + DeFiLlama ✓
+  - Full UI/UX output with Persian + English i18n ✓
+  - Engineering improvements: TTL caching, watchdog, per-call timeouts, shared types, clean architecture ✓
+- No unresolved issues. Ready for the scheduled maintenance cron.

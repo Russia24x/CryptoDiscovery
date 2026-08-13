@@ -31,6 +31,7 @@ from models.schemas import (
     ScanStatus,
 )
 from framework import analysis, discovery, evidence
+from data import sources
 
 # --------------------------------------------------------------------------- #
 #  Logging
@@ -92,6 +93,7 @@ async def health():
         "framework_version": "1.0.0",
         "scans_total": len(SCANS),
         "reports_total": len(REPORTS),
+        "cache": sources.cache_info(),
         "timestamp": datetime.now(timezone.utc).isoformat(),
     }
 
@@ -307,6 +309,203 @@ async def _run_scan(scan_id: str):
         progress.status = ScanStatus.FAILED
         progress.error = str(exc)
         progress.finished_at = datetime.now(timezone.utc)
+
+
+# --------------------------------------------------------------------------- #
+#  Manual coin search & single-coin analysis (Coin Explorer)
+# --------------------------------------------------------------------------- #
+@app.get("/search")
+async def search_coins(q: str = ""):
+    """Search coins by name/symbol via CoinGecko."""
+    results = await sources.search_coins(q)
+    return {"query": q, "count": len(results), "results": results}
+
+
+class AnalyzeRequest(BaseModel):
+    gecko_id: str
+    persona: Persona = Persona.INVESTOR
+    lang: str = "en"
+
+
+@app.post("/analyze")
+async def analyze_single_coin(req: AnalyzeRequest):
+    """Run the full 8-phase framework on a single coin selected by gecko_id.
+
+    Reuses the same evidence + analysis pipeline as a scan, but for one coin.
+    The resulting report is stored like any other and can be opened in the
+    project detail view.
+    """
+    if not req.gecko_id:
+        raise HTTPException(400, "gecko_id is required")
+    log.info("Manual analyze: %s (persona=%s, lang=%s)", req.gecko_id, req.persona.value, req.lang)
+
+    # Build a CandidateInfo from the CoinGecko coin detail
+    detail = await sources.fetch_coin_detail(req.gecko_id)
+    if not detail:
+        raise HTTPException(404, f"coin '{req.gecko_id}' not found on CoinGecko (may be rate-limited)")
+
+    from models.schemas import CandidateInfo
+    md = detail.get("market_data") or {}
+    links = detail.get("links") or {}
+    name = detail.get("name") or req.gecko_id
+    symbol = (detail.get("symbol") or req.gecko_id).upper()
+    market_cap = (md.get("market_cap") or {}).get("usd") or 0.0
+    img_data = detail.get("image") or {}
+
+    # Infer category using the discovery helper
+    category = discovery._guess_category({"name": name}, symbol)  # type: ignore[attr-defined]
+
+    # Match DeFiLlama + fees for this symbol
+    llama_protos = await sources.fetch_defillama_protocols()
+    fees_list = await sources.fetch_fees_overview()
+    llama_entry = sources.match_llama_protocol(symbol, name, llama_protos)
+    # fees match by symbol then name
+    fees_entry = None
+    for f in fees_list:
+        if (f.get("symbol") or "").upper() == symbol:
+            fees_entry = f
+            break
+    if not fees_entry:
+        nm = name.lower()
+        for f in fees_list:
+            fname = (f.get("name") or "").lower()
+            if fname and (fname == nm or fname.startswith(nm + " ") or nm.startswith(fname + " ")):
+                fees_entry = f
+                break
+
+    cand = CandidateInfo(
+        name=name,
+        symbol=symbol,
+        category=category,
+        sector=discovery._sector_for(category),  # type: ignore[attr-defined]
+        description=discovery._short_description(  # type: ignore[attr-defined]
+            {"market_cap": market_cap,
+             "price_change_percentage_24h": md.get("price_change_percentage_24h")},
+            llama_entry,
+        ),
+        key_signal=discovery._describe_signal(fees_entry, llama_entry, category),  # type: ignore[attr-defined]
+        initial_priority="Manual",
+        gecko_id=req.gecko_id,
+        llama_id=llama_entry.get("slug") if llama_entry else None,
+        image=img_data.get("large") or img_data.get("small") if isinstance(img_data, dict) else None,
+        website=(links.get("homepage") or [None])[0] if links else None,
+        twitter=links.get("twitter_screen_name") if links else None,
+        github=((links.get("repos_url") or {}).get("github") or [None])[0] if links else None,
+        discord=(links.get("chat_url") or [None])[0] if links else None,
+        blockchain_explorer=((links.get("blockchain_site") or [None])[0]) if links else None,
+    )
+
+    ev = await evidence.collect(cand, llama_overview=llama_entry, fees_overview=fees_entry)
+    config = ScanConfig(persona=req.persona, lang=req.lang)
+    report = analysis.build_report(cand, ev, config, scan_id="manual")
+    REPORTS[report.id] = report
+    # Also track under a synthetic "manual" bucket so /scans doesn't break
+    if "manual" not in SCAN_REPORT_IDS:
+        SCAN_REPORT_IDS["manual"] = []
+    SCAN_REPORT_IDS["manual"].append(report.id)
+    log.info("Manual analyze complete: %s -> report %s", symbol, report.id)
+    return report.model_dump(mode="json")
+
+
+# --------------------------------------------------------------------------- #
+#  Market Intelligence — comprehensive overview (replaces CMC + DeFiLlama visits)
+# --------------------------------------------------------------------------- #
+@app.get("/market/overview")
+async def market_overview():
+    """One-shot comprehensive market snapshot.
+
+    Returns: global stats, trending coins, top coins by mcap, biggest
+    gainers & losers (24h), top DeFi protocols by TVL, top fee-generating
+    protocols, sector breakdown, and the fear & greed index.
+
+    All upstream calls are cached (90-300s) so repeated dashboard loads are
+    fast and don't hammer public APIs.
+    """
+    # Fire all independent fetches in parallel
+    import asyncio as _aio
+    results = await _aio.gather(
+        sources.fetch_global_market(),
+        sources.fetch_trending(),
+        sources.fetch_top_markets_extended(per_page=250),
+        sources.fetch_defillama_protocols(),
+        sources.fetch_fees_overview(),
+        sources.fetch_fear_greed(),
+        return_exceptions=True,
+    )
+    global_data = results[0] if isinstance(results[0], dict) else None
+    trending = results[1] if isinstance(results[1], list) else []
+    markets = results[2] if isinstance(results[2], list) else []
+    defi_protos = results[3] if isinstance(results[3], list) else []
+    fees_list = results[4] if isinstance(results[4], list) else []
+    fng = results[5] if isinstance(results[5], dict) else None
+
+    # Top coins (first 50 by market cap)
+    top_coins = markets[:50]
+
+    # Gainers & losers by 24h change
+    with_change = [
+        m for m in markets
+        if m.get("price_change_percentage_24h_in_currency") is not None
+        and m.get("market_cap")
+    ]
+    gainers = sorted(with_change, key=lambda x: x["price_change_percentage_24h_in_currency"], reverse=True)[:10]
+    losers = sorted(with_change, key=lambda x: x["price_change_percentage_24h_in_currency"])[:10]
+
+    # Top DeFi protocols by TVL (already sorted by DeFiLlama)
+    top_defi = []
+    for p in defi_protos[:50]:
+        top_defi.append({
+            "name": p.get("name"),
+            "symbol": (p.get("symbol") or "").upper(),
+            "slug": p.get("slug"),
+            "tvl": p.get("tvl"),
+            "chain": p.get("chain"),
+            "category": p.get("category"),
+            "logo": p.get("logo") or p.get("icon"),
+            "url": p.get("url"),
+            "twitter": p.get("twitter"),
+            "github": p.get("github"),
+            "audit_links": p.get("audit_links") or [],
+        })
+
+    # Top fee-generating protocols (24h)
+    fees_with_data = [f for f in fees_list if (f.get("fees_24h") or 0) > 0]
+    fees_with_data.sort(key=lambda x: x.get("fees_24h") or 0, reverse=True)
+    top_fees = fees_with_data[:30]
+
+    # Sector breakdown (aggregate market cap by inferred sector)
+    sector_map: dict[str, dict] = {}
+    for m in markets:
+        if not m.get("market_cap"):
+            continue
+        sym = (m.get("symbol") or "").upper()
+        cat = discovery._guess_category(m, sym)  # type: ignore[attr-defined]
+        sector = discovery._sector_for(cat)  # type: ignore[attr-defined]
+        if sector not in sector_map:
+            sector_map[sector] = {"sector": sector, "count": 0, "total_market_cap": 0.0, "total_volume": 0.0}
+        sector_map[sector]["count"] += 1
+        sector_map[sector]["total_market_cap"] += m.get("market_cap") or 0
+        sector_map[sector]["total_volume"] += m.get("total_volume") or 0
+    sectors = sorted(sector_map.values(), key=lambda x: x["total_market_cap"], reverse=True)
+
+    # Aggregate DeFi TVL
+    defi_tvl = sum((p.get("tvl") or 0) for p in defi_protos)
+
+    return {
+        "global": global_data,
+        "fear_greed": fng,
+        "trending": trending,
+        "top_coins": top_coins,
+        "gainers": gainers,
+        "losers": losers,
+        "top_defi": top_defi,
+        "top_fees": top_fees,
+        "sectors": sectors,
+        "defi_tvl_total": defi_tvl,
+        "coin_count": len(markets),
+        "defi_protocol_count": len(defi_protos),
+        "cached_at": datetime.now(timezone.utc).isoformat(),
+    }
 
 
 if __name__ == "__main__":

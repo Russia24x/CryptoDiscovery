@@ -8,9 +8,14 @@ const SCANNER_PORT = "3003";
 const SCANNER_BASE = "http://localhost:3003";
 const DEFAULT_TIMEOUT_MS = 30000; // 30s timeout for all scanner requests
 
+export interface ScannerFetchInit extends RequestInit {
+  /** Override the default 30s timeout for slow endpoints (e.g. /analyze, /market/overview). */
+  timeoutMs?: number;
+}
+
 export async function scannerFetch(
   path: string,
-  init?: RequestInit,
+  init?: ScannerFetchInit,
 ): Promise<Response> {
   const url = path.includes("?")
     ? `${SCANNER_BASE}${path}${path.includes("XTransformPort") ? "" : "&XTransformPort=" + SCANNER_PORT}`
@@ -18,7 +23,8 @@ export async function scannerFetch(
 
   // Use AbortController for timeout
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), DEFAULT_TIMEOUT_MS);
+  const timeoutMs = init?.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
   try {
     const res = await fetch(url, {
@@ -39,7 +45,7 @@ export async function scannerFetch(
 
 export async function scannerJson<T = unknown>(
   path: string,
-  init?: RequestInit,
+  init?: ScannerFetchInit,
 ): Promise<T> {
   const res = await scannerFetch(path, init);
   if (!res.ok) {
