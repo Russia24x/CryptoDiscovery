@@ -295,9 +295,9 @@ function ArticleCard({ article }: { article: NewsArticle }) {
           )}
           {article.categories.length > 0 && (
             <div className="flex flex-wrap gap-1 pt-1">
-              {article.categories.slice(0, 3).map((c) => (
+              {article.categories.slice(0, 3).map((c, i) => (
                 <span
-                  key={c}
+                  key={`${c}-${i}`}
                   className="rounded bg-muted/60 px-1.5 py-0.5 text-[10px] text-muted-foreground"
                   dir="auto"
                 >

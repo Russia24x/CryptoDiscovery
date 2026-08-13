@@ -2885,8 +2885,8 @@ function ReportDetail({
             </div>
             {report.peer_benchmark.closest_comparables.length > 0 && (
               <div className="flex items-center gap-1 flex-wrap mt-1.5">
-                {report.peer_benchmark.closest_comparables.map((c) => (
-                  <Badge key={c} variant="outline" className="text-[10px]">{c}</Badge>
+                {report.peer_benchmark.closest_comparables.map((c, i) => (
+                  <Badge key={`${c}-${i}`} variant="outline" className="text-[10px]">{c}</Badge>
                 ))}
               </div>
             )}
