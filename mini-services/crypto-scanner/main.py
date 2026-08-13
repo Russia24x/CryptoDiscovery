@@ -15,7 +15,7 @@ import asyncio
 import logging
 import uuid
 from contextlib import asynccontextmanager
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 
 from fastapi import FastAPI, HTTPException
@@ -91,7 +91,7 @@ async def health():
         "framework_version": "1.0.0",
         "scans_total": len(SCANS),
         "reports_total": len(REPORTS),
-        "timestamp": datetime.utcnow().isoformat(),
+        "timestamp": datetime.now(timezone.utc).isoformat(),
     }
 
 
@@ -114,7 +114,7 @@ async def start_scan(req: ScanRequest):
         current_phase=ScanPhase.DISCOVERY,
         progress_pct=0.0,
         config=config,
-        started_at=datetime.utcnow(),
+        started_at=datetime.now(timezone.utc),
     )
     SCANS[scan_id] = progress
     SCAN_REPORT_IDS[scan_id] = []
@@ -247,7 +247,7 @@ async def _run_scan(scan_id: str):
         if not candidates:
             progress.status = ScanStatus.COMPLETED
             progress.current_phase = ScanPhase.DONE
-            progress.finished_at = datetime.utcnow()
+            progress.finished_at = datetime.now(timezone.utc)
             progress.phase_log.append("No candidates discovered.")
             return
 
@@ -293,7 +293,7 @@ async def _run_scan(scan_id: str):
         progress.progress_pct = 100.0
         progress.current_phase = ScanPhase.DONE
         progress.status = ScanStatus.COMPLETED
-        progress.finished_at = datetime.utcnow()
+        progress.finished_at = datetime.now(timezone.utc)
         progress.phase_log.append("Scan complete.")
         log.info("Scan %s complete: %d reports", scan_id, len(SCAN_REPORT_IDS[scan_id]))
 
@@ -301,7 +301,7 @@ async def _run_scan(scan_id: str):
         log.exception("Scan %s failed: %s", scan_id, exc)
         progress.status = ScanStatus.FAILED
         progress.error = str(exc)
-        progress.finished_at = datetime.utcnow()
+        progress.finished_at = datetime.now(timezone.utc)
 
 
 if __name__ == "__main__":

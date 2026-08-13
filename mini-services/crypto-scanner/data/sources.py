@@ -46,7 +46,7 @@ async def _get_json(client: httpx.AsyncClient, url: str, **params: Any) -> Any:
             log.warning("GET %s -> %s", url, r.status_code)
             return None
         return r.json()
-    except Exception as exc:  # noqa: BLE001
+    except (httpx.HTTPError, ValueError) as exc:  # network errors + JSON decode errors
         log.warning("GET %s failed: %s", url, exc)
         return None
 
@@ -68,12 +68,6 @@ async def fetch_defillama_protocols() -> list[dict[str, Any]]:
     for p in data:
         slim.append({k: p.get(k) for k in keep})
     return slim
-
-
-async def fetch_protocol_detail(slug: str) -> dict[str, Any] | None:
-    """Per-protocol TVL history & metadata."""
-    async with httpx.AsyncClient() as c:
-        return await _get_json(c, f"{DEFILLAMA_BASE}/protocol/{slug}")
 
 
 async def fetch_fees_overview() -> list[dict[str, Any]]:
@@ -112,31 +106,6 @@ async def fetch_fees_overview() -> list[dict[str, Any]]:
             "chains": p.get("chains", []),
         })
     return slim
-
-
-async def fetch_protocol_fees(slug: str) -> dict[str, Any] | None:
-    """Detailed fees/revenue breakdown for one protocol."""
-    async with httpx.AsyncClient() as c:
-        return await _get_json(c, f"{DEFILLAMA_FEES}/{slug}")
-
-
-# --------------------------------------------------------------------------- #
-#  DexScreener — free alternative API for token prices/volume (no key needed)
-# --------------------------------------------------------------------------- #
-DEXSCREENER_BASE = "https://api.dexscreener.com/latest/dex"
-
-async def fetch_dexscreener_token(symbol: str) -> dict[str, Any] | None:
-    """Fetch token data from DexScreener as a fallback for CoinGecko."""
-    async with httpx.AsyncClient() as c:
-        data = await _get_json(c, f"{DEXSCREENER_BASE}/search", q=symbol)
-    if not isinstance(data, dict):
-        return None
-    pairs = data.get("pairs") or []
-    if not pairs:
-        return None
-    # Return the first pair with the most liquidity
-    pairs.sort(key=lambda p: float(p.get("liquidity", {}).get("usd") or 0), reverse=True)
-    return pairs[0] if pairs else None
 
 
 # --------------------------------------------------------------------------- #
@@ -204,22 +173,4 @@ def match_llama_protocol(
             return p
         if nm and pname and (nm in pname or pname in nm):
             return p
-    return None
-
-
-def match_fees_protocol(
-    llama_slug: str | None,
-    llama_name: str | None,
-    fees_list: list[dict[str, Any]],
-) -> dict[str, Any] | None:
-    if llama_slug:
-        for f in fees_list:
-            if f.get("slug") == llama_slug or f.get("id") == llama_slug:
-                return f
-    if llama_name:
-        n = llama_name.lower()
-        for f in fees_list:
-            fn = (f.get("name") or "").lower()
-            if fn and (fn == n or n in fn or fn in n):
-                return f
     return None

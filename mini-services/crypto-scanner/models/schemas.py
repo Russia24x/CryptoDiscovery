@@ -4,7 +4,7 @@ Mirrors the 8-phase framework structure.
 """
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
 from typing import Any, Optional
 
@@ -28,7 +28,7 @@ class ScanConfig(BaseModel):
     market_cap_max: float = 1_000_000.0  # effectively unbounded
     sectors: list[str] = Field(default_factory=list)  # empty = all
     max_projects: int = 20
-    data_cutoff: datetime = Field(default_factory=datetime.utcnow)
+    data_cutoff: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
 # --------------------------------------------------------------------------- #

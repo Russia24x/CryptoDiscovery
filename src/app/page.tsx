@@ -761,8 +761,19 @@ export default function Home() {
       r.veto ? "Yes" : "No",
       r.image || "",
     ]);
+    // Escape CSV cells: prevent formula injection (= + - @) and quote escaping
+    const escapeCsvCell = (val: unknown): string => {
+      let s = String(val ?? "");
+      // Prevent formula injection: prefix dangerous chars with single quote
+      if (/^[=+\-@]/.test(s)) {
+        s = "'" + s;
+      }
+      // Escape double quotes by doubling them
+      s = s.replace(/"/g, '""');
+      return `"${s}"`;
+    };
     const csv = [headers, ...rows]
-      .map((row) => row.map((cell) => `"${String(cell).replace(/"/g, '""')}"`).join(","))
+      .map((row) => row.map(escapeCsvCell).join(","))
       .join("\n");
     const blob = new Blob([csv], { type: "text/csv" });
     const url = URL.createObjectURL(blob);

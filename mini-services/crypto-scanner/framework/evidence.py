@@ -329,21 +329,6 @@ def _apply_fees_overview(b: EvidenceBundle, f: dict[str, Any]) -> None:
         b.unclear_token_value_capture = False
 
 
-def _apply_fees_detail(b: EvidenceBundle, f: dict[str, Any]) -> None:
-    """Apply detailed fees breakdown (when available — richer fields)."""
-    _apply_fees_overview(b, f)
-    total = f.get("totalDataChart") or f.get("totalDataChartUSD") or []
-    breakdowns = f.get("breakdowns") or []
-    if breakdowns:
-        b.tokenomics.value_capture = "moderate"
-        b.unclear_token_value_capture = False
-    if total and isinstance(total, list) and len(total) > 30:
-        recent = total[-1][1] if isinstance(total[-1], list) else 0
-        month_ago = total[-30][1] if isinstance(total[-30], list) else 0
-        if month_ago > 0:
-            b.economic.net_revenue = recent - month_ago
-
-
 # --------------------------------------------------------------------------- #
 #  Category-driven inferences
 # --------------------------------------------------------------------------- #

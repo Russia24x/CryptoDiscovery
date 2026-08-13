@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
 from models.schemas import (
@@ -53,7 +53,7 @@ def build_report(
     config: ScanConfig,
     scan_id: str,
 ) -> ProjectReport:
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
 
     # --- PHASE 2: Veto gates ---
     veto = evaluate_vetoes(
@@ -472,9 +472,11 @@ def _build_catalysts(ev: EvidenceBundle, cycle: CyclePhase) -> list[Catalyst]:
 def _build_thesis(c: CandidateInfo, ev: EvidenceBundle, cycle: CyclePhase) -> str:
     rail = "infrastructure" if ev.is_infrastructure else "application"
     rev_part = "with real fee/revenue generation" if (ev.economic.revenue or 0) > 0 else "pre-revenue"
+    sector_lower = (c.sector or "").lower()
+    position = "inside" if ev.is_infrastructure else "adjacent to"
     return (
-        f"If on-chain {c.seector_lower()} activity grows, then {c.name} ({c.symbol}) "
-        f"{rail} demand should increase, because it sits {ev.position_phrase()} "
+        f"If on-chain {sector_lower} activity grows, then {c.name} ({c.symbol}) "
+        f"{rail} demand should increase, because it sits {position} "
         f"the transaction/liquidity rail {rev_part}."
     )
 
@@ -565,22 +567,6 @@ def _data_to_verify(ev: EvidenceBundle) -> list[str]:
     if ev.regulatory_uncertainty:
         out.append("Regulatory status — verify jurisdiction & licenses.")
     return out or ["All key data points have at least secondary evidence."]
-
-
-# --------------------------------------------------------------------------- #
-#  Monkey-patches for thesis templating (kept tiny & local)
-# --------------------------------------------------------------------------- #
-def _sector_lower(self) -> str:
-    return (self.sector or "").lower()
-
-
-def _position_phrase(self) -> str:
-    return "inside" if self.is_infrastructure else "adjacent to"
-
-
-# attach helpers to CandidateInfo / EvidenceBundle at import time
-CandidateInfo.seector_lower = _sector_lower  # type: ignore[attr-defined]
-EvidenceBundle.position_phrase = _position_phrase  # type: ignore[attr-defined]
 
 
 # --------------------------------------------------------------------------- #
