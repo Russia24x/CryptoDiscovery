@@ -46,7 +46,9 @@
     "developer": "Developer",
     "developerDesc": "Integration & DX focus",
     "trader": "Trader",
-    "traderDesc": "Momentum & catalysts focus"
+    "traderDesc": "Momentum & catalysts focus",
+    "comprehensive": "Comprehensive",
+    "comprehensiveDesc": "Balanced across all axes"
   },
   "sectors": {
     "DeFi": "DeFi",

@@ -56,6 +56,13 @@ PERSONA_WEIGHTS: dict[Persona, dict[str, float]] = {
         "Invisible Utility": 0.15,
         "Governance / Legal / Security": 0.15,
     },
+    Persona.COMPREHENSIVE: {
+        "Economic Engine": 0.22,
+        "Moat": 0.22,
+        "Governance / Legal / Security": 0.20,
+        "Invisible Utility": 0.18,
+        "Token & Market Structure": 0.18,
+    },
 }
 
 

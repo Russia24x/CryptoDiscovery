@@ -46,7 +46,9 @@
     "developer": "توسعه‌دهنده",
     "developerDesc": "تمرکز بر یکپارچه‌سازی و DX",
     "trader": "معامله‌گر",
-    "traderDesc": "تمرکز بر مومنتوم و کاتالیزورها"
+    "traderDesc": "تمرکز بر مومنتوم و کاتالیزورها",
+    "comprehensive": "جامع",
+    "comprehensiveDesc": "متعادل در تمام محورها"
   },
   "sectors": {
     "DeFi": "دی‌فای",

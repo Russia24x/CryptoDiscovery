@@ -93,7 +93,7 @@ import { cn } from "@/lib/utils";
 // --------------------------------------------------------------------------- //
 //  Types (mirror the Python schemas)
 // --------------------------------------------------------------------------- //
-type Persona = "researcher" | "investor" | "institutional" | "developer" | "trader";
+type Persona = "researcher" | "investor" | "institutional" | "developer" | "trader" | "comprehensive";
 
 interface ScanSummaryItem {
   id: string;
@@ -373,6 +373,7 @@ const AXIS_ICONS: Record<string, typeof Brain> = {
 };
 
 const PERSONAS: { value: Persona; label: string; desc: string }[] = [
+  { value: "comprehensive", label: "Comprehensive", desc: "Balanced across all axes" },
   { value: "investor", label: "Investor", desc: "Revenue & valuation focus" },
   { value: "institutional", label: "Institutional", desc: "Risk, legal & moat focus" },
   { value: "researcher", label: "Researcher", desc: "Tech & architecture focus" },
@@ -1098,8 +1099,8 @@ export default function Home() {
                       {PERSONAS.map((p) => (
                         <SelectItem key={p.value} value={p.value}>
                           <div className="flex flex-col">
-                            <span className="text-sm font-medium">{p.label}</span>
-                            <span className="text-[10px] text-muted-foreground">{p.desc}</span>
+                            <span className="text-sm font-medium">{t(`personas.${p.value}`)}</span>
+                            <span className="text-[10px] text-muted-foreground">{t(`personas.${p.value}Desc`)}</span>
                           </div>
                         </SelectItem>
                       ))}
@@ -1315,7 +1316,7 @@ export default function Home() {
                             <ScanStatusBadge status={s.status} />
                           </div>
                           <div className="flex items-center justify-between mt-1.5">
-                            <span className="text-[11px] capitalize">{s.persona}</span>
+                            <span className="text-[11px] capitalize">{t(`personas.${s.persona}`)}</span>
                             <span className="text-[11px] text-muted-foreground">{s.processed}/{s.total}</span>
                           </div>
                           <Progress value={s.progress} className="h-1 mt-1.5" />
@@ -1478,13 +1479,13 @@ export default function Home() {
                   {viewMode === "grid" && (
                     <div className="flex items-center gap-2 flex-wrap">
                       <div className="relative flex-1 min-w-[160px]">
-                        <Filter className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+                        <Filter className="absolute start-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
                         <Input
                           ref={searchInputRef}
                           placeholder={t("results.searchPlaceholder")}
                           value={searchQuery}
                           onChange={(e) => setSearchQuery(e.target.value)}
-                          className="h-8 pl-8 text-xs"
+                          className="h-8 ps-8 text-xs"
                         />
                       </div>
                       <Select value={sortBy} onValueChange={(v) => setSortBy(v as typeof sortBy)}>
@@ -2036,7 +2037,7 @@ function ScanProgressCard({ scan, onRefresh, scanning }: { scan: ScanStatus; onR
             <CardTitle className="flex items-center gap-2 text-sm">
               <FlaskConical className="h-4 w-4 text-emerald-500" />
               Scan {scan.scan_id.slice(0, 12)}
-              <Badge variant="outline" className="ml-1 text-[10px] capitalize">{scan.config.persona}</Badge>
+              <Badge variant="outline" className="ml-1 text-[10px] capitalize">{t(`personas.${scan.config.persona}`)}</Badge>
             </CardTitle>
             <CardDescription className="text-xs mt-1 font-mono">
               {scan.current_phase} · {scan.processed}/{scan.total_candidates} processed
@@ -2149,10 +2150,10 @@ function ProjectCard({
       )}
     >
       {/* score accent bar */}
-      <div className={cn("absolute top-0 left-0 right-0 h-0.5", scoreBg(report.project_quality))} />
+      <div className={cn("absolute top-0 inset-x-0 h-0.5", scoreBg(report.project_quality))} />
 
       {/* Watchlist star (always visible) */}
-      <div className="absolute top-2 right-2 z-10">
+      <div className="absolute top-2 end-2 z-10">
         <button
           onClick={(e) => {
             e.stopPropagation();
@@ -2170,7 +2171,7 @@ function ProjectCard({
       </div>
 
       {compareMode && (
-        <div className="absolute top-2 right-9 z-10">
+        <div className="absolute top-2 end-9 z-10">
           <button
             onClick={(e) => {
               e.stopPropagation();
@@ -2231,7 +2232,7 @@ function ProjectCard({
             {report.category}
           </Badge>
           {/* Social links */}
-          <div className="flex items-center gap-0.5 ml-auto">
+          <div className="flex items-center gap-0.5 ms-auto">
             {report.website && (
               <a
                 href={report.website}
@@ -3603,7 +3604,7 @@ function HistoryView({
                 <div className="min-w-0">
                   <div className="flex items-center gap-2">
                     <span className="font-mono text-xs text-muted-foreground">{stat.scan.scan_id.slice(0, 12)}</span>
-                    <Badge variant="outline" className="text-[10px] capitalize">{stat.scan.config.persona}</Badge>
+                    <Badge variant="outline" className="text-[10px] capitalize">{t(`personas.${stat.scan.config.persona}`)}</Badge>
                   </div>
                   <div className="text-[10px] text-muted-foreground mt-0.5">
                     {new Date(stat.scan.started_at).toLocaleString()}
@@ -3774,13 +3775,13 @@ function GlobalSearchView({
           Search for projects by name, symbol, or category across all completed scans
         </SheetDescription>
         <div className="relative mt-2">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+          <Search className="absolute start-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
           <Input
             ref={inputRef}
             placeholder={t("search.placeholder")}
             value={query}
             onChange={(e) => onQueryChange(e.target.value)}
-            className="h-10 pl-10 text-sm"
+            className="h-10 ps-10 text-sm"
           />
           {loading && (
             <Loader2 className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 animate-spin text-muted-foreground" />

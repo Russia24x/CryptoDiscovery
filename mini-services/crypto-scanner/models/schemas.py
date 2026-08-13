@@ -20,6 +20,7 @@ class Persona(str, Enum):
     INSTITUTIONAL = "institutional"
     DEVELOPER = "developer"
     TRADER = "trader"
+    COMPREHENSIVE = "comprehensive"  # جامع — balanced across all axes
 
 
 class ScanConfig(BaseModel):
