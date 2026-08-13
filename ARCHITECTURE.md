@@ -248,6 +248,38 @@ POST /analyze  (Python)
 
 **Composite signal** = مجموع ۵ لنز. اولویت: High (≥۵۰)، Medium (≥۲۵)، Low (<۲۵).
 
+### PHASE 3: Evidence Collection (جمع‌آوری شواهد)
+
+**منابع داده** (به ترتیب اولویت):
+
+| منبع | داده | Evidence Grade |
+|------|------|----------------|
+| **Dune Analytics** (اگر کلید باشد) | تمرکز توکن، درآمد واقعی، DAU | A — Primary Verified |
+| **CoinGecko** | قیمت، مارکت‌کپ، تأمین، توکنومیکس | B — Strong Secondary |
+| **DeFiLlama** | TVL، کارمزد ۷d/30d | B — Strong Secondary |
+| **CMC Keyless** | هولدرها، حسابرسی، ATH/ATL | B — Strong Secondary |
+| **CMC Pro** (اگر کلید باشد) | تأیید متقابل قیمت/مارکت‌کپ | A — Primary Verified |
+
+**ویژگی خاص: Blockchain TVL**
+
+توکن‌هایی که خودشان **بلاک‌چین** هستند (SOL، ETH، BTC، AVAX، ...) TVL پروتکل ندارند — TVL آن‌ها مجموع تمام پروتکل‌های دیفای روی آن زنجیره است:
+
+```python
+# تشخیص بلاک‌چین بودن
+chain = is_blockchain_token(symbol, name)  # "SOL" → "Solana"
+if chain:
+    # TVL = aggregate of all 273 protocols on Solana chain
+    tvl = fetch_defillama_chain_tvl(chain)  # $10.83B for Solana
+    # بلاک‌چین‌ها governance/moat بالاتر می‌گیرند (decentralized, network effect)
+```
+
+| کوین | نوع | TVL قبل | TVL بعد |
+|------|-----|---------|---------|
+| SOL | بلاک‌چین | $0.00B | **$10.83B** (273 پروتکل) |
+| ETH | بلاک‌چین | $0.00B | ~$40B+ |
+| AVAX | بلاک‌چین | $0.00B | aggregate |
+| AAVE | پروتکل | $12B | $12B (تغییری ندارد) |
+
 ### PHASE 2: Screening (غربالگری)
 
 **۵ Veto Gate** (هر یک → HARD REJECT):
