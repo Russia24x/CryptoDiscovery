@@ -1177,10 +1177,14 @@ async def fetch_cmc_keyless_by_symbol(symbol: str) -> dict[str, Any] | None:
 #  In-memory TTL cache — avoids hammering public APIs on repeated dashboard loads
 # --------------------------------------------------------------------------- #
 import time as _time
+import threading as _threading
 
 _CACHE: dict[str, tuple[float, Any]] = {}
 _CACHE_TTL_DEFAULT = 90.0  # seconds
-_CACHE_MAX_ENTRIES = 500  # evict oldest expired entries when this limit is reached
+_CACHE_MAX_ENTRIES = 300  # evict oldest expired entries when this limit is reached
+_CACHE_LOCK = _threading.Lock()
+_CACHE_LAST_CLEANUP = 0.0  # timestamp of last proactive cleanup
+_CACHE_CLEANUP_INTERVAL = 300.0  # run proactive cleanup every 5 minutes
 
 
 def cache_get(key: str, ttl: float = _CACHE_TTL_DEFAULT) -> Any | None:
@@ -1196,24 +1200,38 @@ def cache_get(key: str, ttl: float = _CACHE_TTL_DEFAULT) -> Any | None:
 
 
 def cache_set(key: str, value: Any) -> None:
-    # Evict all expired entries when the cache exceeds the max size threshold.
-    # This prevents unbounded memory growth in long-running production.
+    # Proactive cleanup: periodically remove ALL expired entries, even if
+    # they haven't been read. This prevents memory waste from entries that
+    # are written but never read again (e.g. one-off search results).
+    global _CACHE_LAST_CLEANUP
+    now = _time.time()
+    if now - _CACHE_LAST_CLEANUP > _CACHE_CLEANUP_INTERVAL:
+        _cleanup_expired()
+        _CACHE_LAST_CLEANUP = now
+
+    # Also evict if we hit the hard limit
     if len(_CACHE) >= _CACHE_MAX_ENTRIES:
-        _evict_expired()
-    _CACHE[key] = (_time.time(), value)
+        _evict_oldest()
+
+    _CACHE[key] = (now, value)
 
 
-def _evict_expired() -> None:
-    """Remove all expired entries. Called when cache exceeds _CACHE_MAX_ENTRIES."""
+def _cleanup_expired() -> None:
+    """Remove ALL expired entries from the cache (proactive, not lazy)."""
     now = _time.time()
     expired = [k for k, (ts, _) in _CACHE.items() if now - ts > _CACHE_TTL_DEFAULT]
     for k in expired:
         _CACHE.pop(k, None)
-    # If still over the limit (all entries are fresh), remove the oldest 20%
-    if len(_CACHE) >= _CACHE_MAX_ENTRIES:
-        sorted_items = sorted(_CACHE.items(), key=lambda x: x[1][0])
-        for k, _ in sorted_items[: len(sorted_items) // 5]:
-            _CACHE.pop(k, None)
+    if expired:
+        log.debug("Cache: proactively removed %d expired entries (%d remaining)", len(expired), len(_CACHE))
+
+
+def _evict_oldest() -> None:
+    """Evict oldest 20% of entries when cache is at capacity."""
+    sorted_items = sorted(_CACHE.items(), key=lambda x: x[1][0])
+    for k, _ in sorted_items[: len(sorted_items) // 5]:
+        _CACHE.pop(k, None)
+    log.info("Cache: evicted %d oldest entries (capacity limit %d)", len(sorted_items) // 5, _CACHE_MAX_ENTRIES)
 
 
 def cache_info() -> dict[str, Any]:
