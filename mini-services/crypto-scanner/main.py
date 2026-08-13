@@ -648,11 +648,16 @@ async def get_cmc_categories():
     """Fetch CMC cryptocurrency categories with market cap (CMC Pro exclusive).
 
     Returns cmc_pro_required=True when no API key is set.
+    Returns plan_not_supported=True when the key's plan doesn't include this endpoint (403).
     """
     if not sources.is_cmc_available():
         return {"cmc_pro_required": True, "categories": [], "count": 0,
                 "message": "Set CMC_API_KEY env var to unlock category data"}
-    cats = await sources.fetch_cmc_categories()
+    try:
+        cats = await sources.fetch_cmc_categories()
+    except sources.CmcPlanNotSupported:
+        return {"plan_not_supported": True, "categories": [], "count": 0,
+                "message": "Your CMC API key plan doesn't support the categories endpoint. Upgrade to a higher tier."}
     return {"categories": cats or [], "count": len(cats or []),
             "fetched_at": datetime.now(timezone.utc).isoformat()}
 
@@ -662,11 +667,16 @@ async def get_cmc_exchanges(limit: int = 50):
     """Fetch top exchanges ranked by volume (CMC Pro exclusive).
 
     Returns cmc_pro_required=True when no API key is set.
+    Returns plan_not_supported=True when the key's plan doesn't include this endpoint (403).
     """
     if not sources.is_cmc_available():
         return {"cmc_pro_required": True, "exchanges": [], "count": 0,
                 "message": "Set CMC_API_KEY env var to unlock exchange rankings"}
-    exchanges = await sources.fetch_cmc_exchange_map(limit=limit)
+    try:
+        exchanges = await sources.fetch_cmc_exchange_map(limit=limit)
+    except sources.CmcPlanNotSupported:
+        return {"plan_not_supported": True, "exchanges": [], "count": 0,
+                "message": "Your CMC API key plan doesn't support the exchanges endpoint. Upgrade to a higher tier."}
     return {"exchanges": exchanges or [], "count": len(exchanges or []),
             "fetched_at": datetime.now(timezone.utc).isoformat()}
 
@@ -678,11 +688,16 @@ async def get_cmc_global_metrics():
     Provides CMC's own BTC dominance, total mcap, and 24h volume — used to
     cross-verify CoinGecko's global data. Available with Basic plan.
     Returns cmc_pro_required=True when no API key is set.
+    Returns plan_not_supported=True when the key's plan doesn't include this endpoint (403).
     """
     if not sources.is_cmc_available():
         return {"cmc_pro_required": True, "metrics": None,
                 "message": "Set CMC_API_KEY env var to unlock CMC global metrics"}
-    metrics = await sources.fetch_cmc_global_metrics()
+    try:
+        metrics = await sources.fetch_cmc_global_metrics()
+    except sources.CmcPlanNotSupported:
+        return {"plan_not_supported": True, "metrics": None,
+                "message": "Your CMC API key plan doesn't support the global-metrics endpoint. Upgrade to a higher tier."}
     return {"metrics": metrics, "fetched_at": datetime.now(timezone.utc).isoformat()}
 
 

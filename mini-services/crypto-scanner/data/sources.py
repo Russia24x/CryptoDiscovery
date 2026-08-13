@@ -351,6 +351,7 @@ async def fetch_cmc_categories() -> list[dict[str, Any]] | None:
     Unique to CMC Pro — CoinGecko has categories but CMC's taxonomy includes
     24h/7d market cap change per category, top 3 coins, and volume.
     Returns None if no API key.
+    Raises CmcPlanNotSupported if the key's plan doesn't include this endpoint (403).
     """
     if not CMC_AVAILABLE:
         return None
@@ -360,7 +361,7 @@ async def fetch_cmc_categories() -> list[dict[str, Any]] | None:
         return cached
     try:
         async with httpx.AsyncClient(follow_redirects=True) as c:
-            data = await _cmc_get(c, "/v1/cryptocurrency/categories")
+            data = await _cmc_get_strict(c, "/v1/cryptocurrency/categories")
         if not isinstance(data, dict) or "data" not in data:
             return None
         out = []
@@ -382,6 +383,8 @@ async def fetch_cmc_categories() -> list[dict[str, Any]] | None:
         cache_set(cache_key, out)
         log.info("CMC Pro: fetched %d categories", len(out))
         return out
+    except CmcPlanNotSupported:
+        raise  # Re-raise so the endpoint can show the correct message
     except (httpx.HTTPError, ValueError) as exc:
         log.warning("CMC categories failed: %s", exc)
         return None
@@ -438,6 +441,7 @@ async def fetch_cmc_exchange_map(limit: int = 50) -> list[dict[str, Any]] | None
     Unique to CMC Pro — DeFiLlama has some CEX data but CMC has comprehensive
     exchange rankings with spot/derivatives volume split.
     Returns None if no API key.
+    Raises CmcPlanNotSupported if the key's plan doesn't include this endpoint (403).
     """
     if not CMC_AVAILABLE:
         return None
@@ -447,7 +451,7 @@ async def fetch_cmc_exchange_map(limit: int = 50) -> list[dict[str, Any]] | None
         return cached
     try:
         async with httpx.AsyncClient(follow_redirects=True) as c:
-            data = await _cmc_get(c, "/v1/exchange/map", listing_status="active", limit=limit, sort="volume_24h")
+            data = await _cmc_get_strict(c, "/v1/exchange/map", listing_status="active", limit=limit, sort="volume_24h")
         if not isinstance(data, dict) or "data" not in data:
             return None
         out = []
@@ -463,6 +467,8 @@ async def fetch_cmc_exchange_map(limit: int = 50) -> list[dict[str, Any]] | None
         cache_set(cache_key, out)
         log.info("CMC Pro: fetched %d exchanges", len(out))
         return out
+    except CmcPlanNotSupported:
+        raise  # Re-raise so the endpoint can show the correct message
     except (httpx.HTTPError, ValueError) as exc:
         log.warning("CMC exchange map failed: %s", exc)
         return None
@@ -474,6 +480,7 @@ async def fetch_cmc_global_metrics() -> dict[str, Any] | None:
     Available with Basic plan — provides CMC's own BTC dominance, total mcap,
     and 24h volume. Used to cross-verify CoinGecko's global data.
     Returns None if no API key.
+    Raises CmcPlanNotSupported if the key's plan doesn't include this endpoint (403).
     """
     if not CMC_AVAILABLE:
         return None
@@ -483,7 +490,7 @@ async def fetch_cmc_global_metrics() -> dict[str, Any] | None:
         return cached
     try:
         async with httpx.AsyncClient(follow_redirects=True) as c:
-            data = await _cmc_get(c, "/v1/global-metrics/quotes/latest")
+            data = await _cmc_get_strict(c, "/v1/global-metrics/quotes/latest")
         if not isinstance(data, dict) or "data" not in data:
             return None
         d = data["data"]
@@ -502,6 +509,8 @@ async def fetch_cmc_global_metrics() -> dict[str, Any] | None:
         cache_set(cache_key, out)
         log.info("CMC Pro: global metrics fetched (BTC dom=%s)", out.get("btc_dominance"))
         return out
+    except CmcPlanNotSupported:
+        raise  # Re-raise so the endpoint can show the correct message
     except (httpx.HTTPError, ValueError) as exc:
         log.warning("CMC global metrics failed: %s", exc)
         return None
@@ -630,6 +639,7 @@ import time as _time
 
 _CACHE: dict[str, tuple[float, Any]] = {}
 _CACHE_TTL_DEFAULT = 90.0  # seconds
+_CACHE_MAX_ENTRIES = 500  # evict oldest expired entries when this limit is reached
 
 
 def cache_get(key: str, ttl: float = _CACHE_TTL_DEFAULT) -> Any | None:
@@ -638,12 +648,31 @@ def cache_get(key: str, ttl: float = _CACHE_TTL_DEFAULT) -> Any | None:
         return None
     ts, val = entry
     if _time.time() - ts > ttl:
+        # Expired — remove lazily to keep the dict from growing unbounded
+        _CACHE.pop(key, None)
         return None
     return val
 
 
 def cache_set(key: str, value: Any) -> None:
+    # Evict all expired entries when the cache exceeds the max size threshold.
+    # This prevents unbounded memory growth in long-running production.
+    if len(_CACHE) >= _CACHE_MAX_ENTRIES:
+        _evict_expired()
     _CACHE[key] = (_time.time(), value)
+
+
+def _evict_expired() -> None:
+    """Remove all expired entries. Called when cache exceeds _CACHE_MAX_ENTRIES."""
+    now = _time.time()
+    expired = [k for k, (ts, _) in _CACHE.items() if now - ts > _CACHE_TTL_DEFAULT]
+    for k in expired:
+        _CACHE.pop(k, None)
+    # If still over the limit (all entries are fresh), remove the oldest 20%
+    if len(_CACHE) >= _CACHE_MAX_ENTRIES:
+        sorted_items = sorted(_CACHE.items(), key=lambda x: x[1][0])
+        for k, _ in sorted_items[: len(sorted_items) // 5]:
+            _CACHE.pop(k, None)
 
 
 def cache_info() -> dict[str, Any]:
@@ -653,7 +682,7 @@ def cache_info() -> dict[str, Any]:
     for key, (ts, _) in _CACHE.items():
         if now - ts <= _CACHE_TTL_DEFAULT:
             live += 1
-    return {"entries": len(_CACHE), "live": live, "ttl_seconds": _CACHE_TTL_DEFAULT}
+    return {"entries": len(_CACHE), "live": live, "ttl_seconds": _CACHE_TTL_DEFAULT, "max_entries": _CACHE_MAX_ENTRIES}
 
 
 # --------------------------------------------------------------------------- #

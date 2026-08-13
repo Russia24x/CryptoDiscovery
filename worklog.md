@@ -2053,3 +2053,40 @@ Stage Summary:
 - One critical data quality bug fixed: CoinDesk RSS articles were silently missing due to httpx not following HTTP 308 redirects. Now all 4 English news sources work correctly.
 - Codebase audit confirms the project is in good engineering shape: no lint errors, no TS errors, no console.logs, no bare excepts, no datetime.utcnow, proper error handling throughout.
 - The fix is low-risk (follow_redirects=True is the expected behavior for web fetching) and high-impact (25% more news source coverage).
+
+---
+Task ID: 4
+Agent: main (orchestrator)
+Task: Codebase audit — find and fix engineering issues across all components.
+
+Work Log:
+- Comprehensive codebase audit:
+  - Lint: 0 errors ✓
+  - TypeScript: 0 errors in src/ ✓
+  - No console.log, no 'any' types, no bare excepts, no datetime.utcnow ✓
+  - All fetch calls have proper res.ok checks ✓
+  - All useEffect hooks have proper cleanup (AbortController + clearInterval) ✓
+  - All React keys verified unique (remaining key={s} patterns use Set-derived arrays = inherently unique) ✓
+
+- **FIX 1: Cache memory growth prevention**
+  - Issue: `_CACHE` dict grew unbounded — expired entries were never removed, only detected on read. In long-running production, this would slowly consume memory.
+  - Fix: Added lazy eviction in `cache_get` (removes expired entry on read), `_evict_expired()` helper called when cache exceeds `_CACHE_MAX_ENTRIES=500`, and oldest-20% fallback eviction if all entries are fresh. Cache info now reports `max_entries` for monitoring.
+
+- **FIX 2: CMC Pro 403 handling consistency**
+  - Issue: Only `fetch_cmc_airdrops` used `_cmc_get_strict` (which raises `CmcPlanNotSupported` on 403). The other 3 CMC functions (`fetch_cmc_categories`, `fetch_cmc_exchange_map`, `fetch_cmc_global_metrics`) used `_cmc_get` which silently returns None on 403 — meaning if the user's plan didn't support these endpoints, the frontend would show "no data" instead of the accurate "plan not supported" message.
+  - Fix: Updated all 3 functions to use `_cmc_get_strict` + added `except CmcPlanNotSupported: raise` re-raise. Updated the 3 corresponding endpoints in main.py (`/cmc/categories`, `/cmc/exchanges`, `/cmc/global-metrics`) to catch `CmcPlanNotSupported` and return `plan_not_supported=True` with the accurate upgrade message.
+  - This ensures consistent UX: every CMC Pro endpoint now distinguishes "no key" (cmc_pro_required) from "key but plan doesn't support" (plan_not_supported).
+
+- Verified all fixes:
+  - /cmc/categories → 100 real categories ✓
+  - /cmc/exchanges → 50 exchanges ✓
+  - /cmc/global-metrics → metrics available ✓
+  - /cmc/airdrops → plan_not_supported (correct — Basic plan doesn't include airdrops) ✓
+  - Cache info shows max_entries=500 ✓
+  - Browser QA: Hub loads, zero console errors ✓
+  - Lint: 0 errors ✓
+  - Dev log + scanner log: zero errors ✓
+
+Stage Summary:
+- Two engineering issues fixed: unbounded cache growth (memory safety) and inconsistent CMC 403 handling (UX consistency).
+- The codebase is now in production-ready shape: proper memory management, consistent error handling, clean lint, zero runtime errors.
