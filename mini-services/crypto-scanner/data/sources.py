@@ -75,25 +75,42 @@ def _gecko_headers() -> dict[str, str]:
 
 
 async def _get_json(client: httpx.AsyncClient, url: str, **params: Any) -> Any:
-    try:
-        # Inject CoinGecko API key header for CoinGecko URLs
-        headers = _gecko_headers() if "coingecko.com" in url else {}
-        r = await client.get(url, params=params, timeout=TIMEOUT, headers=headers)
-        if r.status_code == 429:
-            # Rate limited — wait and retry once
-            log.warning("GET %s -> 429 (rate limited), retrying in 2s...", url)
-            await asyncio.sleep(2)
+    """Fetch JSON with exponential backoff retry on 429/5xx and network errors.
+
+    Retry strategy:
+      - 429 (rate limited): retry after 2s, 4s, 8s (3 retries)
+      - 5xx (server error): retry after 1s, 2s (2 retries)
+      - Network error: retry after 1s (1 retry)
+      - 4xx (except 429): no retry (client error)
+    """
+    headers = _gecko_headers() if "coingecko.com" in url else {}
+    max_retries = 3
+    for attempt in range(max_retries + 1):
+        try:
             r = await client.get(url, params=params, timeout=TIMEOUT, headers=headers)
+            if r.status_code == 200:
+                return r.json()
+            if r.status_code == 429 and attempt < max_retries:
+                wait = 2 ** (attempt + 1)  # 2s, 4s, 8s
+                log.warning("GET %s -> 429, retry %d/%d in %ds...", url, attempt + 1, max_retries, wait)
+                await asyncio.sleep(wait)
+                continue
+            if 500 <= r.status_code < 600 and attempt < 2:
+                wait = 2 ** attempt  # 1s, 2s
+                log.warning("GET %s -> %d, retry %d/2 in %ds...", url, r.status_code, attempt + 1, wait)
+                await asyncio.sleep(wait)
+                continue
             if r.status_code != 200:
-                log.warning("GET %s -> %s after retry", url, r.status_code)
+                log.warning("GET %s -> %s", url, r.status_code)
                 return None
-        elif r.status_code != 200:
-            log.warning("GET %s -> %s", url, r.status_code)
+        except (httpx.HTTPError, ValueError) as exc:
+            if attempt < 1:
+                log.warning("GET %s failed: %s, retrying in 1s...", url, exc)
+                await asyncio.sleep(1)
+                continue
+            log.warning("GET %s failed after retries: %s", url, exc)
             return None
-        return r.json()
-    except (httpx.HTTPError, ValueError) as exc:  # network errors + JSON decode errors
-        log.warning("GET %s failed: %s", url, exc)
-        return None
+    return None
 
 
 # --------------------------------------------------------------------------- #

@@ -479,7 +479,21 @@ export default function Home() {
 
   useEffect(() => {
     refreshScans();
-    // IndexedDB hooks auto-load on mount, no manual loading needed
+    // Check for shared scan in URL (?scan=xxx)
+    const params = new URLSearchParams(window.location.search);
+    const sharedScanId = params.get("scan");
+    if (sharedScanId) {
+      setMainView("discovery");
+      fetch(`/api/scanner/scan/${sharedScanId}`)
+        .then((r) => r.ok ? r.json() : null)
+        .then((data) => {
+          if (data) {
+            setActiveScan(data);
+            setScanning(data.status === "running" || data.status === "queued");
+          }
+        })
+        .catch(() => {});
+    }
   }, [refreshScans]);
 
   // Alert system — poll for score changes every 60s and show browser notifications
@@ -1644,6 +1658,25 @@ export default function Home() {
                         <Download className="h-3.5 w-3.5" />
                         <span className="hidden sm:inline">CSV</span>
                       </Button>
+                      {/* Share scan */}
+                      {activeScan && (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => {
+                            const url = `${window.location.origin}/?scan=${activeScan.scan_id}`;
+                            navigator.clipboard?.writeText(url).then(() => {
+                              toast({ title: t("toast.scanShared") || "Scan link copied!", description: url });
+                            }).catch(() => {
+                              toast({ title: "Share URL", description: url });
+                            });
+                          }}
+                          className="h-8 text-xs gap-1.5"
+                        >
+                          <Copy className="h-3.5 w-3.5" />
+                          <span className="hidden sm:inline">Share</span>
+                        </Button>
+                      )}
                       {/* View mode toggle */}
                       <div className="flex items-center rounded-lg border border-border/50 bg-muted/20 p-0.5">
                         <button

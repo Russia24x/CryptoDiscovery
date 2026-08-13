@@ -603,6 +603,102 @@ async def backtest():
     }
 
 
+@app.get("/correlation")
+async def correlation_analysis():
+    """Calculate Pearson correlation between framework scores and price changes.
+
+    Uses the same data as /backtest but computes the statistical correlation
+    coefficient to measure how well the framework's quality scores predict
+    price performance.
+
+    Returns: {correlation, r_squared, interpretation, data_points, ...}
+    """
+    conn = db._get_conn()
+    rows = conn.execute("""
+        SELECT symbol, MIN(timestamp) as first_ts, MAX(timestamp) as last_ts,
+               COUNT(*) as cnt
+        FROM score_history
+        GROUP BY symbol
+        HAVING cnt >= 1
+        ORDER BY last_ts DESC
+        LIMIT 30
+    """).fetchall()
+
+    pairs = []  # (score, change_pct)
+    for row in rows:
+        symbol = row["symbol"]
+        history = db.get_score_history(symbol, limit=1)
+        if not history:
+            continue
+        entry = history[0]
+        score = entry["project_quality"]
+
+        report_row = conn.execute(
+            "SELECT report_json FROM reports WHERE symbol = ? ORDER BY created_at DESC LIMIT 1",
+            (symbol,)
+        ).fetchone()
+        gecko_id = None
+        if report_row:
+            try:
+                gecko_id = json.loads(report_row["report_json"]).get("candidate", {}).get("gecko_id")
+            except Exception:  # noqa: BLE001
+                pass
+
+        if not gecko_id:
+            continue
+
+        try:
+            chart = await sources.fetch_price_chart(gecko_id, days=30)
+            if chart and chart.get("prices") and len(chart["prices"]) >= 2:
+                price_then = chart["prices"][0][1]
+                price_now = chart["prices"][-1][1]
+                if price_then > 0:
+                    change_pct = (price_now - price_then) / price_then * 100
+                    pairs.append((score, change_pct, symbol))
+        except Exception:  # noqa: BLE001
+            pass
+
+    if len(pairs) < 3:
+        return {
+            "correlation": None,
+            "r_squared": None,
+            "interpretation": "Not enough data points (need at least 3)",
+            "data_points": len(pairs),
+            "pairs": [],
+        }
+
+    # Pearson correlation coefficient
+    n = len(pairs)
+    scores = [p[0] for p in pairs]
+    changes = [p[1] for p in pairs]
+    mean_s = sum(scores) / n
+    mean_c = sum(changes) / n
+
+    num = sum((s - mean_s) * (c - mean_c) for s, c in zip(scores, changes))
+    den_s = (sum((s - mean_s) ** 2 for s in scores)) ** 0.5
+    den_c = (sum((c - mean_c) ** 2 for c in changes)) ** 0.5
+
+    correlation = num / (den_s * den_c) if den_s > 0 and den_c > 0 else 0
+    r_squared = correlation ** 2
+
+    interpretation = (
+        "Strong positive — high scores predict price gains" if correlation > 0.5 else
+        "Moderate positive — scores weakly predict price" if correlation > 0.2 else
+        "No correlation — scores don't predict price" if abs(correlation) <= 0.2 else
+        "Negative — high scores predict price drops" if correlation < -0.2 else
+        "Strong negative — scores inversely predict price"
+    )
+
+    return {
+        "correlation": round(correlation, 4),
+        "r_squared": round(r_squared, 4),
+        "interpretation": interpretation,
+        "data_points": n,
+        "pairs": [{"symbol": p[2], "score": p[0], "change_pct": round(p[1], 2)} for p in pairs],
+        "fetched_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+
 @app.post("/analyze")
 async def analyze_single_coin(req: AnalyzeRequest):
     """Run the full 8-phase framework on a single coin selected by gecko_id.
