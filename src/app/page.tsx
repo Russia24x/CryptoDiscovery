@@ -1023,7 +1023,7 @@ export default function Home() {
               <CardContent className="space-y-4">
                 {/* Persona */}
                 <div className="space-y-1.5">
-                  <Label className="text-xs font-medium">Persona</Label>
+                  <Label className="text-xs font-medium">{t("config.personaLabel")}</Label>
                   <Select value={persona} onValueChange={(v) => setPersona(v as Persona)}>
                     <SelectTrigger className="h-9">
                       <SelectValue />
@@ -1065,7 +1065,7 @@ export default function Home() {
 
                 {/* Max projects */}
                 <div className="space-y-1.5">
-                  <Label className="text-xs font-medium">Max projects</Label>
+                  <Label className="text-xs font-medium">{t("config.maxProjectsLabel")}</Label>
                   <Input
                     type="number"
                     min={3}
@@ -1132,29 +1132,29 @@ export default function Home() {
                       onClick={() => applyPreset("defi")}
                       className="px-2 py-1.5 rounded-md text-[11px] font-medium bg-muted/30 hover:bg-emerald-500/10 hover:text-emerald-400 border border-border/40 hover:border-emerald-500/30 transition-all text-left"
                     >
-                      <div className="font-semibold">DeFi Focus</div>
-                      <div className="text-[9px] text-muted-foreground">Investor · $500M+</div>
+                      <div className="font-semibold">{t("config.defiFocus")}</div>
+                      <div className="text-[9px] text-muted-foreground">{t("config.defiFocusDesc")}</div>
                     </button>
                     <button
                       onClick={() => applyPreset("largecap")}
                       className="px-2 py-1.5 rounded-md text-[11px] font-medium bg-muted/30 hover:bg-sky-500/10 hover:text-sky-400 border border-border/40 hover:border-sky-500/30 transition-all text-left"
                     >
-                      <div className="font-semibold">Large Cap</div>
-                      <div className="text-[9px] text-muted-foreground">Institutional · $5B+</div>
+                      <div className="font-semibold">{t("config.largeCap")}</div>
+                      <div className="text-[9px] text-muted-foreground">{t("config.largeCapDesc")}</div>
                     </button>
                     <button
                       onClick={() => applyPreset("emerging")}
                       className="px-2 py-1.5 rounded-md text-[11px] font-medium bg-muted/30 hover:bg-amber-500/10 hover:text-amber-400 border border-border/40 hover:border-amber-500/30 transition-all text-left"
                     >
-                      <div className="font-semibold">Emerging</div>
-                      <div className="text-[9px] text-muted-foreground">Researcher · $50-500M</div>
+                      <div className="font-semibold">{t("config.emerging")}</div>
+                      <div className="text-[9px] text-muted-foreground">{t("config.emergingDesc")}</div>
                     </button>
                     <button
                       onClick={() => applyPreset("infrastructure")}
                       className="px-2 py-1.5 rounded-md text-[11px] font-medium bg-muted/30 hover:bg-violet-500/10 hover:text-violet-400 border border-border/40 hover:border-violet-500/30 transition-all text-left"
                     >
-                      <div className="font-semibold">Infra</div>
-                      <div className="text-[9px] text-muted-foreground">Developer · $200M+</div>
+                      <div className="font-semibold">{t("config.infra")}</div>
+                      <div className="text-[9px] text-muted-foreground">{t("config.infraDesc")}</div>
                     </button>
                   </div>
                 </div>
@@ -1226,7 +1226,7 @@ export default function Home() {
               <CardContent className="p-0">
                 <ScrollArea className="h-[300px] px-6 pb-4">
                   {scans.length === 0 ? (
-                    <p className="text-xs text-muted-foreground py-4">No scans yet. Run one to see results.</p>
+                    <p className="text-xs text-muted-foreground py-4">{t("config.noScansYet")}</p>
                   ) : (
                     <div className="space-y-2">
                       {scans.map((s) => (
@@ -1487,7 +1487,7 @@ export default function Home() {
                             <Sparkles className="h-3 w-3 text-amber-400" />
                             <span className="text-[11px] font-semibold text-amber-400">{t("results.topPerformers")}</span>
                           </div>
-                          <span className="text-[11px] text-muted-foreground">Highest quality scores from this scan</span>
+                          <span className="text-[11px] text-muted-foreground">{t("results.highestQuality")}</span>
                         </div>
                         <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3">
                           {filteredReports
@@ -1578,7 +1578,7 @@ export default function Home() {
                               size={200}
                             />
                           ) : (
-                            <p className="text-xs text-muted-foreground py-12">No sector data</p>
+                            <p className="text-xs text-muted-foreground py-12">{t("analytics.noSectorData")}</p>
                           )}
                         </CardContent>
                       </Card>
@@ -1986,7 +1986,7 @@ function ScanProgressCard({ scan, onRefresh, scanning }: { scan: ScanStatus; onR
                 className="h-7 text-[11px] gap-1"
               >
                 <RefreshCw className={cn("h-3 w-3", scanning && "animate-spin")} />
-                <span className="hidden sm:inline">Refresh</span>
+                <span className="hidden sm:inline">{t("results.reset")}</span>
               </Button>
             )}
             <ScanStatusBadge status={scan.status} />
@@ -2208,13 +2208,13 @@ function ProjectCard({
         {/* mini metrics */}
         <div className="grid grid-cols-3 gap-2 text-[10px]">
           <div className="flex flex-col">
-            <span className="text-muted-foreground">Token Q</span>
+            <span className="text-muted-foreground">{t("results.tokenQ")}</span>
             <span className={cn("font-mono font-semibold", report.token_quality != null ? scoreColor(report.token_quality) : "text-muted-foreground")}>
               {report.token_quality != null ? report.token_quality.toFixed(0) : "—"}
             </span>
           </div>
           <div className="flex flex-col">
-            <span className="text-muted-foreground">Confidence</span>
+            <span className="text-muted-foreground">{t("results.confidence")}</span>
             <div className="flex items-center gap-1.5">
               <span className="font-mono font-semibold text-foreground">{report.confidence.toFixed(0)}%</span>
               {/* Confidence sparkline bar */}
@@ -2359,7 +2359,7 @@ function ReportDetail({
                       onClick={() => onCopy(report)}
                     >
                       <Copy className="h-3 w-3" />
-                      <span className="hidden sm:inline">Copy</span>
+                      <span className="hidden sm:inline">{t("detail.copy")}</span>
                     </Button>
                   </TooltipTrigger>
                   <TooltipContent>{t("detail.copy")}</TooltipContent>
@@ -2577,7 +2577,7 @@ function ReportDetail({
               </div>
               <div className="mt-2 grid grid-cols-2 gap-2 text-[10px]">
                 <div>
-                  <span className="text-muted-foreground">Annualized Revenue: </span>
+                  <span className="text-muted-foreground">{t("metrics.annualizedRevenue")}: </span>
                   <span className="font-mono font-semibold">
                     {report.valuation_multiples.annualized_revenue != null
                       ? fmtUsd(report.valuation_multiples.annualized_revenue)
@@ -2585,7 +2585,7 @@ function ReportDetail({
                   </span>
                 </div>
                 <div>
-                  <span className="text-muted-foreground">Annualized Fees: </span>
+                  <span className="text-muted-foreground">{t("metrics.annualizedFees")}: </span>
                   <span className="font-mono font-semibold">
                     {report.valuation_multiples.annualized_fees != null
                       ? fmtUsd(report.valuation_multiples.annualized_fees)
@@ -2668,14 +2668,14 @@ function ReportDetail({
         {/* Cycle & Peer */}
         <section className="grid grid-cols-1 md:grid-cols-2 gap-3">
           <div className="border border-border/40 rounded-lg p-3 bg-card/30">
-            <div className="text-[10px] text-muted-foreground uppercase tracking-wide mb-1">Cycle Phase</div>
+            <div className="text-[10px] text-muted-foreground uppercase tracking-wide mb-1">{t("detail.cyclePhase")}</div>
             <div className="text-sm font-semibold flex items-center gap-2">
               <Activity className="h-4 w-4 text-emerald-500" />
               {report.cycle_phase}
             </div>
           </div>
           <div className="border border-border/40 rounded-lg p-3 bg-card/30">
-            <div className="text-[10px] text-muted-foreground uppercase tracking-wide mb-1">Peer Benchmark</div>
+            <div className="text-[10px] text-muted-foreground uppercase tracking-wide mb-1">{t("detail.peerBenchmark")}</div>
             <div className="text-sm font-semibold">
               Percentile {report.peer_benchmark.peer_percentile?.toFixed(0) || "—"}% · Rank {report.peer_benchmark.category_rank || "—"}
             </div>
@@ -3189,7 +3189,7 @@ function ActionDistribution({ reports }: { reports: ScanSummaryItem[] }) {
   const total = reports.length;
 
   if (entries.length === 0) {
-    return <p className="text-xs text-muted-foreground py-8 text-center">No data</p>;
+    return <p className="text-xs text-muted-foreground py-8 text-center">{t("common.noData")}</p>;
   }
 
   return (
@@ -3418,9 +3418,9 @@ function HistoryView({
         <SheetHeader className="px-6 pt-6 pb-4 border-b border-border/60">
           <SheetTitle className="flex items-center gap-2 text-base">
             <History className="h-5 w-5 text-sky-400" />
-            Scan History
+            {t("history.title")}
           </SheetTitle>
-          <SheetDescription className="sr-only">Loading scan history data</SheetDescription>
+          <SheetDescription className="sr-only">{t("history.loadingHistory")}</SheetDescription>
         </SheetHeader>
         <div className="flex items-center justify-center py-16">
           <Loader2 className="h-8 w-8 animate-spin text-sky-500" />
@@ -3435,13 +3435,13 @@ function HistoryView({
         <SheetHeader className="px-6 pt-6 pb-4 border-b border-border/60">
           <SheetTitle className="flex items-center gap-2 text-base">
             <History className="h-5 w-5 text-sky-400" />
-            Scan History
+            {t("history.title")}
           </SheetTitle>
-          <SheetDescription className="sr-only">No completed scans available</SheetDescription>
+          <SheetDescription className="sr-only">{t("history.noScansAvailable")}</SheetDescription>
         </SheetHeader>
         <div className="flex flex-col items-center justify-center py-16 text-center px-6">
           <History className="h-12 w-12 text-muted-foreground/30 mb-3" />
-          <p className="text-sm text-muted-foreground">No completed scans yet</p>
+          <p className="text-sm text-muted-foreground">{t("history.noScansYet")}</p>
         </div>
       </div>
     );
@@ -3467,7 +3467,7 @@ function HistoryView({
         <div className="flex items-center justify-between gap-2">
           <SheetTitle className="flex items-center gap-2 text-base">
             <History className="h-5 w-5 text-sky-400" />
-            Scan History
+            {t("history.title")}
             <Badge variant="secondary" className="font-mono text-[10px]">{scans.length}</Badge>
           </SheetTitle>
           {onCompareScans && scans.length >= 2 && (
@@ -3478,12 +3478,12 @@ function HistoryView({
               className="h-8 text-xs gap-1.5"
             >
               <GitCompare className="h-3.5 w-3.5 text-violet-400" />
-              Diff Scans
+              {t("history.diffScans")}
             </Button>
           )}
         </div>
         <p className="text-xs text-muted-foreground">
-          Compare metrics across your last {scans.length} completed scans
+          {t("history.description", {count: scans.length})}
         </p>
       </SheetHeader>
 
@@ -3493,7 +3493,7 @@ function HistoryView({
           <CardHeader className="pb-2">
             <CardTitle className="flex items-center gap-2 text-sm">
               <TrendingUp className="h-4 w-4 text-emerald-500" />
-              Quality Trend
+              {t("history.qualityTrend")}
             </CardTitle>
             <CardDescription className="text-xs">
               Average project quality across recent scans
@@ -3525,7 +3525,7 @@ function HistoryView({
         {/* Scan cards */}
         <div className="space-y-3">
           <div className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-            Individual Scans
+            {t("history.individualScans")}
           </div>
           {scanStats.map((stat) => (
             <button
@@ -3547,26 +3547,26 @@ function HistoryView({
               </div>
               <div className="grid grid-cols-4 gap-2">
                 <div className="text-center p-2 rounded-lg bg-muted/20">
-                  <div className="text-[10px] text-muted-foreground">Projects</div>
+                  <div className="text-[10px] text-muted-foreground">{t("analytics.projects")}</div>
                   <div className="text-sm font-bold font-mono">{stat.total}</div>
                 </div>
                 <div className="text-center p-2 rounded-lg bg-muted/20">
-                  <div className="text-[10px] text-muted-foreground">Avg Quality</div>
+                  <div className="text-[10px] text-muted-foreground">{t("history.avgQuality")}</div>
                   <div className={cn("text-sm font-bold font-mono", scoreColor(stat.avgQ))}>{stat.avgQ.toFixed(1)}</div>
                 </div>
                 <div className="text-center p-2 rounded-lg bg-muted/20">
-                  <div className="text-[10px] text-muted-foreground">Avg Conf</div>
+                  <div className="text-[10px] text-muted-foreground">{t("history.avgConf")}</div>
                   <div className="text-sm font-bold font-mono text-emerald-400">{stat.avgConf.toFixed(0)}%</div>
                 </div>
                 <div className="text-center p-2 rounded-lg bg-muted/20">
-                  <div className="text-[10px] text-muted-foreground">High (70+)</div>
+                  <div className="text-[10px] text-muted-foreground">{t("history.high70")}</div>
                   <div className="text-sm font-bold font-mono text-lime-400">{stat.highCount}</div>
                 </div>
               </div>
               {stat.topProject && (
                 <div className="mt-2 flex items-center gap-1.5 text-[11px]">
                   <Sparkles className="h-3 w-3 text-amber-400" />
-                  <span className="text-muted-foreground">Top:</span>
+                  <span className="text-muted-foreground">{t("history.top")}:</span>
                   <span className="font-semibold">{stat.topProject.name}</span>
                   <span className="text-muted-foreground font-mono">({stat.topProject.project_quality.toFixed(0)})</span>
                 </div>
@@ -3635,7 +3635,7 @@ function MarketSentimentBanner({
           </div>
           <div>
             <div className="flex items-center gap-2">
-              <span className="text-[10px] text-muted-foreground uppercase tracking-wide font-semibold">Market Sentiment</span>
+              <span className="text-[10px] text-muted-foreground uppercase tracking-wide font-semibold">{t("sentiment.title")}</span>
               <Badge className={cn("text-[10px] border-transparent", color.replace("text-", "bg-").replace("-400", "-500/20"))}>
                 {label}
               </Badge>
@@ -3652,7 +3652,7 @@ function MarketSentimentBanner({
         {/* Sentiment meter bar */}
         <div className="hidden sm:flex flex-col items-end gap-1.5 flex-shrink-0">
           <div className="flex items-center gap-1.5">
-            <span className="text-[10px] text-muted-foreground">Bearish</span>
+            <span className="text-[10px] text-muted-foreground">{t("sentiment.bearishLabel")}</span>
             <div className="relative w-32 h-2 rounded-full bg-muted/30 overflow-hidden">
               <div
                 className={cn("absolute inset-y-0 left-0 rounded-full transition-all duration-1000", scoreBg(clampedSentiment))}
@@ -3663,7 +3663,7 @@ function MarketSentimentBanner({
                 <div key={tick} className="absolute inset-y-0 w-px bg-background/40" style={{ left: `${tick}%` }} />
               ))}
             </div>
-            <span className="text-[10px] text-muted-foreground">Bullish</span>
+            <span className="text-[10px] text-muted-foreground">{t("sentiment.bullishLabel")}</span>
           </div>
           <div className="text-[10px] text-muted-foreground font-mono">
             Q:{stats.avgQ.toFixed(0)} · C:{stats.avgConf.toFixed(0)}% · H:{stats.highCount}
@@ -3727,11 +3727,11 @@ function GlobalSearchView({
           <div className="flex flex-col items-center justify-center py-16 text-center">
             <Search className="h-12 w-12 text-muted-foreground/30 mb-3" />
             <p className="text-sm text-muted-foreground">{t("search.empty")}</p>
-            <p className="text-[11px] text-muted-foreground/70 mt-1">Search by name, symbol, category, or sector</p>
+            <p className="text-[11px] text-muted-foreground/70 mt-1">{t("search.emptyDesc")}</p>
           </div>
         ) : results.length === 0 && !loading ? (
           <div className="flex flex-col items-center justify-center py-16 text-center">
-            <p className="text-sm text-muted-foreground">No results found for "{query}"</p>
+            <p className="text-sm text-muted-foreground">{t("search.noResults", {query})}</p>
           </div>
         ) : (
           <>
@@ -3798,11 +3798,11 @@ function ScanDiffView({ scanA, scanB }: { scanA: ScanStatus | null; scanB: ScanS
             <GitCompare className="h-5 w-5 text-violet-400" />
             Scan Diff
           </SheetTitle>
-          <SheetDescription className="sr-only">Select two scans to compare</SheetDescription>
+          <SheetDescription className="sr-only">{t("scanDiff.selectTwoShort")}</SheetDescription>
         </SheetHeader>
         <div className="flex flex-col items-center justify-center py-16 text-center px-6">
           <GitCompare className="h-12 w-12 text-muted-foreground/30 mb-3" />
-          <p className="text-sm text-muted-foreground">Select two scans from History to compare them</p>
+          <p className="text-sm text-muted-foreground">{t("scanDiff.selectTwo")}</p>
         </div>
       </div>
     );
@@ -3843,7 +3843,7 @@ function ScanDiffView({ scanA, scanB }: { scanA: ScanStatus | null; scanB: ScanS
           <GitCompare className="h-5 w-5 text-violet-400" />
           Scan Diff
         </SheetTitle>
-        <SheetDescription className="sr-only">Side-by-side comparison of two scan results</SheetDescription>
+        <SheetDescription className="sr-only">{t("scanDiff.sideBySide")}</SheetDescription>
         <p className="text-xs text-muted-foreground">
           Comparing {scanA.scan_id.slice(0, 8)} vs {scanB.scan_id.slice(0, 8)}
         </p>
@@ -3868,10 +3868,10 @@ function ScanDiffView({ scanA, scanB }: { scanA: ScanStatus | null; scanB: ScanS
                 {new Date(scan.started_at).toLocaleString()}
               </div>
               <div className="grid grid-cols-2 gap-1.5 text-[11px]">
-                <div>Projects: <span className="font-mono font-semibold">{stats.total}</span></div>
-                <div>Avg Q: <span className={cn("font-mono font-semibold", scoreColor(stats.avgQ))}>{stats.avgQ.toFixed(1)}</span></div>
-                <div>Avg Conf: <span className="font-mono font-semibold text-emerald-400">{stats.avgConf.toFixed(0)}%</span></div>
-                <div>High: <span className="font-mono font-semibold text-lime-400">{stats.highCount}</span></div>
+                <div>{t("history.projects")}: <span className="font-mono font-semibold">{stats.total}</span></div>
+                <div>{t("history.avgQ")}: <span className={cn("font-mono font-semibold", scoreColor(stats.avgQ))}>{stats.avgQ.toFixed(1)}</span></div>
+                <div>{t("history.avgConf")}: <span className="font-mono font-semibold text-emerald-400">{stats.avgConf.toFixed(0)}%</span></div>
+                <div>{t("history.high70")}: <span className="font-mono font-semibold text-lime-400">{stats.highCount}</span></div>
               </div>
             </div>
           ))}
@@ -3891,7 +3891,7 @@ function ScanDiffView({ scanA, scanB }: { scanA: ScanStatus | null; scanB: ScanS
                 <div>{t("scanDiff.metric")}</div>
                 <div className="text-right text-sky-400">{t("scanDiff.scanA")}</div>
                 <div className="text-right text-violet-400">{t("scanDiff.scanB")}</div>
-                <div className="text-right">Δ Change</div>
+                <div className="text-right">{t("scanDiff.change")}</div>
               </div>
               {diffRows.map((row, i) => {
                 const diff = row.b - row.a;
@@ -3942,7 +3942,7 @@ function ScanDiffView({ scanA, scanB }: { scanA: ScanStatus | null; scanB: ScanS
             </div>
             {onlyInA.length > 0 && (
               <div className="mt-3">
-                <div className="text-[10px] text-muted-foreground mb-1.5">Only in Scan A:</div>
+                <div className="text-[10px] text-muted-foreground mb-1.5">{t("scanDiff.onlyInScanA")}:</div>
                 <div className="flex flex-wrap gap-1">
                   {onlyInA.slice(0, 8).map((r) => (
                     <Badge key={r.id} variant="outline" className="text-[10px] gap-1 text-sky-400 border-sky-500/30">
@@ -3954,7 +3954,7 @@ function ScanDiffView({ scanA, scanB }: { scanA: ScanStatus | null; scanB: ScanS
             )}
             {onlyInB.length > 0 && (
               <div className="mt-2">
-                <div className="text-[10px] text-muted-foreground mb-1.5">Only in Scan B:</div>
+                <div className="text-[10px] text-muted-foreground mb-1.5">{t("scanDiff.onlyInScanB")}:</div>
                 <div className="flex flex-wrap gap-1">
                   {onlyInB.slice(0, 8).map((r) => (
                     <Badge key={r.id} variant="outline" className="text-[10px] gap-1 text-violet-400 border-violet-500/30">
@@ -4106,7 +4106,7 @@ function HelpView() {
           <div className="space-y-1 text-xs text-muted-foreground">
             <div className="flex items-center gap-2">
               <Badge variant="outline" className="text-[10px]">CoinGecko</Badge>
-              <span>Market data, prices, tokenomics</span>
+              <span>{t("help.coinGeckoDesc")}</span>
             </div>
             <div className="flex items-center gap-2">
               <Badge variant="outline" className="text-[10px]">DeFiLlama</Badge>
@@ -4121,7 +4121,7 @@ function HelpView() {
         {/* Disclaimer */}
         <div className="rounded-lg bg-rose-500/5 border border-rose-500/20 p-3">
           <p className="text-[11px] text-rose-300/80">
-            <strong>Disclaimer:</strong> This framework is a research and analysis tool, not personalized financial advice.
+            <strong>{t("help.disclaimer").split(":")[0]}:</strong> This framework is a research and analysis tool, not personalized financial advice.
             Always do your own research (DYOR) before making investment decisions.
           </p>
         </div>

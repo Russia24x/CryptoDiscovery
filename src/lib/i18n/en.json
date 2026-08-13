@@ -31,7 +31,10 @@
     "defiFocusDesc": "Investor · $500M+",
     "largeCapDesc": "Institutional · $5B+",
     "emergingDesc": "Researcher · $50-500M",
-    "infraDesc": "Developer · $200M+"
+    "infraDesc": "Developer · $200M+",
+    "personaLabel": "Persona",
+    "maxProjectsLabel": "Max projects",
+    "noScansYet": "No scans yet. Run one to see results."
   },
   "personas": {
     "investor": "Investor",
@@ -93,7 +96,9 @@
     "tokenQuality": "Token Quality",
     "confidence": "Confidence",
     "action": "Action",
-    "details": "Details"
+    "details": "Details",
+    "highestQuality": "Highest quality scores from this scan",
+    "tokenQ": "Token Q"
   },
   "projectCard": {
     "tokenQ": "Token Q",
@@ -168,7 +173,8 @@
     "qualityScoreDistributionDesc": "Histogram of project quality scores",
     "riskHeatmap": "Risk Heatmap",
     "riskHeatmapDesc": "Severe risk distribution across all scanned projects",
-    "projects": "Projects"
+    "projects": "Projects",
+    "noSectorData": "No sector data"
   },
   "history": {
     "title": "Scan History",
@@ -181,7 +187,11 @@
     "avgQuality": "Avg Quality",
     "avgConf": "Avg Conf",
     "high70": "High (70+)",
-    "top": "Top"
+    "top": "Top:",
+    "noScansYet": "No completed scans yet",
+    "noScansAvailable": "No completed scans available",
+    "loadingHistory": "Loading scan history data...",
+    "avgQ": "Avg Q"
   },
   "scanDiff": {
     "title": "Scan Diff",
@@ -194,7 +204,12 @@
     "onlyInA": "Only in A",
     "common": "Common",
     "onlyInB": "Only in B",
-    "comparing": "Comparing {a} vs {b}"
+    "comparing": "Comparing {a} vs {b}",
+    "selectTwo": "Select two scans from History to compare them",
+    "selectTwoShort": "Select two scans to compare",
+    "sideBySide": "Side-by-side comparison of two scan results",
+    "onlyInScanA": "Only in Scan A:",
+    "onlyInScanB": "Only in Scan B:"
   },
   "watchlist": {
     "title": "Watchlist",
@@ -262,7 +277,9 @@
     "keyboardShortcuts": "Keyboard Shortcuts",
     "dataSources": "Data Sources",
     "dataSourcesNote": "All data from public APIs. No API key required. CoinGecko rate limits may cause some data to be missing.",
-    "disclaimer": "Disclaimer: This framework is a research and analysis tool, not personalized financial advice. Always do your own research (DYOR) before making investment decisions."
+    "disclaimer": "Disclaimer: This framework is a research and analysis tool, not personalized financial advice. Always do your own research (DYOR) before making investment decisions.",
+    "coinGeckoDesc": "Market data, prices, tokenomics",
+    "defiLlamaDesc": "TVL, fees, revenue, protocol metadata"
   },
   "footer": {
     "evidenceNarrative": "Crypto Discovery Framework · Evidence > Narrative",
