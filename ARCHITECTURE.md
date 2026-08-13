@@ -83,8 +83,8 @@ Never guess missing data      ← اگر Evidence کافی نیست، Confidence
 │       └──────────────┴──────────────┴──────────────┘                      │
 │                              │                                            │
 │                    ┌─────────▼──────────┐                                 │
-│                    │  Data Sources      │  14 sources                     │
-│                    │  11 free + 3 key   │  TTL cache (500 max)            │
+│                    │  Data Sources      │  15 sources                     │
+│                    │  11 free + 4 key   │  TTL cache (500 max)            │
 │                    └────────────────────┘                                 │
 └─────────────────────────────────────────────────────────────────────────┘
 ```
@@ -427,7 +427,7 @@ PERSONA_WEIGHTS = {
 
 ## 5. منابع داده و استراتژی چندمنبعی
 
-### ۱۴ منبع داده (۱۱ رایگان + ۳ با API Key)
+### ۱۵ منبع داده (۱۱ رایگان + ۴ با API Key)
 
 #### منابع رایگان (همیشه فعال)
 
@@ -450,8 +450,34 @@ PERSONA_WEIGHTS = {
 | منبع | Key Env | داده اختصاصی | وضعیت طرح فعلی |
 |------|---------|-------------|----------------|
 | **CMC Pro** | `CMC_API_KEY` | Categories (350), Global metrics, Exchange map, Quotes/Info, Cross-verification | Basic: Categories ✓, Global ✓, Airdrops ✗ |
-| **CryptoPanic** | `CRYPTOPANIC_TOKEN` | اخبار curaتed | — |
+| **Dune Analytics** | `DUNE_API_KEY` | **EXCLUSIVE: On-chain Grade A data** — real revenue vs fees (Revenue ≠ Fees), token holder concentration, bot-filtered DAU/MAU, whale tracking, 100+ chains (Solana, Bitcoin L2, non-EVM) | Free tier: 2500 datapoints/month, 5 req/min |
+| **CryptoPanic** | `CRYPTOPANIC_TOKEN` | اخبار curated | — |
 | **CryptoCompare** | `CRYPTOCOMPARE_KEY` | اخبار + قیمت | — |
+
+### Dune Analytics — ارتقای Evidence Grade به A
+
+Dune داده‌ها را **مستقیماً از تراکنش‌های بلاک‌چین** می‌خواند — بدون واسطه. این بالاترین کیفیت شواهد در لوله داده است:
+
+```
+بدون Dune: CoinGecko + DeFiLlama + CMC Keyless = Grade B (Strong Secondary)
+با Dune:   CoinGecko + DeFiLlama + CMC Keyless + Dune = Grade A (Primary Verified)
+```
+
+**کوئری‌های پیش‌فرض Dune** (قابل تنظیم با env var):
+
+| Env Var | کاربرد | ماژول CryptoSieve |
+|---------|--------|-------------------|
+| `DUNE_QUERY_TOKEN_CONCENTRATION` | تمرکز هولدرها (top 10/100، نهنگ‌ها، تیم) | PHASE 2: Veto/Screening + Axis 4 |
+| `DUNE_QUERY_REAL_REVENUE` | تفکیک درآمد واقعی از کارمزد | PHASE 4/6: Revenue ≠ Fees |
+| `DUNE_QUERY_ACTIVE_USERS` | DAU/MAU با فیلتر ربات | Axis 1: Invisible Utility + Axis 3: Moat |
+
+**فعال‌سازی**: کلید رایگان از https://dune.com/api-keys، سپس در `.env`:
+```
+DUNE_API_KEY=your_key
+DUNE_QUERY_TOKEN_CONCENTRATION=12345  # query ID from dune.com
+DUNE_QUERY_REAL_REVENUE=67890
+DUNE_QUERY_ACTIVE_USERS=11111
+```
 
 ### استراتژی Cross-Verification
 
@@ -505,7 +531,7 @@ mini-services/crypto-scanner/
 | Method | Path | توضیح |
 |--------|------|-------|
 | GET | `/health` | سلامت سرویس + آمار کش |
-| GET | `/sources` | وضعیت ۱۴ منبع داده |
+| GET | `/sources` | وضعیت ۱۵ منبع داده |
 | POST | `/scan` | شروع scan جدید |
 | GET | `/scan/{id}` | وضعیت scan + خلاصه نتایج |
 | GET | `/scan/{id}/projects` | گزارش‌های کامل یک scan |
@@ -534,6 +560,13 @@ mini-services/crypto-scanner/
 | GET | `/cmc/categories` | ۳۵۰ دسته CMC با مارکت‌کپ |
 | GET | `/cmc/exchanges?limit=` | لیست صرافی‌ها |
 | GET | `/cmc/global-metrics` | سلطه BTC، کل مارکت‌کپ (cross-verify) |
+
+#### Dune Analytics (On-Chain, Grade A)
+| Method | Path | توضیح |
+|--------|------|-------|
+| GET | `/dune/query/{query_id}` | نتایج کش‌شده هر کوئری Dune |
+| POST | `/dune/execute/{query_id}` | اجرای تازه کوئری با پارامتر |
+| GET | `/dune/insights/{symbol}` | insights آماده: تمرکز توکن، درآمد واقعی، کاربران فعال |
 
 ### ذخیره‌سازی داده
 
@@ -611,7 +644,7 @@ src/
 - **اقدامات سریع**: ۴ کارت ناوبری به سایر نماها
 - **نمای بازار**: Trending coins، top-3 DeFi، TVL کل، فعال‌ترین کوین‌ها
 - **چیدمان دو ستونه**: اخبار (EN/FA) + تلگرام | آمار چارچوب + cross-verification + top movers
-- **فوتر سلامت**: ۱۴ منبع با dot‌های وضعیت
+- **فوتر سلامت**: ۱۵ منبع با dot‌های وضعیت
 - **داده**: ۷ API موازی با resilience مستقل
 
 #### 1. Discovery (اسکن بازار)
