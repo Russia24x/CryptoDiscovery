@@ -394,7 +394,7 @@ async def fetch_coin_detail(gecko_id: str) -> dict[str, Any] | None:
             tickers="false",
             market_data="true",
             community_data="false",
-            developer_data="false",
+            developer_data="true",
             sparkline="false",
         )
 
@@ -1128,7 +1128,14 @@ async def fetch_cmc_keyless_by_symbol(symbol: str) -> dict[str, Any] | None:
         "TIA": "celestia", "STX": "blockstack", "RUNE": "thorchain",
         "AAVE": "aave", "MKR": "maker", "LDO": "lido", "RNDR": "render-token",
         "IMX": "immutable-x", "GRT": "the-graph", "SAND": "the-sandbox",
-        "MANA": "decentraland", "AXS": "axie-infinity", "FTM": "fantom",
+        "MANA": "decentraland", "AXS": "axie-infinity",
+        # Stablecoins
+        "USDT": "tether", "USDC": "usd-coin", "DAI": "dai", "TUSD": "true-usd",
+        # Additional L1/L2 + privacy coins
+        "TRX": "tron", "DOGE": "dogecoin", "ZEC": "zcash", "XMR": "monero",
+        "XLM": "stellar", "TON": "toncoin", "HBAR": "hedera-hashgraph",
+        "FLOW": "flow", "XTZ": "tezos", "EGLD": "elrond-egld",
+        "KAS": "kaspa", "PEPE": "pepe", "SHIB": "shiba-inu",
     }
     sym_upper = symbol.upper().strip()
     slug = _SYMBOL_TO_SLUG.get(sym_upper, symbol.lower().replace(" ", "-"))

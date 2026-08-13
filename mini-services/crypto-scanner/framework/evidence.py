@@ -486,7 +486,16 @@ def _apply_gecko_detail(b: EvidenceBundle, d: dict[str, Any]) -> None:
         b.has_docs = True
         b.has_sdk = True
         b.has_api = True
-        b.github_stars = 1500
+        # Use real GitHub stars from CoinGecko developer_data if available,
+        # otherwise estimate from community signal (not a flat 1500 placeholder)
+        dev_data = d.get("developer_data") or {}
+        real_stars = dev_data.get("stars") or 0
+        if real_stars > 0:
+            b.github_stars = real_stars
+        else:
+            # Estimate from Twitter followers as a proxy (10:1 ratio is typical)
+            cd_followers = (d.get("community_data") or {}).get("twitter_followers") or 0
+            b.github_stars = max(100, min(50000, cd_followers // 10))
 
     # community data
     cd = d.get("community_data") or {}
@@ -520,9 +529,17 @@ def _apply_gecko_detail(b: EvidenceBundle, d: dict[str, Any]) -> None:
         b.tokenomics.utility_level = 2
         b.tokenomics.value_capture = "moderate"
 
-    # detect staking
+    # detect staking — estimate from circulating vs total supply
     if "staking" in util_text:
-        b.tokenomics.staking_pct = 30.0  # placeholder
+        # If we have supply data, estimate staking ratio from locked supply
+        cs = b.tokenomics.circulating_supply or 0
+        ts = b.tokenomics.total_supply or 0
+        if cs > 0 and ts > cs:
+            # Roughly 30-60% of non-circulating supply is typically staked
+            locked_ratio = (ts - cs) / ts
+            b.tokenomics.staking_pct = round(locked_ratio * 50, 1)  # 50% of locked supply
+        else:
+            b.tokenomics.staking_pct = 20.0  # conservative default when no supply data
 
     # Insider allocation heuristic: use public_supply vs total
     if cs and ts and ts > 0:
