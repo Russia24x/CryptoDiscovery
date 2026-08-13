@@ -14,15 +14,19 @@ import {
   Copy,
   Crosshair,
   Download,
+  ExternalLink,
   Filter,
   FlaskConical,
   Gauge,
   GitCompare,
+  Github,
+  Globe,
   Grid3x3,
   History,
   Layers,
   ListFilter,
   Loader2,
+  MessageCircle,
   Moon,
   PieChart,
   Radar,
@@ -37,6 +41,7 @@ import {
   RefreshCw,
   TrendingDown,
   TrendingUp,
+  Twitter,
   Zap,
 } from "lucide-react";
 
@@ -80,6 +85,7 @@ import {
 } from "@/components/ui/tooltip";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { useToast } from "@/hooks/use-toast";
+import { useIndexedDBSet, useIndexedDBList } from "@/lib/use-indexed-db";
 import { cn } from "@/lib/utils";
 
 // --------------------------------------------------------------------------- //
@@ -99,6 +105,9 @@ interface ScanSummaryItem {
   veto: boolean;
   category: string;
   sector: string;
+  website?: string | null;
+  twitter?: string | null;
+  github?: string | null;
 }
 
 interface ScanStatus {
@@ -140,6 +149,10 @@ interface FullReport {
     initial_priority: string;
     image: string | null;
     website: string | null;
+    twitter: string | null;
+    github: string | null;
+    discord: string | null;
+    blockchain_explorer: string | null;
   };
   data_cutoff: string;
   veto: { triggered: boolean; veto_type: string | null; reason: string };
@@ -335,11 +348,13 @@ export default function Home() {
   // risk heatmap data (full reports fetched on demand)
   const [riskReports, setRiskReports] = useState<FullReport[]>([]);
   const [riskLoading, setRiskLoading] = useState(false);
-  // watchlist (persisted to localStorage)
-  const [watchlist, setWatchlist] = useState<Set<string>>(new Set());
+  // watchlist (persisted to IndexedDB with localStorage fallback)
+  const watchlistDB = useIndexedDBSet("watchlist");
+  const watchlist = watchlistDB.items;
   const [showWatchlist, setShowWatchlist] = useState(false);
-  // recently viewed projects (persisted to localStorage)
-  const [recentlyViewed, setRecentlyViewed] = useState<string[]>([]);
+  // recently viewed projects (persisted to IndexedDB with localStorage fallback)
+  const recentlyViewedDB = useIndexedDBList("recentlyViewed", 5);
+  const recentlyViewed = recentlyViewedDB.items;
   // toast notifications
   const { toast } = useToast();
   // scan history comparison
@@ -371,24 +386,8 @@ export default function Home() {
 
   useEffect(() => {
     refreshScans();
-    // load watchlist from localStorage
-    try {
-      const stored = localStorage.getItem("crypto-watchlist");
-      if (stored) setWatchlist(new Set(JSON.parse(stored)));
-    } catch {}
-    // load recently viewed from localStorage
-    try {
-      const recent = localStorage.getItem("crypto-recent");
-      if (recent) setRecentlyViewed(JSON.parse(recent));
-    } catch {}
+    // IndexedDB hooks auto-load on mount, no manual loading needed
   }, [refreshScans]);
-
-  // persist watchlist to localStorage
-  useEffect(() => {
-    try {
-      localStorage.setItem("crypto-watchlist", JSON.stringify(Array.from(watchlist)));
-    } catch {}
-  }, [watchlist]);
 
   // Ref to always have latest startScan (avoids stale closure in keyboard handler)
   const startScanRef = useRef<() => void>(() => {});
@@ -542,12 +541,8 @@ export default function Home() {
         if (report.candidate?.symbol) {
           fetchProjectScoreHistory(report.candidate.symbol);
         }
-        // track recently viewed
-        setRecentlyViewed((cur) => {
-          const next = [id, ...cur.filter((x) => x !== id)].slice(0, 5);
-          try { localStorage.setItem("crypto-recent", JSON.stringify(next)); } catch {}
-          return next;
-        });
+        // track recently viewed in IndexedDB
+        recentlyViewedDB.add(id);
       }
     } catch {
     } finally {
@@ -571,15 +566,7 @@ export default function Home() {
 
   // --- watchlist toggle ---
   const toggleWatchlist = (id: string) => {
-    setWatchlist((cur) => {
-      const next = new Set(cur);
-      if (next.has(id)) {
-        next.delete(id);
-      } else {
-        next.add(id);
-      }
-      return next;
-    });
+    watchlistDB.toggle(id);
   };
 
   // --- scan presets ---
@@ -2172,6 +2159,45 @@ function ProjectCard({
           <Badge variant="outline" className="text-[10px] text-muted-foreground">
             {report.category}
           </Badge>
+          {/* Social links */}
+          <div className="flex items-center gap-0.5 ml-auto">
+            {report.website && (
+              <a
+                href={report.website}
+                target="_blank"
+                rel="noopener noreferrer"
+                onClick={(e) => e.stopPropagation()}
+                className="p-1 rounded text-muted-foreground/50 hover:text-emerald-400 hover:bg-emerald-500/10 transition-colors"
+                title="Website"
+              >
+                <Globe className="h-3 w-3" />
+              </a>
+            )}
+            {report.twitter && (
+              <a
+                href={`https://x.com/${report.twitter}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                onClick={(e) => e.stopPropagation()}
+                className="p-1 rounded text-muted-foreground/50 hover:text-sky-400 hover:bg-sky-500/10 transition-colors"
+                title="X / Twitter"
+              >
+                <Twitter className="h-3 w-3" />
+              </a>
+            )}
+            {report.github && (
+              <a
+                href={report.github}
+                target="_blank"
+                rel="noopener noreferrer"
+                onClick={(e) => e.stopPropagation()}
+                className="p-1 rounded text-muted-foreground/50 hover:text-violet-400 hover:bg-violet-500/10 transition-colors"
+                title="GitHub"
+              >
+                <Github className="h-3 w-3" />
+              </a>
+            )}
+          </div>
         </div>
 
         {/* mini metrics */}
@@ -2258,6 +2284,39 @@ function ReportDetail({
             <p className="text-xs text-muted-foreground mt-0.5">
               {report.candidate.category} · {report.candidate.sector}
             </p>
+            {/* Social links in detail header */}
+            <div className="flex items-center gap-1.5 mt-2">
+              {report.candidate.website && (
+                <a href={report.candidate.website} target="_blank" rel="noopener noreferrer"
+                  className="flex items-center gap-1 px-2 py-1 rounded-md text-[10px] bg-muted/30 hover:bg-emerald-500/10 hover:text-emerald-400 border border-border/40 transition-colors">
+                  <Globe className="h-3 w-3" /> Website
+                </a>
+              )}
+              {report.candidate.twitter && (
+                <a href={`https://x.com/${report.candidate.twitter}`} target="_blank" rel="noopener noreferrer"
+                  className="flex items-center gap-1 px-2 py-1 rounded-md text-[10px] bg-muted/30 hover:bg-sky-500/10 hover:text-sky-400 border border-border/40 transition-colors">
+                  <Twitter className="h-3 w-3" /> @{report.candidate.twitter}
+                </a>
+              )}
+              {report.candidate.github && (
+                <a href={report.candidate.github} target="_blank" rel="noopener noreferrer"
+                  className="flex items-center gap-1 px-2 py-1 rounded-md text-[10px] bg-muted/30 hover:bg-violet-500/10 hover:text-violet-400 border border-border/40 transition-colors">
+                  <Github className="h-3 w-3" /> GitHub
+                </a>
+              )}
+              {report.candidate.discord && (
+                <a href={report.candidate.discord} target="_blank" rel="noopener noreferrer"
+                  className="flex items-center gap-1 px-2 py-1 rounded-md text-[10px] bg-muted/30 hover:bg-indigo-500/10 hover:text-indigo-400 border border-border/40 transition-colors">
+                  <MessageCircle className="h-3 w-3" /> Discord
+                </a>
+              )}
+              {report.candidate.blockchain_explorer && (
+                <a href={report.candidate.blockchain_explorer} target="_blank" rel="noopener noreferrer"
+                  className="flex items-center gap-1 px-2 py-1 rounded-md text-[10px] bg-muted/30 hover:bg-amber-500/10 hover:text-amber-400 border border-border/40 transition-colors">
+                  <ExternalLink className="h-3 w-3" /> Explorer
+                </a>
+              )}
+            </div>
           </div>
           {/* Score ring - clean, no clutter next to it */}
           <ScoreRadial

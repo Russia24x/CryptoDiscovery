@@ -151,6 +151,9 @@ async def get_scan(scan_id: str):
             "veto": r.veto.triggered,
             "category": r.candidate.category,
             "sector": r.candidate.sector,
+            "website": r.candidate.website,
+            "twitter": r.candidate.twitter,
+            "github": r.candidate.github,
         }
         for rid in SCAN_REPORT_IDS.get(scan_id, [])
         for r in [REPORTS.get(rid)]

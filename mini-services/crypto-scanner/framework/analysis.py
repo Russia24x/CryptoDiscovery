@@ -55,6 +55,20 @@ def build_report(
 ) -> ProjectReport:
     now = datetime.now(timezone.utc)
 
+    # Enrich candidate with links/image from evidence (CoinGecko detail)
+    if ev.image_url and not candidate.image:
+        candidate.image = ev.image_url
+    if ev.homepage and not candidate.website:
+        candidate.website = ev.homepage
+    if ev.twitter_handle and not candidate.twitter:
+        candidate.twitter = ev.twitter_handle
+    if ev.github_url and not candidate.github:
+        candidate.github = ev.github_url
+    if ev.discord_url and not candidate.discord:
+        candidate.discord = ev.discord_url
+    if ev.blockchain_explorer and not candidate.blockchain_explorer:
+        candidate.blockchain_explorer = ev.blockchain_explorer
+
     # --- PHASE 2: Veto gates ---
     veto = evaluate_vetoes(
         guaranteed_return_claims=ev.guaranteed_return_claims,

@@ -216,7 +216,6 @@ async def discover_candidates(
             initial_priority=priority,
             gecko_id=gecko_id,
             llama_id=llama_entry.get("slug") if llama_entry else None,
-            website=m.get("image") if isinstance(m.get("image"), str) else None,
             image=m.get("image"),
         )
         candidates.append((cand, signal))
@@ -307,6 +306,7 @@ def _llama_only_pool(
             key_signal=" · ".join(signal_parts),
             initial_priority="High" if fees_24h else "Medium",
             llama_id=p.get("slug"),
+            image=p.get("logo") or p.get("icon"),
         ))
         if len(out) >= max_projects:
             break

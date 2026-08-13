@@ -63,7 +63,8 @@ async def fetch_defillama_protocols() -> list[dict[str, Any]]:
     # keep only the fields we actually use, to bound memory
     keep = ("name", "symbol", "slug", "tvl", "chain", "category",
             "description", "parentProtocol", "audit_links", "hallmarks",
-            "governance", "methodology", "methodologyURL")
+            "governance", "methodology", "methodologyURL",
+            "logo", "icon", "twitter", "github", "url")
     slim: list[dict[str, Any]] = []
     for p in data:
         slim.append({k: p.get(k) for k in keep})

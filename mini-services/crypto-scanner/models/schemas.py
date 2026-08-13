@@ -273,6 +273,10 @@ class CandidateInfo(BaseModel):
     llama_id: Optional[str] = None
     website: Optional[str] = None
     image: Optional[str] = None
+    twitter: Optional[str] = None
+    github: Optional[str] = None
+    discord: Optional[str] = None
+    blockchain_explorer: Optional[str] = None
 
 
 class ProjectReport(BaseModel):

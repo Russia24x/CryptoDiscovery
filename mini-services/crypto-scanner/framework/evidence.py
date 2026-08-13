@@ -92,6 +92,13 @@ class EvidenceBundle:
         self.has_token = True
         self.market_cap_usd: float | None = None
         self.fdv_usd: float | None = None
+        # Links and image from CoinGecko
+        self.image_url: str | None = None
+        self.homepage: str | None = None
+        self.twitter_handle: str | None = None
+        self.github_url: str | None = None
+        self.discord_url: str | None = None
+        self.blockchain_explorer: str | None = None
 
 
 async def collect(
@@ -176,17 +183,36 @@ def _apply_gecko_detail(b: EvidenceBundle, d: dict[str, Any]) -> None:
         if ms > 0:
             b.tokenomics.supply_growth_pct = round((pending / ms) * 100 / 3, 2)
 
-    # links → detect API/docs presence
+    # links → detect API/docs presence + store for CandidateInfo
     links = d.get("links") or {}
     site = (links.get("homepage") or [None])[0]
     repo = (links.get("repos_url") or {}).get("github") or []
+    chat = (links.get("chat_url") or [None])[0]
+    tw_handle = links.get("twitter_screen_name")
+    bc_sites = links.get("blockchain_site") or []
+
+    # Store links in EvidenceBundle for CandidateInfo enrichment
+    if site:
+        b.homepage = site
+    if tw_handle:
+        b.twitter_handle = tw_handle
+    if repo and isinstance(repo, list) and len(repo) > 0:
+        b.github_url = repo[0]
+    if chat:
+        b.discord_url = chat
+    if bc_sites and isinstance(bc_sites, list) and len(bc_sites) > 0:
+        b.blockchain_explorer = bc_sites[0]
+
+    # Image URL from CoinGecko (large size)
+    img_data = d.get("image") or {}
+    if isinstance(img_data, dict):
+        b.image_url = img_data.get("large") or img_data.get("thumb") or img_data.get("small")
+
     if repo:
-        b.has_docs = True  # repos usually have docs
+        b.has_docs = True
         b.has_sdk = True
         b.has_api = True
-        # rough developer count from stars
-        # (we don't call GitHub API to stay key-less; use a heuristic)
-        b.github_stars = 1500  # placeholder signal (kept conservative)
+        b.github_stars = 1500
 
     # community data
     cd = d.get("community_data") or {}
