@@ -1759,7 +1759,7 @@ export default function Home() {
       <Sheet open={!!selectedReport} onOpenChange={(o) => !o && setSelectedReport(null)}>
         <SheetContent side="right" className="w-full sm:max-w-2xl lg:max-w-3xl p-0 overflow-y-auto">
           <SheetDescription className="sr-only">
-            Detailed project analysis report with all framework sections
+            {t("detail.srDescription")}
           </SheetDescription>
           {selectedReport ? (
             <ReportDetail

@@ -136,7 +136,12 @@
     "md": "MD",
     "json": "JSON",
     "oldestToLatest": "Oldest → Latest",
-    "scans": "scans"
+    "scans": "scans",
+    "srDescription": "Detailed project analysis report with all framework sections",
+    "action": "Action",
+    "highRisk": "HIGH RISK",
+    "butFlagged": "but flagged",
+    "dueTo": "due to a critical sub-factor below 3"
   },
   "metrics": {
     "fees24h": "Fees (24h)",

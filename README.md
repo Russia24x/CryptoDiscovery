@@ -6,10 +6,11 @@
 [![Next.js](https://img.shields.io/badge/Next.js-16-black)](https://nextjs.org/)
 [![Python](https://img.shields.io/badge/Python-3.12-blue)](https://python.org/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5-blue)](https://www.typescriptlang.org/)
+[![Bilingual](https://img.shields.io/badge/i18n-EN%2FFA%20RTL-green)]()
 
 ## Overview
 
-CryptoSieve is a comprehensive framework for discovering, evaluating, and ranking crypto projects based on verifiable evidence — not narratives. It implements a multi-phase analysis pipeline inspired by professional investment research methodologies.
+CryptoSieve is a comprehensive framework for discovering, evaluating, and ranking crypto projects based on verifiable evidence — not narratives. It implements a multi-phase analysis pipeline inspired by professional investment research methodologies, aligned with Framework 3.0 specifications.
 
 ### Core Philosophy
 
@@ -25,6 +26,35 @@ Adoption > Attention
 Project Quality ≠ Token Quality ≠ Investment Attractiveness
 ```
 
+## Key Features
+
+### Analysis Engine
+- **8-Phase Pipeline**: Discovery → Screening → Evidence → Evaluation → Scoring → Investment → Decision → Output
+- **5 Discovery Lenses**: Money Flow, Hidden Infrastructure, Bottleneck, Institutional Adoption, Emerging Rails
+- **5 Hard Veto Gates**: Fraud, Security, Custody, Backing Transparency, Legal Deception
+- **5 Fundamental Axes** (0-10 scoring with confidence): Invisible Utility, Economic Engine, Moat, Token & Market Structure, Governance/Legal/Security
+- **Valuation Multiples** (Framework 3.0): P/R (MC/Revenue), P/F (FDV/Fees), P/T (MC/TVL)
+- **Cross-Verification Engine**: Tracks data sources and discrepancies
+- **Self-Correction Engine**: 7 bias checks (popular project, source, snapshot, precision, narrative, confirmation, anti-promise)
+- **Fee Stability Analysis**: Real 7d vs 30d fee volatility comparison
+
+### User Interface
+- **Bilingual UI**: English & Persian (فارسی) with automatic RTL layout
+- **Dark/Light Theme**: System-aware with manual toggle
+- **Keyboard Shortcuts**: S (scan), / (search), G/A (views), C (compare), W (watchlist), ⌘K (global search), Esc (close)
+- **IndexedDB Persistence**: Watchlist and recently viewed saved in browser
+- **Export**: Markdown, JSON, CSV (with formula injection protection)
+- **Scan History**: Quality trend visualization across scans
+- **Scan Diff**: Side-by-side comparison of two scans
+- **Global Search**: Search across all completed scans with debounce
+- **Market Sentiment**: Composite score (Bullish/Bearish/Neutral)
+- **Project Score History**: Track score changes across scans
+- **Social Links**: Website, Twitter/X, GitHub, Discord, Blockchain Explorer
+
+### Data Sources (No API Key Required)
+- **CoinGecko**: Market data, prices, tokenomics, social links
+- **DeFiLlama**: TVL, fees (7d/30d), revenue, protocol metadata
+
 ## Architecture
 
 ```
@@ -34,14 +64,16 @@ Project Quality ≠ Token Quality ≠ Investment Attractiveness
 │  │ Scan Config  │  │ Results Grid  │  │ Detail Drawer      │ │
 │  │ + Presets    │  │ + Analytics   │  │ + Radar Chart      │ │
 │  │ + Persona    │  │ + Sentiment   │  │ + Valuation P/R/P/F│ │
+│  │ + i18n EN/FA │  │ + Heatmap     │  │ + Cross-Verify     │ │
 │  └─────────────┘  └──────────────┘  └────────────────────┘ │
 │         │                │                    │              │
 │         ▼                ▼                    ▼              │
 │  ┌─────────────────────────────────────────────────────────┐ │
-│  │              API Proxy Layer (/api/scanner/*)            │ │
+│  │        API Proxy Layer (/api/scanner/*)                  │ │
+│  │        • 30s timeout • Error handling • try-catch       │ │
 │  └─────────────────────────┬───────────────────────────────┘ │
 └────────────────────────────┼────────────────────────────────┘
-                             │ HTTP (30s timeout, error handling)
+                             │ HTTP
                              ▼
 ┌─────────────────────────────────────────────────────────────┐
 │              Python FastAPI Service (:3003)                   │
@@ -53,17 +85,18 @@ Project Quality ≠ Token Quality ≠ Investment Attractiveness
 │         ▼              ▼              ▼              ▼        │
 │  ┌──────────┐  ┌───────────┐  ┌──────────┐  ┌────────────┐ │
 │  │ Scoring  │→│ Investment│→│ Decision │→│ Output     │ │
-│  │ + Penalty│  │ + Valuation│  │ 6 Levels │  │ 23 Sections│ │
+│  │ + Penalty│  │ + P/R/P/F │  │ 6 Levels │  │ 23 Sections│ │
 │  └──────────┘  └───────────┘  └──────────┘  └────────────┘ │
 │         │              │                                  │
 │         ▼              ▼                                  │
 │  ┌──────────────────────────────────────────────────────┐  │
 │  │           Data Sources (No API Key Required)          │  │
-│  │  ┌────────────┐  ┌──────────────┐  ┌──────────────┐ │  │
-│  │  │ CoinGecko  │  │  DeFiLlama   │  │ (Extensible) │ │  │
-│  │  │ Prices     │  │  TVL/Fees    │  │              │ │  │
-│  │  │ Tokenomics │  │  Revenue     │  │              │ │  │
-│  │  └────────────┘  └──────────────┘  └──────────────┘ │  │
+│  │  ┌────────────┐  ┌──────────────┐                    │  │
+│  │  │ CoinGecko  │  │  DeFiLlama   │                    │  │
+│  │  │ Prices     │  │  TVL/Fees    │                    │  │
+│  │  │ Tokenomics │  │  Revenue     │                    │  │
+│  │  │ Links      │  │  7d/30d      │                    │  │
+│  │  └────────────┘  └──────────────┘                    │  │
 │  └──────────────────────────────────────────────────────┘  │
 └─────────────────────────────────────────────────────────────┘
 ```
@@ -99,6 +132,8 @@ bun run dev
 3. Configure market cap range and sectors
 4. Click "Scan Market" or press `S`
 5. Explore ranked results and detailed reports
+6. Toggle language (EN/FA) using the language button
+7. Toggle theme (dark/light) using the theme button
 
 ## Framework Phases
 
@@ -106,35 +141,13 @@ bun run dev
 |-------|------|-------------|
 | 0 | Settings | Persona selection, market cap range, sector filters |
 | 1 | Discovery | 5 lenses: Money Flow, Hidden Infrastructure, Bottleneck, Institutional, Emerging |
-| 2 | Screening | 5 hard veto gates + 12 severe risk flags |
-| 3 | Evidence | 4 quality grades (A-D) with freshness tracking |
-| 4 | Evaluation | 5 fundamental axes scored 0-10 with confidence |
-| 5 | Scoring | Weighted score 0-100 with weakest-link penalty |
-| 6 | Investment | P/R, P/F, P/T valuation multiples + cycle phase |
-| 7 | Decision | 6 action levels with risk adjustment |
-| 8 | Output | 23-section report with 5 final questions |
-
-### Valuation Multiples (Framework 3.0)
-
-```
-P/R = Market Cap ÷ Annualized Revenue    (real revenue only)
-P/F = FDV ÷ Annualized Fees              (fees ≠ revenue)
-P/T = Market Cap ÷ TVL
-```
-
-## Key Features
-
-- **Bilingual UI** (English/Persian) with automatic RTL
-- **Dark/Light theme** with system detection
-- **Keyboard shortcuts** (S, /, G, A, C, W, ⌘K, Esc)
-- **IndexedDB** persistence for watchlist and recently viewed
-- **Export** (Markdown, JSON, CSV) with formula injection protection
-- **Scan history** with quality trend visualization
-- **Scan diff** for comparing two scans side-by-side
-- **Global search** across all completed scans
-- **Market sentiment** composite score (Bullish/Bearish)
-- **Cross-verification** engine tracking data sources
-- **Self-correction** engine with 7 bias checks
+| 2 | Screening | 5 hard veto gates (Fraud, Security, Custody, Backing, Legal) + 12 severe risks |
+| 3 | Evidence | 4 quality grades (A-D) with freshness tracking, real 7d/30d fee data |
+| 4 | Evaluation | 5 fundamental axes scored 0-10 with confidence, persona-weighted |
+| 5 | Scoring | Weighted score 0-100 with weakest-link penalty, token quality separate |
+| 6 | Investment | P/R, P/F, P/T valuation + cycle phase + catalysts + thesis + kill conditions |
+| 7 | Decision | 6 action levels with risk adjustment + bias checks |
+| 8 | Output | 23-section report + 5 final questions + cross-verification + self-correction |
 
 ## Project Structure
 
@@ -142,39 +155,41 @@ P/T = Market Cap ÷ TVL
 .
 ├── src/
 │   ├── app/
-│   │   ├── page.tsx              # Main dashboard (4100+ lines)
-│   │   ├── layout.tsx            # Root layout with ThemeProvider + LanguageProvider
-│   │   └── api/scanner/          # API proxy routes (7 endpoints)
+│   │   ├── page.tsx              # Main dashboard
+│   │   ├── layout.tsx            # Root layout (ThemeProvider + LanguageProvider)
+│   │   └── api/scanner/          # API proxy routes (7 endpoints, error-handled)
 │   ├── components/
-│   │   ├── dashboard/            # Visualization components
-│   │   │   ├── score-radial.tsx
-│   │   │   ├── axis-radar-chart.tsx
-│   │   │   ├── sector-donut.tsx
-│   │   │   └── risk-heatmap.tsx
+│   │   ├── dashboard/            # SVG visualization components
+│   │   │   ├── score-radial.tsx       # Animated circular gauge
+│   │   │   ├── axis-radar-chart.tsx   # Pentagon radar chart
+│   │   │   ├── sector-donut.tsx       # Animated donut chart
+│   │   │   └── risk-heatmap.tsx       # CSS-grid heatmap
 │   │   ├── theme-provider.tsx
 │   │   ├── theme-toggle.tsx
 │   │   └── language-toggle.tsx
 │   └── lib/
 │       ├── i18n/
-│       │   ├── LanguageProvider.tsx
-│       │   ├── en.json
-│       │   └── fa.json
-│       ├── use-indexed-db.ts
-│       ├── scanner-client.ts
+│       │   ├── LanguageProvider.tsx   # Context provider with RTL
+│       │   ├── en.json                # English translations
+│       │   └── fa.json                # Persian translations
+│       ├── use-indexed-db.ts          # IndexedDB hooks
+│       ├── scanner-client.ts          # API client (30s timeout)
 │       └── utils.ts
 ├── mini-services/
 │   └── crypto-scanner/
 │       ├── main.py               # FastAPI service
 │       ├── models/schemas.py     # Pydantic models
-│       ├── data/sources.py       # API integrations
+│       ├── data/sources.py       # CoinGecko + DeFiLlama
 │       └── framework/
-│           ├── core.py           # Principles, veto gates, persona weights
-│           ├── discovery.py      # PHASE 1 — 5 discovery lenses
+│           ├── core.py           # Principles, veto, persona weights
+│           ├── discovery.py      # PHASE 1 — 5 lenses
 │           ├── evidence.py       # PHASE 3 — evidence collection
 │           ├── evaluation.py     # PHASE 4 — 5 axes scoring
 │           └── analysis.py       # PHASE 5-8 — scoring + output
-├── RULES.md                      # Git and code quality rules
-└── README.md                     # This file
+├── RULES.md                      # Git + code quality rules
+├── README.md                     # This file
+├── DEVELOPMENT.md                # Development guide
+└── worklog.md                    # Development history
 ```
 
 ## Tech Stack
@@ -183,9 +198,10 @@ P/T = Market Cap ÷ TVL
 |-------|-----------|
 | Frontend | Next.js 16, React, TypeScript, Tailwind CSS 4, shadcn/ui |
 | Backend | Python 3.12, FastAPI, Pydantic, httpx |
-| Data | CoinGecko API, DeFiLlama API (both free, no key) |
+| Data | CoinGecko API, DeFiLlama API (free, no key) |
 | Storage | IndexedDB (browser), in-memory (Python) |
-| Charts | Pure SVG (no external chart library) |
+| Charts | Pure SVG (no chart library) |
+| i18n | Custom LanguageProvider with EN/FA + RTL |
 
 ## API Endpoints
 
@@ -196,7 +212,13 @@ P/T = Market Cap ÷ TVL
 | GET | `/api/scanner/scan/:id` | Get scan status and results |
 | GET | `/api/scanner/scans` | List all scans |
 | GET | `/api/scanner/projects` | List all project reports |
-| GET | `/api/scanner/project/:id` | Get full project report |
+| GET | `/api/scanner/project/:id` | Get full 23-section project report |
+
+## Documentation
+
+- [RULES.md](RULES.md) — Git rules, code quality, architecture, i18n, testing
+- [DEVELOPMENT.md](DEVELOPMENT.md) — Setup, testing, troubleshooting, architecture decisions
+- [worklog.md](worklog.md) — Complete development history
 
 ## Disclaimer
 
