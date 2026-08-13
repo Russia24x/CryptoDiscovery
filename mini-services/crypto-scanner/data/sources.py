@@ -31,6 +31,12 @@ DEFILLAMA_PROTOCOLS = "https://api.llama.fi/protocols"
 DEFILLAMA_FEES = "https://api.llama.fi/overview/fees"
 DEFILLAMA_STABLECOINS = "https://api.llama.fi/stablecoins"
 
+# CoinGecko API key (optional — free demo key at https://www.coingecko.com/api/pricing)
+# Without a key: 5-15 calls/min (frequent 429s)
+# With demo key: 30 calls/min (much more stable)
+# The demo key is passed via the x-cg-demo-api-key header.
+COINGECKO_API_KEY = os.environ.get("COINGECKO_API_KEY", "")
+
 # CoinMarketCap Pro API (optional — requires API key)
 CMC_PRO_BASE = "https://pro-api.coinmarketcap.com"
 CMC_API_KEY = os.environ.get("CMC_API_KEY", "")
@@ -61,14 +67,23 @@ TIMEOUT = 15.0
 # --------------------------------------------------------------------------- #
 #  Low-level fetchers
 # --------------------------------------------------------------------------- #
+def _gecko_headers() -> dict[str, str]:
+    """Return headers for CoinGecko requests, including demo API key if configured."""
+    if COINGECKO_API_KEY:
+        return {"x-cg-demo-api-key": COINGECKO_API_KEY, "accept": "application/json"}
+    return {"accept": "application/json"}
+
+
 async def _get_json(client: httpx.AsyncClient, url: str, **params: Any) -> Any:
     try:
-        r = await client.get(url, params=params, timeout=TIMEOUT)
+        # Inject CoinGecko API key header for CoinGecko URLs
+        headers = _gecko_headers() if "coingecko.com" in url else {}
+        r = await client.get(url, params=params, timeout=TIMEOUT, headers=headers)
         if r.status_code == 429:
             # Rate limited — wait and retry once
             log.warning("GET %s -> 429 (rate limited), retrying in 2s...", url)
             await asyncio.sleep(2)
-            r = await client.get(url, params=params, timeout=TIMEOUT)
+            r = await client.get(url, params=params, timeout=TIMEOUT, headers=headers)
             if r.status_code != 200:
                 log.warning("GET %s -> %s after retry", url, r.status_code)
                 return None

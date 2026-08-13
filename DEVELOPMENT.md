@@ -30,6 +30,47 @@ The dashboard runs on port 3000.
 nohup setsid python /home/z/my-project/watchdog.py &
 ```
 
+### 4. Scanner Watchdog (keeps Python service alive + loads .env)
+
+```bash
+nohup setsid python /home/z/my-project/scanner-watchdog.py &
+```
+
+The scanner watchdog automatically:
+- Loads `.env` from `mini-services/crypto-scanner/.env`
+- Restarts the scanner if it crashes
+- Logs to `scanner.log`
+
+## API Key Configuration (all optional)
+
+Create a `.env` file at `mini-services/crypto-scanner/.env`:
+
+```bash
+# CoinGecko Demo API Key (free at https://www.coingecko.com/api/pricing)
+# Increases rate limit from 5-15 to 30 calls/min, reduces 429 errors
+COINGECKO_API_KEY=your_demo_key
+
+# CoinMarketCap Pro API Key (free at https://pro.coinmarketcap.com/signup)
+# Enables: categories, global metrics, exchange map, cross-verification
+CMC_API_KEY=your_cmc_key
+
+# Dune Analytics API Key (free at https://dune.com/api-keys)
+# Enables: on-chain Grade A evidence (revenue, holders, active users)
+DUNE_API_KEY=your_dune_key
+
+# Optional: Dune query IDs for pre-configured insights
+# Browse https://dune.com/browse to find queries
+# DUNE_QUERY_TOKEN_CONCENTRATION=12345
+# DUNE_QUERY_REAL_REVENUE=67890
+# DUNE_QUERY_ACTIVE_USERS=11111
+
+# Optional: Additional news sources
+# CRYPTOPANIC_TOKEN=your_token
+# CRYPTOCOMPARE_KEY=your_key
+```
+
+Without any keys, the system uses 11 free sources. With all keys, it uses 15 sources.
+
 ## Code Quality
 
 ### Before Committing

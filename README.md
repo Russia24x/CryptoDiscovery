@@ -111,7 +111,9 @@ Project Quality ≠ Token Quality ≠ Investment Attractiveness
 #### Optional API-Key Sources (unlock exclusive data)
 | Source | Key Env Var | Exclusive Data |
 |--------|------------|----------------|
+| **CoinGecko** | `COINGECKO_API_KEY` | Free demo key — increases rate limit from 5-15 to 30 calls/min, reduces 429 errors. Get at https://www.coingecko.com/api/pricing |
 | **CoinMarketCap Pro** | `CMC_API_KEY` | **Categories** (350 categories with per-category mcap, 24h/7d change, top coins) · **Global metrics** (CMC's own BTC dominance + total mcap for cross-verification) · **Exchange map** · **Quotes/info** (metadata, logo, links) · Cross-verification of price/mcap/supply. *Note: Airdrops & exchange volume require a higher tier plan.* |
+| **Dune Analytics** | `DUNE_API_KEY` | **EXCLUSIVE: On-chain Grade A data** — real revenue vs fees (Revenue ≠ Fees), token holder concentration, bot-filtered DAU/MAU, whale tracking, 100+ chains (Solana, Bitcoin L2, non-EVM). Free key at https://dune.com/api-keys |
 | **CryptoPanic** | `CRYPTOPANIC_TOKEN` | Curated crypto news feed |
 | **CryptoCompare** | `CRYPTOCOMPARE_KEY` | Crypto news + price data |
 
