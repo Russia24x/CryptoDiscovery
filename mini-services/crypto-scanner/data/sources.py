@@ -393,7 +393,7 @@ async def fetch_coin_detail(gecko_id: str) -> dict[str, Any] | None:
             localization="false",
             tickers="false",
             market_data="true",
-            community_data="false",
+            community_data="true",
             developer_data="true",
             sparkline="false",
         )

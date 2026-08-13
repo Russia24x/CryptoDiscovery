@@ -35,7 +35,7 @@ Project Quality ≠ Token Quality ≠ Investment Attractiveness
 - **Quick Actions Grid**: 4 clickable cards navigating to Discovery, Coin Explorer, Market Intelligence, News — each with scan count badges
 - **Market Snapshot Strip**: Trending coins, top-3 DeFi protocols, DeFi TVL total, active coins count, compact Fear & Greed
 - **Two-Column Layout**: Latest news (EN/FA tabs) + Telegram feed (left) · Framework stats + cross-verification + top movers (right)
-- **Data Sources Health Footer**: 14 sources with live status dots
+- **Data Sources Health Footer**: 15 sources with live status dots
 - **Cross-Verification Card**: CoinGecko ↔ CMC BTC dominance comparison with discrepancy % (when CMC key active)
 - Aggregates 7 data sources in parallel with independent resilience (one failing endpoint doesn't break the Hub)
 
@@ -56,7 +56,7 @@ Project Quality ≠ Token Quality ≠ Investment Attractiveness
 #### 2. Coin Explorer (Manual Single-Coin Analysis)
 - Search any cryptocurrency by name/symbol (CoinGecko search API)
 - Select from 6 analysis personas (Investor, Institutional, Researcher, Developer, Trader, Comprehensive)
-- Run the full 8-phase framework on a single coin → complete 23-section report
+- Run the full 8-phase framework on a single coin → complete 29-section report
 - Rich result card with quality score radial, 5 axes bars, valuation multiples, executive verdict, thesis, catalysts, severe risks
 - Deep links to website, Twitter/X, GitHub, block explorer
 
@@ -81,7 +81,7 @@ Project Quality ≠ Token Quality ≠ Investment Attractiveness
   - Chat-style message bubbles with photos and album grids
   - View counts, relative timestamps, per-message deep links
   - Auto-refresh toggle (60s interval)
-- **Data sources badge row**: shows all 14 sources with availability + free/key status
+- **Data sources badge row**: shows all 15 sources with availability + free/key status
 
 ### General UI Features
 - **Bilingual UI**: English & Persian (فارسی) with automatic RTL layout
@@ -91,7 +91,7 @@ Project Quality ≠ Token Quality ≠ Investment Attractiveness
 - **Export**: Markdown, JSON, CSV (with formula injection protection)
 - **Social Links**: Website, Twitter/X, GitHub, Discord, Blockchain Explorer
 
-### Data Sources (14 total: 11 free + 3 optional API-key)
+### Data Sources (15 total: 11 free + 4 optional API-key (CoinGecko has an optional demo key that enhances rate limits))
 
 #### Free Sources (no key required)
 | Source | Data |
@@ -222,7 +222,7 @@ bun run dev
 | 5 | Scoring | Weighted score 0-100 with weakest-link penalty, token quality separate |
 | 6 | Investment | P/R, P/F, P/T valuation + cycle phase + catalysts + thesis + kill conditions |
 | 7 | Decision | 6 action levels with risk adjustment + bias checks |
-| 8 | Output | 23-section report + 5 final questions + cross-verification + self-correction |
+| 8 | Output | 29-section report + 5 final questions + cross-verification + self-correction |
 
 ## Project Structure
 
@@ -289,7 +289,7 @@ bun run dev
 | GET | `/api/scanner/scan/:id` | Get scan status and results |
 | GET | `/api/scanner/scans` | List all scans |
 | GET | `/api/scanner/projects` | List all project reports |
-| GET | `/api/scanner/project/:id` | Get full 23-section project report |
+| GET | `/api/scanner/project/:id` | Get full 29-section project report |
 
 ### Coin Explorer & Market Intelligence
 | Method | Path | Description |

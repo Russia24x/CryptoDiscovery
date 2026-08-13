@@ -60,7 +60,7 @@ Never guess missing data      ← اگر Evidence کافی نیست، Confidence
 │       └──────────────┴─────────────┴──────────────┴──────────────┘        │
 │                              │                                            │
 │                    ┌─────────▼──────────┐                                 │
-│                    │  API Proxy Layer   │  18 route files                 │
+│                    │  API Proxy Layer   │  21 route files                 │
 │                    │  /api/scanner/*    │  timeout + error handling       │
 │                    └─────────┬──────────┘                                 │
 └──────────────────────────────┼───────────────────────────────────────────┘
@@ -77,7 +77,7 @@ Never guess missing data      ← اگر Evidence کافی نیست، Confidence
 │       ▼              ▼              ▼              ▼                      │
 │  ┌──────────┐  ┌───────────┐  ┌──────────┐  ┌────────────┐              │
 │  │ Scoring  │→│ Investment│→│ Decision │→│  Output    │              │
-│  │ + Penalty│  │ + P/R/P/F │  │ 6 Levels │  │ 23 Sections│              │
+│  │ + Penalty│  │ + P/R/P/F │  │ 6 Levels │  │ 29 Sections│              │
 │  └──────────┘  └───────────┘  └──────────┘  └────────────┘              │
 │       │              │              │              │                      │
 │       └──────────────┴──────────────┴──────────────┘                      │
@@ -178,7 +178,7 @@ POST /api/scanner/scan  →  POST /scan  (Python)
 └─────────────────────────────────────────────────────────────┘
         │
         ▼
-┌─── PHASE 8: Output (23-section report) ───────────────────┐
+┌─── PHASE 8: Output (29-section report) ───────────────────┐
 │  1. Candidate info + links                                  │
 │  2. Veto result + severe risks                              │
 │  3. Executive verdict (i18n)                                │
@@ -225,7 +225,7 @@ POST /analyze  (Python)
   → evidence.collect(candidate)         ← PHASE 3 (4 sources)
   → analysis.build_report(candidate, ev, config, "manual")
   → Store report in REPORTS dict
-  → Return full 23-section ProjectReport
+  → Return full 29-section ProjectReport
 ```
 
 ---
@@ -639,7 +639,7 @@ src/
 ├── app/
 │   ├── page.tsx                    (4338 lines) — Main page, 5 views, Hub + Discovery
 │   ├── layout.tsx                  — Root layout with ThemeProvider + LanguageProvider
-│   └── api/scanner/                — 18 proxy route files
+│   └── api/scanner/                — 21 proxy route files
 │       ├── health/route.ts
 │       ├── scan/route.ts
 │       ├── scan/[id]/route.ts
@@ -934,20 +934,6 @@ def cache_info():
 - [ ] **Custom watchlists**: لیست‌های متعدد با دسته‌بندی
 - [ ] **Notes & tags**: یادداشت کاربر روی هر پروژه
 - [ ] **Export portfolio**: خروجی CSV/JSON برای portfolio tracker‌ها
-
-### اولویت پایین (Long-term)
-
-#### ۷. مقیاس‌پذیری
-- [ ] **Redis cache**: به‌جای in-memory برای multi-instance
-- [ ] **Background workers**: Celery برای scan‌های طولانی
-- [ ] **CDN**: برای تصاویر کوین و API responses
-- [ ] **API rate limiting**: برای جلوگیری از abuse
-
-#### ۸. هوش مصنوعی
-- [ ] **LLM thesis generation**: تولید thesis فارسی/انگلیسی با LLM
-- [ ] **Anomaly detection**: تشخیص ناهنجاری در داده‌های on-chain
-- [ ] **Predictive scoring**: مدل ML برای پیش‌بینی کیفیت پروژه
-- [ ] **Auto-categorization**: دسته‌بندی خودکار پروژه‌ها با NLP
 
 ---
 
