@@ -898,13 +898,13 @@ def cache_info():
 ### اولویت بالا (Short-term)
 
 #### ۱. پایداری داده
-- [ ] **Persistence layer**: ذخیره scan‌ها و گزارش‌ها در SQLite (Prisma) به‌جای in-memory
+- [x] **Persistence layer**: ذخیره scan‌ها و گزارش‌ها در SQLite ✓
 - [x] **CoinGecko rate limit handling**: Demo API key فعال (۳۰ calls/min) ✓
 - [ ] **Webhook برای Telegram**: به‌جای polling، ثبت webhook برای real-time updates
 - [ ] **Retry logic**: exponential backoff برای API‌های ناپایدار
 
 #### ۲. بهبود فریمورک
-- [ ] **Historical scoring**: ذخیره امتیاز پروژه در طول زمان برای trend analysis
+- [x] **Historical scoring**: ذخیره امتیاز پروژه در SQLite برای trend analysis ✓
 - [ ] **Alert system**: هشدار زمانی که امتیاز یک پروژه تغییر قابل‌توجه می‌کند
 - [ ] **Custom persona**: اجازه تعریف وزن‌های شخصی‌سازی‌شده توسط کاربر
 - [ ] **Backtesting**: مقایسه پیش‌بینی‌های فریمورک با عملکرد واقعی قیمت
