@@ -32,6 +32,7 @@ from models.schemas import (
 )
 from framework import analysis, discovery, evidence
 from data import sources
+import db
 
 # --------------------------------------------------------------------------- #
 #  Logging
@@ -43,8 +44,21 @@ logging.basicConfig(
 log = logging.getLogger("scanner")
 
 # --------------------------------------------------------------------------- #
-#  In-memory stores (good enough for a single-instance analysis tool)
+#  Persistence layer — SQLite for durability + in-memory for speed
+#  All writes go to BOTH in-memory (for fast reads) and SQLite (for restarts).
+#  On startup, in-memory is populated from SQLite.
 # --------------------------------------------------------------------------- #
+db.init_db()
+
+# Ensure the "manual" scan bucket exists in the DB (for manual coin analyses)
+db.save_scan(
+    scan_id="manual", status="completed", phase="Completed", progress=100.0,
+    total=0, processed=0, persona="manual",
+    config_json='{"persona": "manual"}',
+    started_at=datetime.now(timezone.utc).isoformat(),
+    finished_at=datetime.now(timezone.utc).isoformat(),
+)
+
 SCANS: dict[str, ScanProgress] = {}
 REPORTS: dict[str, ProjectReport] = {}
 SCAN_REPORT_IDS: dict[str, list[str]] = {}
@@ -91,8 +105,10 @@ async def health():
         "status": "ok",
         "service": "crypto-scanner",
         "framework_version": "1.0.0",
-        "scans_total": len(SCANS),
-        "reports_total": len(REPORTS),
+        "scans_total": len(SCANS) + db.get_scan_count() - min(len(SCANS), db.get_scan_count()),
+        "reports_total": len(REPORTS) + max(0, db.get_report_count() - len(REPORTS)),
+        "db_scans": db.get_scan_count(),
+        "db_reports": db.get_report_count(),
         "cache": sources.cache_info(),
         "timestamp": datetime.now(timezone.utc).isoformat(),
     }
@@ -229,9 +245,13 @@ async def get_scan_projects(scan_id: str):
 
 @app.get("/project/{report_id}")
 async def get_project(report_id: str):
-    if report_id not in REPORTS:
-        raise HTTPException(404, "project report not found")
-    return REPORTS[report_id].model_dump(mode="json")
+    # Try in-memory first (fast), then SQLite (durable)
+    if report_id in REPORTS:
+        return REPORTS[report_id].model_dump(mode="json")
+    db_report = db.load_report(report_id)
+    if db_report:
+        return db_report
+    raise HTTPException(404, "project report not found")
 
 
 @app.get("/projects")
@@ -273,6 +293,19 @@ async def list_scans():
         }
         for s in sorted(SCANS.values(), key=lambda x: x.started_at, reverse=True)
     ]
+
+
+@app.get("/score-history/{symbol}")
+async def get_score_history(symbol: str, limit: int = 20):
+    """Get historical scores for a symbol — for trend analysis.
+
+    Returns a list of {project_quality, token_quality, confidence, action, timestamp}
+    entries, newest first. Data persists across restarts via SQLite.
+    """
+    history = db.get_score_history(symbol, limit=limit)
+    if not history:
+        return {"symbol": symbol.upper(), "history": [], "count": 0}
+    return {"symbol": symbol.upper(), "history": history, "count": len(history)}
 
 
 # --------------------------------------------------------------------------- #
@@ -335,6 +368,11 @@ async def _run_scan(scan_id: str):
                 report = analysis.build_report(cand, ev, config, scan_id)
                 REPORTS[report.id] = report
                 SCAN_REPORT_IDS[scan_id].append(report.id)
+                # Persist to SQLite
+                try:
+                    db.save_report(report.id, scan_id, report.model_dump(mode="json"))
+                except Exception as exc:  # noqa: BLE001
+                    log.warning("Failed to persist report %s: %s", report.id, exc)
             except Exception as exc:  # noqa: BLE001
                 log.exception("Failed processing %s: %s", cand.symbol, exc)
                 progress.phase_log.append(f"  ! {cand.symbol} failed: {exc}")
@@ -457,6 +495,11 @@ async def analyze_single_coin(req: AnalyzeRequest):
     config = ScanConfig(persona=req.persona, lang=req.lang)
     report = analysis.build_report(cand, ev, config, scan_id="manual")
     REPORTS[report.id] = report
+    # Persist to SQLite
+    try:
+        db.save_report(report.id, "manual", report.model_dump(mode="json"))
+    except Exception as exc:  # noqa: BLE001
+        log.warning("Failed to persist manual report %s: %s", report.id, exc)
     # Also track under a synthetic "manual" bucket so /scans doesn't break
     if "manual" not in SCAN_REPORT_IDS:
         SCAN_REPORT_IDS["manual"] = []
