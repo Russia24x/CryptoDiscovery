@@ -961,17 +961,19 @@ export default function Home() {
   }, [activeScan?.reports]);
   const availableActions = useMemo(() => {
     if (!activeScan?.reports) return [];
-    const set = new Set<{ value: string; labelKey: string }>();
+    // Use a Map keyed by `value` to deduplicate — Set uses reference equality
+    // for objects, so identical {value, labelKey} pairs would be added multiple times.
+    const map = new Map<string, { value: string; labelKey: string }>();
     activeScan.reports.forEach((r) => {
       const a = r.action.toLowerCase();
-      if (a.includes("high conviction")) set.add({ value: "high conviction", labelKey: "actions.highConviction" });
-      else if (a.includes("core")) set.add({ value: "core", labelKey: "actions.coreCandidate" });
-      else if (a.includes("small")) set.add({ value: "small", labelKey: "actions.smallPosition" });
-      else if (a.includes("research")) set.add({ value: "research", labelKey: "actions.deepResearch" });
-      else if (a.includes("watch")) set.add({ value: "watch", labelKey: "actions.watch" });
-      else set.add({ value: "ignore", labelKey: "actions.ignore" });
+      if (a.includes("high conviction")) map.set("high conviction", { value: "high conviction", labelKey: "actions.highConviction" });
+      else if (a.includes("core")) map.set("core", { value: "core", labelKey: "actions.coreCandidate" });
+      else if (a.includes("small")) map.set("small", { value: "small", labelKey: "actions.smallPosition" });
+      else if (a.includes("research")) map.set("research", { value: "research", labelKey: "actions.deepResearch" });
+      else if (a.includes("watch")) map.set("watch", { value: "watch", labelKey: "actions.watch" });
+      else map.set("ignore", { value: "ignore", labelKey: "actions.ignore" });
     });
-    return Array.from(set).sort((a, b) => a.value.localeCompare(b.value));
+    return Array.from(map.values()).sort((a, b) => a.value.localeCompare(b.value));
   }, [activeScan?.reports]);
 
   // --- sector distribution data for donut chart ---
