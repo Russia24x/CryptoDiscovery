@@ -771,6 +771,41 @@ async def get_dune_insights(symbol: str):
     }
 
 
+# --------------------------------------------------------------------------- #
+#  CoinGecko enhanced endpoints (price charts, OHLC, new coins, categories)
+# --------------------------------------------------------------------------- #
+@app.get("/coingecko/chart/{gecko_id}")
+async def get_price_chart(gecko_id: str, days: int = 7):
+    """Fetch historical price chart (sparkline) for a coin."""
+    data = await sources.fetch_price_chart(gecko_id, days=days)
+    if data is None:
+        return {"error": "Chart data unavailable (may be rate-limited)"}
+    return data
+
+
+@app.get("/coingecko/ohlc/{gecko_id}")
+async def get_ohlc(gecko_id: str, days: int = 7):
+    """Fetch OHLC candlestick data for a coin."""
+    data = await sources.fetch_ohlc(gecko_id, days=days)
+    if data is None:
+        return {"error": "OHLC data unavailable"}
+    return {"gecko_id": gecko_id, "days": days, "candles": data, "count": len(data)}
+
+
+@app.get("/coingecko/new-coins")
+async def get_new_coins():
+    """Fetch recently listed coins from CoinGecko."""
+    data = await sources.fetch_new_coins()
+    return {"coins": data or [], "count": len(data or [])}
+
+
+@app.get("/coingecko/categories")
+async def get_coingecko_categories():
+    """Fetch CoinGecko coin categories (free, different from CMC)."""
+    data = await sources.fetch_coingecko_categories()
+    return {"categories": data or [], "count": len(data or [])}
+
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run("main:app", host="0.0.0.0", port=3003, reload=False, log_level="info")

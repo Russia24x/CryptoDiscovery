@@ -1122,6 +1122,108 @@ async def search_coins(query: str) -> list[dict[str, Any]]:
     return out
 
 
+async def fetch_price_chart(gecko_id: str, days: int = 7) -> dict[str, Any] | None:
+    """Fetch historical price chart (sparkline data) for a coin.
+
+    Uses CoinGecko /coins/{id}/market_chart endpoint.
+    Auto-granularity: 1d → 5-min, 2-90d → hourly, 90d+ → daily.
+
+    Returns: {prices: [[timestamp, price], ...], market_caps: [...], total_volumes: [...]}
+    """
+    if not gecko_id:
+        return None
+    cache_key = f"chart:{gecko_id}:{days}"
+    cached = cache_get(cache_key, ttl=300.0)  # 5-min cache
+    if cached is not None:
+        return cached
+    async with httpx.AsyncClient(follow_redirects=True) as c:
+        data = await _get_json(c, f"{COINGECKO_BASE}/coins/{gecko_id}/market_chart",
+                               vs_currency="usd", days=str(days))
+    if not isinstance(data, dict):
+        return None
+    out = {
+        "gecko_id": gecko_id,
+        "days": days,
+        "prices": data.get("prices") or [],
+        "market_caps": data.get("market_caps") or [],
+        "total_volumes": data.get("total_volumes") or [],
+    }
+    cache_set(cache_key, out)
+    log.info("CoinGecko: chart for %s (%dd) — %d price points", gecko_id, days, len(out["prices"]))
+    return out
+
+
+async def fetch_ohlc(gecko_id: str, days: int = 7) -> list[list[float]] | None:
+    """Fetch OHLC candlestick data for a coin.
+
+    Returns: [[timestamp, open, high, low, close], ...]
+    """
+    if not gecko_id:
+        return None
+    cache_key = f"ohlc:{gecko_id}:{days}"
+    cached = cache_get(cache_key, ttl=300.0)
+    if cached is not None:
+        return cached
+    async with httpx.AsyncClient(follow_redirects=True) as c:
+        data = await _get_json(c, f"{COINGECKO_BASE}/coins/{gecko_id}/ohlc",
+                               vs_currency="usd", days=str(days))
+    if not isinstance(data, list):
+        return None
+    cache_set(cache_key, data)
+    log.info("CoinGecko: OHLC for %s (%dd) — %d candles", gecko_id, days, len(data))
+    return data
+
+
+async def fetch_new_coins() -> list[dict[str, Any]] | None:
+    """Fetch recently listed coins from CoinGecko.
+
+    Returns: [{id, symbol, name, activated_at}, ...]
+    """
+    cache_key = "new_coins"
+    cached = cache_get(cache_key, ttl=600.0)  # 10-min cache
+    if cached is not None:
+        return cached
+    async with httpx.AsyncClient(follow_redirects=True) as c:
+        data = await _get_json(c, f"{COINGECKO_BASE}/coins/list/new")
+    if not isinstance(data, list):
+        return None
+    out = [{"id": c.get("id"), "symbol": (c.get("symbol") or "").upper(),
+            "name": c.get("name"), "activated_at": c.get("activated_at")} for c in data[:50]]
+    cache_set(cache_key, out)
+    log.info("CoinGecko: %d new coins listed", len(out))
+    return out
+
+
+async def fetch_coingecko_categories() -> list[dict[str, Any]] | None:
+    """Fetch CoinGecko coin categories with market data (free, no key needed).
+
+    Different from CMC categories — CoinGecko has its own taxonomy.
+    Returns: [{id, name, market_cap, volume_24h, top_3_coins, content}, ...]
+    """
+    cache_key = "gecko_categories"
+    cached = cache_get(cache_key, ttl=300.0)
+    if cached is not None:
+        return cached
+    async with httpx.AsyncClient(follow_redirects=True) as c:
+        data = await _get_json(c, f"{COINGECKO_BASE}/coins/categories")
+    if not isinstance(data, list):
+        return None
+    out = []
+    for cat in data[:100]:
+        out.append({
+            "id": cat.get("id"),
+            "name": cat.get("name"),
+            "market_cap": cat.get("market_cap"),
+            "market_cap_change_24h": cat.get("market_cap_change_24h_percentage"),
+            "volume_24h": cat.get("volume_24h"),
+            "content": cat.get("content"),
+            "top_3_coins": cat.get("top_3_coins") or [],
+        })
+    cache_set(cache_key, out)
+    log.info("CoinGecko: %d categories fetched", len(out))
+    return out
+
+
 # --------------------------------------------------------------------------- #
 #  CoinGecko global market data
 # --------------------------------------------------------------------------- #
