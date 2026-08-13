@@ -600,6 +600,14 @@ mini-services/crypto-scanner/
 | POST | `/dune/execute/{query_id}` | اجرای تازه کوئری با پارامتر |
 | GET | `/dune/insights/{symbol}` | insights آماده: تمرکز توکن، درآمد واقعی، کاربران فعال |
 
+#### CoinGecko Enhanced (Demo Key)
+| Method | Path | توضیح |
+|--------|------|-------|
+| GET | `/coingecko/chart/{gecko_id}?days=7` | نمودار قیمت تاریخی (sparkline) |
+| GET | `/coingecko/ohlc/{gecko_id}?days=7` | داده OHLC شمعی |
+| GET | `/coingecko/new-coins` | کوین‌های تازه لیست‌شده (discovery) |
+| GET | `/coingecko/categories` | دسته‌بندی CoinGecko (رایگان، متفاوت از CMC) |
+
 ### ذخیره‌سازی داده
 
 ```python
