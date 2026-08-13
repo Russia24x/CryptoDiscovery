@@ -258,6 +258,37 @@ interface FullReport {
   }[];
   fee_stability?: string | null;
   bias_checks?: string[];
+  market_overview?: {
+    price: number | null;
+    market_cap: number | null;
+    fdv: number | null;
+    cmc_rank: number | null;
+    volume_24h: number | null;
+    circulating_supply: number | null;
+    total_supply: number | null;
+    max_supply: number | null;
+    tvl: number | null;
+    holder_count: number | null;
+    top_10_holder_ratio: number | null;
+    top_100_holder_ratio: number | null;
+    ath: number | null;
+    atl: number | null;
+    audited: boolean | null;
+    platform_count: number | null;
+    percent_change_24h: number | null;
+    percent_change_7d: number | null;
+    percent_change_30d: number | null;
+    price_low_24h: number | null;
+    price_high_24h: number | null;
+    price_low_30d: number | null;
+    price_high_30d: number | null;
+    price_low_52w: number | null;
+    price_high_52w: number | null;
+    market_cap_dominance: number | null;
+    description: string | null;
+    audit_infos: { auditor: string; status: string; time: string; url: string }[] | null;
+    social_links: { website: string; twitter: string; github: string; discord: string; explorer: string } | null;
+  } | null;
 }
 
 // --------------------------------------------------------------------------- //
@@ -3021,6 +3052,122 @@ function ReportDetail({
                 </div>
               ))}
             </div>
+          </section>
+        )}
+
+        {/* Fee Stability */}
+        {report.fee_stability && report.fee_stability !== "unknown" && (
+          <section>
+            <SectionTitle icon={Gauge} title="Fee Stability" />
+            <div className="p-3 rounded-lg border border-border/40 bg-card/20">
+              <Badge variant="outline" className={cn(
+                "text-[10px]",
+                report.fee_stability === "stable" && "bg-emerald-500/10 text-emerald-400 border-emerald-500/30",
+                report.fee_stability === "volatile" && "bg-rose-500/10 text-rose-400 border-rose-500/30",
+              )}>
+                {report.fee_stability === "stable" ? "Stable" : "Volatile"}
+              </Badge>
+              <p className="text-[11px] text-muted-foreground mt-1.5">
+                {report.valuation_multiples?.fee_volatility_pct != null
+                  ? `Fee volatility: ${report.valuation_multiples.fee_volatility_pct.toFixed(1)}% (7d avg vs 30d avg)`
+                  : "Based on 24h vs 7d fee comparison"}
+              </p>
+            </div>
+          </section>
+        )}
+
+        {/* Market Overview (CMC Keyless data) */}
+        {report.market_overview && (
+          <section>
+            <SectionTitle icon={ChartNoAxesColumn} title="Market Overview" />
+            <div className="grid grid-cols-2 gap-2">
+              {report.market_overview.cmc_rank != null && (
+                <div className="p-2 rounded-lg border border-border/40 bg-card/20">
+                  <div className="text-[9px] text-muted-foreground uppercase">CMC Rank</div>
+                  <div className="text-sm font-semibold">#{report.market_overview.cmc_rank}</div>
+                </div>
+              )}
+              {report.market_overview.holder_count != null && (
+                <div className="p-2 rounded-lg border border-border/40 bg-card/20">
+                  <div className="text-[9px] text-muted-foreground uppercase">Holders</div>
+                  <div className="text-sm font-semibold">{report.market_overview.holder_count.toLocaleString()}</div>
+                </div>
+              )}
+              {report.market_overview.top_10_holder_ratio != null && (
+                <div className="p-2 rounded-lg border border-border/40 bg-card/20">
+                  <div className="text-[9px] text-muted-foreground uppercase">Top 10 Holders</div>
+                  <div className="text-sm font-semibold">{report.market_overview.top_10_holder_ratio.toFixed(2)}%</div>
+                </div>
+              )}
+              {report.market_overview.top_100_holder_ratio != null && (
+                <div className="p-2 rounded-lg border border-border/40 bg-card/20">
+                  <div className="text-[9px] text-muted-foreground uppercase">Top 100 Holders</div>
+                  <div className="text-sm font-semibold">{report.market_overview.top_100_holder_ratio.toFixed(2)}%</div>
+                </div>
+              )}
+              {report.market_overview.ath != null && (
+                <div className="p-2 rounded-lg border border-border/40 bg-card/20">
+                  <div className="text-[9px] text-muted-foreground uppercase">ATH</div>
+                  <div className="text-sm font-semibold">{fmtUsd(report.market_overview.ath)}</div>
+                </div>
+              )}
+              {report.market_overview.atl != null && (
+                <div className="p-2 rounded-lg border border-border/40 bg-card/20">
+                  <div className="text-[9px] text-muted-foreground uppercase">ATL</div>
+                  <div className="text-sm font-semibold">{fmtUsd(report.market_overview.atl)}</div>
+                </div>
+              )}
+              {report.market_overview.price_high_52w != null && (
+                <div className="p-2 rounded-lg border border-border/40 bg-card/20">
+                  <div className="text-[9px] text-muted-foreground uppercase">52W High</div>
+                  <div className="text-sm font-semibold">{fmtUsd(report.market_overview.price_high_52w)}</div>
+                </div>
+              )}
+              {report.market_overview.price_low_52w != null && (
+                <div className="p-2 rounded-lg border border-border/40 bg-card/20">
+                  <div className="text-[9px] text-muted-foreground uppercase">52W Low</div>
+                  <div className="text-sm font-semibold">{fmtUsd(report.market_overview.price_low_52w)}</div>
+                </div>
+              )}
+              {report.market_overview.platform_count != null && (
+                <div className="p-2 rounded-lg border border-border/40 bg-card/20">
+                  <div className="text-[9px] text-muted-foreground uppercase">Platforms</div>
+                  <div className="text-sm font-semibold">{report.market_overview.platform_count}</div>
+                </div>
+              )}
+              {report.market_overview.market_cap_dominance != null && (
+                <div className="p-2 rounded-lg border border-border/40 bg-card/20">
+                  <div className="text-[9px] text-muted-foreground uppercase">MC Dominance</div>
+                  <div className="text-sm font-semibold">{report.market_overview.market_cap_dominance.toFixed(2)}%</div>
+                </div>
+              )}
+              {report.market_overview.audited != null && (
+                <div className="p-2 rounded-lg border border-border/40 bg-card/20">
+                  <div className="text-[9px] text-muted-foreground uppercase">Audited</div>
+                  <div className="text-sm font-semibold">{report.market_overview.audited ? "✓ Yes" : "✗ No"}</div>
+                </div>
+              )}
+              {report.market_overview.percent_change_30d != null && (
+                <div className="p-2 rounded-lg border border-border/40 bg-card/20">
+                  <div className="text-[9px] text-muted-foreground uppercase">30d Change</div>
+                  <div className={cn("text-sm font-semibold", report.market_overview.percent_change_30d >= 0 ? "text-emerald-400" : "text-rose-400")}>
+                    {report.market_overview.percent_change_30d >= 0 ? "+" : ""}{report.market_overview.percent_change_30d.toFixed(2)}%
+                  </div>
+                </div>
+              )}
+            </div>
+            {/* Audit details */}
+            {report.market_overview.audit_infos && report.market_overview.audit_infos.length > 0 && (
+              <div className="mt-2 space-y-1">
+                {report.market_overview.audit_infos.slice(0, 3).map((a, i) => (
+                  <div key={i} className="flex items-center gap-2 text-[10px] text-muted-foreground">
+                    <BadgeCheck className="h-3 w-3 text-emerald-500" />
+                    <span>{a.auditor}</span>
+                    <span className="text-muted-foreground/60">{a.time?.slice(0, 10)}</span>
+                  </div>
+                ))}
+              </div>
+            )}
           </section>
         )}
 
