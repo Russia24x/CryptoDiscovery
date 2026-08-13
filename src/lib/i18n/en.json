@@ -305,5 +305,79 @@
     "language": "Language",
     "persian": "فارسی",
     "english": "English"
+  },
+  "actions": {
+    "ignore": "Ignore",
+    "watch": "Watch",
+    "deepResearch": "Deep Research",
+    "smallPosition": "Small Position",
+    "coreCandidate": "Core Candidate",
+    "highConviction": "High Conviction",
+    "watchLowConfidence": "Watch (Low confidence)",
+    "deepResearchConfidence": "Deep Research (Confidence building)"
+  },
+  "qualityBands": {
+    "elite": "Elite Infrastructure",
+    "strong": "Strong Infrastructure",
+    "promising": "Promising",
+    "watchlist": "Watchlist",
+    "weak": "Weak",
+    "story": "Story / Speculation",
+    "highRisk": "HIGH RISK"
+  },
+  "axes": {
+    "invisibleUtility": "Invisible Utility",
+    "economicEngine": "Economic Engine",
+    "moat": "Moat",
+    "tokenMarket": "Token & Market Structure",
+    "governance": "Governance / Legal / Security"
+  },
+  "subFactors": {
+    "userAbstraction": "User Abstraction",
+    "integrationSimplicity": "Integration Simplicity",
+    "apiUsability": "API Usability",
+    "developerExperience": "Developer Experience",
+    "documentation": "Documentation",
+    "switchingCost": "Switching Cost",
+    "communitySignal": "Community Signal",
+    "revenueScale": "Revenue Scale",
+    "feeGeneration": "Fee Generation",
+    "growth": "Growth",
+    "aumTvl": "AUM / TVL",
+    "recurrence": "Recurrence",
+    "retention": "Retention",
+    "customerDiversification": "Customer Diversification",
+    "networkMoat": "Network Moat",
+    "regulatoryMoat": "Regulatory Moat",
+    "distributionMoat": "Distribution Moat",
+    "integrationMoat": "Integration Moat",
+    "liquidityMoat": "Liquidity Moat",
+    "dataMoat": "Data Moat",
+    "tokenUtility": "Token Utility",
+    "valueCapture": "Value Capture",
+    "supplyDiscipline": "Supply Discipline",
+    "unlockRisk": "Unlock Risk",
+    "holderAlignment": "Holder Alignment",
+    "buybackBurn": "Buyback / Burn",
+    "marketLiquidity": "Market Liquidity",
+    "holderDistribution": "Holder Distribution",
+    "teamTransparency": "Team Transparency",
+    "legalEntity": "Legal Entity",
+    "auditQuality": "Audit Quality",
+    "incidentHistory": "Incident History",
+    "operationalSecurity": "Operational Security",
+    "upgradeDecentralization": "Upgrade Decentralization",
+    "regulatoryStatus": "Regulatory Status",
+    "disclosureQuality": "Disclosure Quality"
+  },
+  "valueCapture": {
+    "strong": "strong",
+    "moderate": "moderate",
+    "weak": "weak"
+  },
+  "feeStability": {
+    "stable": "stable",
+    "volatile": "volatile",
+    "unknown": "unknown"
   }
 }

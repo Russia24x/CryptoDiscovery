@@ -305,5 +305,79 @@
     "language": "زبان",
     "persian": "فارسی",
     "english": "English"
+  },
+  "actions": {
+    "ignore": "نادیده",
+    "watch": "تحت نظر",
+    "deepResearch": "تحقیق عمیق",
+    "smallPosition": "پوزیشن کوچک",
+    "coreCandidate": "کاندیدای اصلی",
+    "highConviction": "اقتدار بالا",
+    "watchLowConfidence": "تحت نظر (اطمینان پایین)",
+    "deepResearchConfidence": "تحقیق عمیق (ساخت اطمینان)"
+  },
+  "qualityBands": {
+    "elite": "زیرساخت نخبه",
+    "strong": "زیرساخت قوی",
+    "promising": "آینده‌دار",
+    "watchlist": "لیست تحت نظر",
+    "weak": "ضعیف",
+    "story": "داستان / سفته‌بازی",
+    "highRisk": "ریسک بالا"
+  },
+  "axes": {
+    "invisibleUtility": "کاربرد نامرئی",
+    "economicEngine": "موتور اقتصادی",
+    "moat": "خندق رقابتی",
+    "tokenMarket": "ساختار توکن و بازار",
+    "governance": "حاکمیت / حقوقی / امنیت"
+  },
+  "subFactors": {
+    "userAbstraction": "انتزاع کاربر",
+    "integrationSimplicity": "سادگی یکپارچه‌سازی",
+    "apiUsability": "قابلیت استفاده API",
+    "developerExperience": "تجربه توسعه‌دهنده",
+    "documentation": "مستندات",
+    "switchingCost": "هزینه تعویض",
+    "communitySignal": "سیگنال جامعه",
+    "revenueScale": "مقیاس درآمد",
+    "feeGeneration": "تولید کارمزد",
+    "growth": "رشد",
+    "aumTvl": "AUM / TVL",
+    "recurrence": "تکرارپذیری",
+    "retention": "حبس مشتری",
+    "customerDiversification": "تنوع مشتری",
+    "networkMoat": "خندق شبکه‌ای",
+    "regulatoryMoat": "خندق تنظیمی",
+    "distributionMoat": "خندق توزیعی",
+    "integrationMoat": "خندق یکپارچه‌سازی",
+    "liquidityMoat": "خندق نقدینگی",
+    "dataMoat": "خندق داده",
+    "tokenUtility": "کاربرد توکن",
+    "valueCapture": "ارزش‌گذاری",
+    "supplyDiscipline": "انضباط عرضه",
+    "unlockRisk": "ریسک آنلاک",
+    "holderAlignment": "همسویی دارنده",
+    "buybackBurn": "بای‌بک / سوزاندن",
+    "marketLiquidity": "نقدینگی بازار",
+    "holderDistribution": "توزیع دارنده",
+    "teamTransparency": "شفافیت تیم",
+    "legalEntity": "شخص حقوقی",
+    "auditQuality": "کیفیت حسابرسی",
+    "incidentHistory": "تاریخچه حوادث",
+    "operationalSecurity": "امنیت عملیاتی",
+    "upgradeDecentralization": "غیرمتمرکزسازی ارتقا",
+    "regulatoryStatus": "وضعیت تنظیمی",
+    "disclosureQuality": "کیفیت افشا"
+  },
+  "valueCapture": {
+    "strong": "قوی",
+    "moderate": "متوسط",
+    "weak": "ضعیف"
+  },
+  "feeStability": {
+    "stable": "پایدار",
+    "volatile": "نوسانی",
+    "unknown": "نامشخص"
   }
 }

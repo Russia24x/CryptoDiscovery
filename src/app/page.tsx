@@ -289,14 +289,79 @@ function scoreBg(score: number, max = 100): string {
   return "bg-rose-500";
 }
 
-function actionBadge(action: string): { label: string; cls: string } {
+function actionBadge(action: string, t?: (key: string) => string): { label: string; cls: string } {
   const a = action.toLowerCase();
-  if (a.includes("high conviction")) return { label: action, cls: "bg-emerald-500/15 text-emerald-400 border-emerald-500/30" };
-  if (a.includes("core")) return { label: action, cls: "bg-lime-500/15 text-lime-400 border-lime-500/30" };
-  if (a.includes("small")) return { label: action, cls: "bg-amber-500/15 text-amber-400 border-amber-500/30" };
-  if (a.includes("deep research") || a.includes("research")) return { label: action, cls: "bg-sky-500/15 text-sky-400 border-sky-500/30" };
-  if (a.includes("watch")) return { label: action, cls: "bg-slate-500/15 text-slate-300 border-slate-500/30" };
-  return { label: action, cls: "bg-rose-500/15 text-rose-400 border-rose-500/30" };
+  let label = action;
+  if (t) {
+    if (a.includes("high conviction")) label = t("actions.highConviction");
+    else if (a.includes("core")) label = t("actions.coreCandidate");
+    else if (a.includes("small")) label = t("actions.smallPosition");
+    else if (a.includes("deep research") || a.includes("research")) label = a.includes("confidence") ? t("actions.deepResearchConfidence") : t("actions.deepResearch");
+    else if (a.includes("watch")) label = a.includes("low") ? t("actions.watchLowConfidence") : t("actions.watch");
+    else label = t("actions.ignore");
+  }
+  if (a.includes("high conviction")) return { label, cls: "bg-emerald-500/15 text-emerald-400 border-emerald-500/30" };
+  if (a.includes("core")) return { label, cls: "bg-lime-500/15 text-lime-400 border-lime-500/30" };
+  if (a.includes("small")) return { label, cls: "bg-amber-500/15 text-amber-400 border-amber-500/30" };
+  if (a.includes("deep research") || a.includes("research")) return { label, cls: "bg-sky-500/15 text-sky-400 border-sky-500/30" };
+  if (a.includes("watch")) return { label, cls: "bg-slate-500/15 text-slate-300 border-slate-500/30" };
+  return { label, cls: "bg-rose-500/15 text-rose-400 border-rose-500/30" };
+}
+
+// Translate axis names
+function translateAxisName(name: string, t: (key: string) => string): string {
+  const map: Record<string, string> = {
+    "Invisible Utility": t("axes.invisibleUtility"),
+    "Economic Engine": t("axes.economicEngine"),
+    "Moat": t("axes.moat"),
+    "Token & Market Structure": t("axes.tokenMarket"),
+    "Governance / Legal / Security": t("axes.governance"),
+  };
+  return map[name] || name;
+}
+
+// Translate sub-factor names
+function translateSubFactor(name: string, t: (key: string) => string): string {
+  const keyMap: Record<string, string> = {
+    "User Abstraction": "subFactors.userAbstraction",
+    "Integration Simplicity": "subFactors.integrationSimplicity",
+    "API Usability": "subFactors.apiUsability",
+    "Developer Experience": "subFactors.developerExperience",
+    "Documentation": "subFactors.documentation",
+    "Switching Cost": "subFactors.switchingCost",
+    "Community Signal": "subFactors.communitySignal",
+    "Revenue Scale": "subFactors.revenueScale",
+    "Fee Generation": "subFactors.feeGeneration",
+    "Growth": "subFactors.growth",
+    "AUM / TVL": "subFactors.aumTvl",
+    "Recurrence": "subFactors.recurrence",
+    "Retention": "subFactors.retention",
+    "Customer Diversification": "subFactors.customerDiversification",
+    "Network Moat": "subFactors.networkMoat",
+    "Regulatory Moat": "subFactors.regulatoryMoat",
+    "Distribution Moat": "subFactors.distributionMoat",
+    "Integration Moat": "subFactors.integrationMoat",
+    "Liquidity Moat": "subFactors.liquidityMoat",
+    "Data Moat": "subFactors.dataMoat",
+    "Token Utility": "subFactors.tokenUtility",
+    "Value Capture": "subFactors.valueCapture",
+    "Supply Discipline": "subFactors.supplyDiscipline",
+    "Unlock Risk": "subFactors.unlockRisk",
+    "Holder Alignment": "subFactors.holderAlignment",
+    "Buyback / Burn": "subFactors.buybackBurn",
+    "Market Liquidity": "subFactors.marketLiquidity",
+    "Holder Distribution": "subFactors.holderDistribution",
+    "Team Transparency": "subFactors.teamTransparency",
+    "Legal Entity": "subFactors.legalEntity",
+    "Audit Quality": "subFactors.auditQuality",
+    "Incident History": "subFactors.incidentHistory",
+    "Operational Security": "subFactors.operationalSecurity",
+    "Upgrade Decentralization": "subFactors.upgradeDecentralization",
+    "Regulatory Status": "subFactors.regulatoryStatus",
+    "Disclosure Quality": "subFactors.disclosureQuality",
+  };
+  const key = keyMap[name];
+  return key ? t(key) : name;
 }
 
 const AXIS_ICONS: Record<string, typeof Brain> = {
@@ -2070,7 +2135,7 @@ function ProjectCard({
   onToggleWatchlist?: () => void;
 }) {
   const { t } = useLanguage();
-  const ab = actionBadge(report.action);
+  const ab = actionBadge(report.action, t);
   return (
     <div
       className={cn(
@@ -2265,7 +2330,7 @@ function ReportDetail({
   scoreHistory?: { scanId: string; score: number; date: string }[];
 }) {
   const { t } = useLanguage();
-  const ab = actionBadge(report.decision.action_label);
+  const ab = actionBadge(report.decision.action_label, t);
   return (
     <div>
       <SheetHeader className="px-6 pt-6 pb-4 border-b border-border/60 sticky top-0 bg-background/95 backdrop-blur z-10">
@@ -2486,7 +2551,7 @@ function ReportDetail({
                   <div className="flex items-center justify-between gap-2 mb-2">
                     <div className="flex items-center gap-2 min-w-0">
                       <Icon className="h-4 w-4 text-emerald-500 flex-shrink-0" />
-                      <span className="text-xs font-semibold truncate">{ax.name}</span>
+                      <span className="text-xs font-semibold truncate">{translateAxisName(ax.name, t)}</span>
                     </div>
                     <div className="flex items-center gap-2 flex-shrink-0">
                       <span className="text-[10px] text-muted-foreground font-mono">conf {ax.confidence.toFixed(0)}%</span>
@@ -2507,7 +2572,7 @@ function ReportDetail({
                     <div className="grid grid-cols-2 gap-x-3 gap-y-1">
                       {Object.entries(ax.sub_factors).map(([k, v]) => (
                         <div key={k} className="flex items-center justify-between gap-1 text-[10px]">
-                          <span className="text-muted-foreground truncate">{k}</span>
+                          <span className="text-muted-foreground truncate">{translateSubFactor(k, t)}</span>
                           <div className="flex items-center gap-1 flex-shrink-0">
                             <div className="w-10 h-1 rounded-full bg-muted/40 overflow-hidden">
                               <div
@@ -2610,11 +2675,11 @@ function ReportDetail({
               )}>
                 {report.fee_stability === "stable" && <BadgeCheck className="h-3 w-3" />}
                 {report.fee_stability === "volatile" && <AlertTriangle className="h-3 w-3" />}
-                Fee Stability: {report.fee_stability}
+                {t("detail.feeStability")}: {report.fee_stability ? t(`feeStability.${report.fee_stability}`) : "—"}
               </Badge>
               {report.valuation_multiples?.fee_volatility_pct != null && (
                 <span className="text-[10px] text-muted-foreground">
-                  Volatility: {report.valuation_multiples.fee_volatility_pct.toFixed(1)}%
+                  {t("detail.volatility")}: {report.valuation_multiples.fee_volatility_pct.toFixed(1)}%
                 </span>
               )}
             </div>
@@ -2634,10 +2699,10 @@ function ReportDetail({
           </div>
           <div className="flex items-center gap-1.5 flex-wrap">
             <Badge variant="outline" className="text-[10px]">
-              Utility Level {report.tokenomics.utility_level}/4
+              {t("metrics.utilityLevel")} {report.tokenomics.utility_level}/4
             </Badge>
             <Badge variant="outline" className="text-[10px]">
-              Value Capture: {report.tokenomics.value_capture || "—"}
+              {t("subFactors.valueCapture")}: {report.tokenomics.value_capture ? t(`valueCapture.${report.tokenomics.value_capture}`) : "—"}
             </Badge>
             {report.tokenomics.buyback && <Badge className="bg-emerald-500/15 text-emerald-400 text-[10px]">Buyback</Badge>}
             {report.tokenomics.burn && <Badge className="bg-orange-500/15 text-orange-400 text-[10px]">Burn</Badge>}
@@ -3343,7 +3408,7 @@ function WatchlistView({
         ) : (
           <div className="space-y-2">
             {watchlisted.map((r) => {
-              const ab = actionBadge(r.action);
+              const ab = actionBadge(r.action, t);
               return (
                 <div
                   key={r.id}
@@ -3740,7 +3805,7 @@ function GlobalSearchView({
             </div>
             <div className="space-y-2">
               {results.map((result, i) => {
-                const ab = actionBadge(result.report.action);
+                const ab = actionBadge(result.report.action, t);
                 return (
                   <button
                     key={`${result.report.id}-${i}`}
