@@ -1944,6 +1944,7 @@ function EmptyState() {
 }
 
 function ScanProgressCard({ scan, onRefresh, scanning }: { scan: ScanStatus; onRefresh?: () => void; scanning?: boolean }) {
+  const { t } = useLanguage();
   const phaseIndex = useMemo(() => {
     const phases = [
       "PHASE 1",
@@ -2068,6 +2069,7 @@ function ProjectCard({
   watchlisted?: boolean;
   onToggleWatchlist?: () => void;
 }) {
+  const { t } = useLanguage();
   const ab = actionBadge(report.action);
   return (
     <div
@@ -2140,7 +2142,7 @@ function ProjectCard({
                     <TooltipTrigger asChild>
                       <ShieldAlert className="h-3.5 w-3.5 text-rose-500 flex-shrink-0" />
                     </TooltipTrigger>
-                    <TooltipContent>Hard veto triggered</TooltipContent>
+                    <TooltipContent>{t("detail.severeRisks")}</TooltipContent>
                   </Tooltip>
                 </TooltipProvider>
               )}
@@ -2171,7 +2173,7 @@ function ProjectCard({
                 rel="noopener noreferrer"
                 onClick={(e) => e.stopPropagation()}
                 className="p-1 rounded text-muted-foreground/50 hover:text-emerald-400 hover:bg-emerald-500/10 transition-colors"
-                title="Website"
+                title={t("projectCard.website")}
               >
                 <Globe className="h-3 w-3" />
               </a>
@@ -2183,7 +2185,7 @@ function ProjectCard({
                 rel="noopener noreferrer"
                 onClick={(e) => e.stopPropagation()}
                 className="p-1 rounded text-muted-foreground/50 hover:text-sky-400 hover:bg-sky-500/10 transition-colors"
-                title="X / Twitter"
+                title={t("projectCard.twitter")}
               >
                 <Twitter className="h-3 w-3" />
               </a>
@@ -2195,7 +2197,7 @@ function ProjectCard({
                 rel="noopener noreferrer"
                 onClick={(e) => e.stopPropagation()}
                 className="p-1 rounded text-muted-foreground/50 hover:text-violet-400 hover:bg-violet-500/10 transition-colors"
-                title="GitHub"
+                title={t("projectCard.github")}
               >
                 <Github className="h-3 w-3" />
               </a>
@@ -2262,6 +2264,7 @@ function ReportDetail({
   onCopy?: (r: FullReport) => void;
   scoreHistory?: { scanId: string; score: number; date: string }[];
 }) {
+  const { t } = useLanguage();
   const ab = actionBadge(report.decision.action_label);
   return (
     <div>
@@ -2292,7 +2295,7 @@ function ReportDetail({
               {report.candidate.website && (
                 <a href={report.candidate.website} target="_blank" rel="noopener noreferrer"
                   className="flex items-center gap-1 px-2 py-1 rounded-md text-[10px] bg-muted/30 hover:bg-emerald-500/10 hover:text-emerald-400 border border-border/40 transition-colors">
-                  <Globe className="h-3 w-3" /> Website
+                  <Globe className="h-3 w-3" /> {t("projectCard.website")}
                 </a>
               )}
               {report.candidate.twitter && (
@@ -2304,7 +2307,7 @@ function ReportDetail({
               {report.candidate.github && (
                 <a href={report.candidate.github} target="_blank" rel="noopener noreferrer"
                   className="flex items-center gap-1 px-2 py-1 rounded-md text-[10px] bg-muted/30 hover:bg-violet-500/10 hover:text-violet-400 border border-border/40 transition-colors">
-                  <Github className="h-3 w-3" /> GitHub
+                  <Github className="h-3 w-3" /> {t("projectCard.github")}
                 </a>
               )}
               {report.candidate.discord && (
@@ -2324,7 +2327,7 @@ function ReportDetail({
           {/* Score ring - clean, no clutter next to it */}
           <ScoreRadial
             score={report.project_quality_score}
-            label="Quality"
+            label={t("detail.projectQuality")}
             size={72}
             strokeWidth={6}
           />
@@ -2335,7 +2338,7 @@ function ReportDetail({
             <Badge className={cn("text-[10px]", ab.cls)}>{report.decision.action_label}</Badge>
             <Badge variant="outline" className="text-[10px]">
               <Gauge className="h-3 w-3 mr-1" />
-              Risk-adj {report.decision.risk_adjusted_score.toFixed(0)}
+              {t("detail.riskAdj")} {report.decision.risk_adjusted_score.toFixed(0)}
             </Badge>
             <Badge variant="outline" className="text-[10px]">
               Confidence {report.confidence.toFixed(0)}%
@@ -2359,7 +2362,7 @@ function ReportDetail({
                       <span className="hidden sm:inline">Copy</span>
                     </Button>
                   </TooltipTrigger>
-                  <TooltipContent>Copy summary to clipboard</TooltipContent>
+                  <TooltipContent>{t("detail.copy")}</TooltipContent>
                 </Tooltip>
               </TooltipProvider>
             )}
@@ -2378,7 +2381,7 @@ function ReportDetail({
                         MD
                       </Button>
                     </TooltipTrigger>
-                    <TooltipContent>Export as Markdown</TooltipContent>
+                    <TooltipContent>{t("detail.md")}</TooltipContent>
                   </Tooltip>
                 </TooltipProvider>
                 <Button
@@ -2399,7 +2402,7 @@ function ReportDetail({
       <div className="px-6 py-5 space-y-6">
         {/* Verdict */}
         <section>
-          <SectionTitle icon={Sparkles} title="Executive Verdict" />
+          <SectionTitle icon={Sparkles} title={t("detail.executiveVerdict")} />
           <div className={cn(
             "relative rounded-lg p-4 border overflow-hidden",
             report.veto.triggered
@@ -2420,7 +2423,7 @@ function ReportDetail({
         {/* Score Trend Across Scans */}
         {scoreHistory.length > 1 && (
           <section>
-            <SectionTitle icon={TrendingUp} title="Score History" />
+            <SectionTitle icon={TrendingUp} title={t("detail.scoreHistory")} />
             <div className="border border-border/40 rounded-lg p-3 bg-card/20">
               <div className="flex items-end justify-between gap-2 h-20 mb-2">
                 {scoreHistory.map((point, i) => {
@@ -2460,7 +2463,7 @@ function ReportDetail({
               </div>
               <div className="flex items-center justify-between text-[9px] text-muted-foreground">
                 <span>{scoreHistory.length} scans</span>
-                <span>Oldest → Latest</span>
+                <span>{t("detail.oldestToLatest")}</span>
               </div>
             </div>
           </section>
@@ -2469,7 +2472,7 @@ function ReportDetail({
         {/* 5 Fundamental Axes */}
         <section>
           <div className="flex items-center justify-between gap-2 mb-2">
-            <SectionTitle icon={Gauge} title="Five Fundamental Axes" />
+            <SectionTitle icon={Gauge} title={t("detail.fiveAxes")} />
           </div>
           {/* Radar chart visualization */}
           <div className="flex justify-center mb-4 p-3 rounded-lg border border-border/40 bg-card/20">
@@ -2526,20 +2529,20 @@ function ReportDetail({
 
         {/* Economic Engine */}
         <section>
-          <SectionTitle icon={CircleDollarSign} title="Economic Engine" />
+          <SectionTitle icon={CircleDollarSign} title={t("detail.economicEngine")} />
           <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
-            <Metric label="Fees (24h)" value={fmtUsd(report.economic_engine.fees)} />
-            <Metric label="Revenue (24h)" value={fmtUsd(report.economic_engine.revenue)} />
-            <Metric label="Net Rev (30d avg)" value={fmtUsd(report.economic_engine.net_revenue)} />
-            <Metric label="TVL" value={fmtUsd(report.economic_engine.tvl)} />
-            <Metric label="AUM" value={fmtUsd(report.economic_engine.aum)} />
+            <Metric label={t("metrics.fees24h")} value={fmtUsd(report.economic_engine.fees)} />
+            <Metric label={t("metrics.revenue24h")} value={fmtUsd(report.economic_engine.revenue)} />
+            <Metric label={t("metrics.netRev30d")} value={fmtUsd(report.economic_engine.net_revenue)} />
+            <Metric label={t("metrics.tvl")} value={fmtUsd(report.economic_engine.tvl)} />
+            <Metric label={t("metrics.aum")} value={fmtUsd(report.economic_engine.aum)} />
             <Metric
-              label="Growth WoW"
+              label={t("metrics.growthWoW")}
               value={fmtPct(report.economic_engine.revenue_growth_pct)}
               tone={report.economic_engine.revenue_growth_pct != null && report.economic_engine.revenue_growth_pct < 0 ? "neg" : "pos"}
             />
-            <Metric label="Recurrence" value={report.economic_engine.recurrence || "—"} />
-            <Metric label="Cust. Concentration" value={report.economic_engine.customer_concentration || "—"} />
+            <Metric label={t("metrics.recurrence")} value={report.economic_engine.recurrence || "—"} />
+            <Metric label={t("metrics.custConcentration")} value={report.economic_engine.customer_concentration || "—"} />
           </div>
 
           {/* Framework 3.0: Valuation Multiples (P/R, P/F, P/T) */}
@@ -2620,14 +2623,14 @@ function ReportDetail({
 
         {/* Tokenomics & Market */}
         <section>
-          <SectionTitle icon={Layers} title="Tokenomics & Market Structure" />
+          <SectionTitle icon={Layers} title={t("detail.tokenomics")} />
           <div className="grid grid-cols-2 md:grid-cols-3 gap-2 mb-2">
-            <Metric label="Market Cap" value={fmtUsd(report.tokenomics.market_cap)} />
-            <Metric label="FDV" value={fmtUsd(report.tokenomics.fdv)} />
-            <Metric label="Supply Growth" value={fmtPct(report.tokenomics.supply_growth_pct)} tone={report.tokenomics.supply_growth_pct != null && report.tokenomics.supply_growth_pct > 6 ? "neg" : "neutral"} />
-            <Metric label="Insider Alloc." value={fmtPct(report.tokenomics.insider_allocation_pct)} />
-            <Metric label="Daily Volume" value={fmtUsd(report.market_structure.daily_volume)} />
-            <Metric label="Holder Conc." value={report.market_structure.holder_concentration != null ? fmtPct(report.market_structure.holder_concentration * 100) : "—"} />
+            <Metric label={t("metrics.marketCap")} value={fmtUsd(report.tokenomics.market_cap)} />
+            <Metric label={t("metrics.fdv")} value={fmtUsd(report.tokenomics.fdv)} />
+            <Metric label={t("metrics.supplyGrowth")} value={fmtPct(report.tokenomics.supply_growth_pct)} tone={report.tokenomics.supply_growth_pct != null && report.tokenomics.supply_growth_pct > 6 ? "neg" : "neutral"} />
+            <Metric label={t("metrics.insiderAlloc")} value={fmtPct(report.tokenomics.insider_allocation_pct)} />
+            <Metric label={t("metrics.dailyVolume")} value={fmtUsd(report.market_structure.daily_volume)} />
+            <Metric label={t("metrics.holderConc")} value={report.market_structure.holder_concentration != null ? fmtPct(report.market_structure.holder_concentration * 100) : "—"} />
           </div>
           <div className="flex items-center gap-1.5 flex-wrap">
             <Badge variant="outline" className="text-[10px]">
@@ -2649,13 +2652,13 @@ function ReportDetail({
         {/* Institutional adoption & moat */}
         <section className="grid grid-cols-1 md:grid-cols-2 gap-3">
           <div>
-            <SectionTitle icon={BadgeCheck} title="Institutional Adoption" />
+            <SectionTitle icon={BadgeCheck} title={t("detail.institutionalAdoption")} />
             <p className="text-xs text-muted-foreground leading-relaxed bg-muted/20 rounded-lg p-3 border border-border/40">
               {report.institutional_adoption}
             </p>
           </div>
           <div>
-            <SectionTitle icon={ShieldCheck} title="Competitive Moat" />
+            <SectionTitle icon={ShieldCheck} title={t("detail.competitiveMoat")} />
             <p className="text-xs text-muted-foreground leading-relaxed bg-muted/20 rounded-lg p-3 border border-border/40">
               {report.competitive_moat}
             </p>
@@ -2688,7 +2691,7 @@ function ReportDetail({
 
         {/* Catalysts */}
         <section>
-          <SectionTitle icon={Zap} title="Catalyst Matrix" />
+          <SectionTitle icon={Zap} title={t("detail.catalysts")} />
           <div className="space-y-1.5">
             {report.catalysts.map((c, i) => (
               <div
@@ -2710,7 +2713,7 @@ function ReportDetail({
 
         {/* Thesis */}
         <section>
-          <SectionTitle icon={Target} title="Investment Thesis" />
+          <SectionTitle icon={Target} title={t("detail.investmentThesis")} />
           <div className="bg-gradient-to-br from-emerald-500/10 to-teal-600/5 border border-emerald-500/20 rounded-lg p-3">
             <p className="text-sm italic text-foreground/90 leading-relaxed">
               &ldquo;{report.final_thesis}&rdquo;
@@ -2720,7 +2723,7 @@ function ReportDetail({
 
         {/* Kill conditions */}
         <section>
-          <SectionTitle icon={ShieldAlert} title="Thesis Kill Conditions" />
+          <SectionTitle icon={ShieldAlert} title={t("detail.killConditions")} />
           <div className="space-y-1">
             {report.thesis_kill_conditions.map((k, i) => (
               <div key={i} className="flex items-start gap-2 text-xs text-muted-foreground">
@@ -2734,7 +2737,7 @@ function ReportDetail({
         {/* Severe risks */}
         {report.severe_risks.some((r) => r.present) && (
           <section>
-            <SectionTitle icon={AlertTriangle} title="Severe Risks Detected" />
+            <SectionTitle icon={AlertTriangle} title={t("detail.severeRisks")} />
             <div className="flex flex-wrap gap-1.5">
               {report.severe_risks.filter((r) => r.present).map((r) => (
                 <Badge key={r.name} className="bg-rose-500/15 text-rose-400 border-rose-500/30 text-[10px]">
@@ -2747,7 +2750,7 @@ function ReportDetail({
 
         {/* Five final answers */}
         <section>
-          <SectionTitle icon={Brain} title="Five Final Questions" />
+          <SectionTitle icon={Brain} title={t("detail.finalQuestions")} />
           <div className="space-y-2">
             {report.five_final_answers.map((a, i) => (
               <div key={i} className="flex gap-2.5 text-xs">
@@ -2763,7 +2766,7 @@ function ReportDetail({
         {/* Data to verify */}
         {report.data_needing_verification.length > 0 && (
           <section>
-            <SectionTitle icon={FlaskConical} title="Data Requiring Verification" />
+            <SectionTitle icon={FlaskConical} title={t("detail.dataVerification")} />
             <div className="space-y-1">
               {report.data_needing_verification.map((d, i) => (
                 <div key={i} className="flex items-start gap-2 text-[11px] text-muted-foreground">
@@ -2778,7 +2781,7 @@ function ReportDetail({
         {/* Framework 3.0: Cross-Verification */}
         {report.cross_verifications && report.cross_verifications.length > 0 && (
           <section>
-            <SectionTitle icon={BadgeCheck} title="Cross-Verification (Framework 3.0)" />
+            <SectionTitle icon={BadgeCheck} title={t("detail.crossVerification")} />
             <div className="space-y-1.5">
               {report.cross_verifications.map((cv, i) => (
                 <div key={i} className="flex items-center gap-2 p-2 rounded-lg border border-border/40 bg-card/20 text-[11px]">
@@ -2804,7 +2807,7 @@ function ReportDetail({
         {/* Framework 3.0: Self-Correction / Bias Checks */}
         {report.bias_checks && report.bias_checks.length > 0 && (
           <section>
-            <SectionTitle icon={Brain} title="Self-Correction Engine (Framework 3.0)" />
+            <SectionTitle icon={Brain} title={t("detail.selfCorrection")} />
             <div className="space-y-1">
               {report.bias_checks.map((bc, i) => (
                 <div key={i} className="flex items-start gap-2 text-[11px] text-muted-foreground p-1.5 rounded-md bg-muted/10">
@@ -3164,6 +3167,7 @@ function reportToMarkdown(r: FullReport): string {
 //  ActionDistribution — horizontal bar chart of action recommendations
 // --------------------------------------------------------------------------- //
 function ActionDistribution({ reports }: { reports: ScanSummaryItem[] }) {
+  const { t } = useLanguage();
   const counts: Record<string, { count: number; cls: string }> = {};
   reports.forEach((r) => {
     const a = r.action.toLowerCase();
@@ -3213,6 +3217,7 @@ function ActionDistribution({ reports }: { reports: ScanSummaryItem[] }) {
 //  ScoreHistogram — vertical bar histogram of quality scores
 // --------------------------------------------------------------------------- //
 function ScoreHistogram({ reports }: { reports: ScanSummaryItem[] }) {
+  const { t } = useLanguage();
   const buckets = [
     { label: "0-20", min: 0, max: 20, color: "bg-rose-500" },
     { label: "20-40", min: 20, max: 40, color: "bg-orange-500" },
@@ -3304,6 +3309,7 @@ function WatchlistView({
   onSelect: (id: string) => void;
   reports: ScanSummaryItem[];
 }) {
+  const { t } = useLanguage();
   const watchlisted = reports.filter((r) => watchlist.has(r.id));
 
   return (
@@ -3317,7 +3323,7 @@ function WatchlistView({
           </Badge>
         </SheetTitle>
         <p className="text-xs text-muted-foreground">
-          Projects you're tracking. Saved locally in your browser.
+          {t("watchlist.description")}
         </p>
       </SheetHeader>
 
@@ -3327,7 +3333,7 @@ function WatchlistView({
             <div className="flex h-16 w-16 items-center justify-center rounded-full bg-amber-500/10 border border-amber-500/20 mb-4">
               <Star className="h-8 w-8 text-amber-400/50" />
             </div>
-            <h3 className="text-sm font-semibold mb-1">No projects in watchlist yet</h3>
+            <h3 className="text-sm font-semibold mb-1">{t("watchlist.empty")}</h3>
             <p className="text-xs text-muted-foreground max-w-xs">
               Click the star icon on any project card to add it to your watchlist.
               Watchlisted projects are saved across scans.
@@ -3404,6 +3410,7 @@ function HistoryView({
   onSelectScan: (scan: ScanStatus) => void;
   onCompareScans?: () => void;
 }) {
+  const { t } = useLanguage();
   if (loading) {
     return (
       <div>
@@ -3579,6 +3586,7 @@ function MarketSentimentBanner({
 }: {
   stats: { total: number; avgQ: number; avgConf: number; highCount: number; vetoCount: number; topSector: string };
 }) {
+  const { t } = useLanguage();
   // Calculate a composite sentiment score (0-100)
   const qualityComponent = stats.avgQ; // 0-100
   const confidenceComponent = stats.avgConf; // 0-100
@@ -3681,6 +3689,7 @@ function GlobalSearchView({
   loading: boolean;
   onSelect: (reportId: string) => void;
 }) {
+  const { t } = useLanguage();
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -3701,7 +3710,7 @@ function GlobalSearchView({
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
           <Input
             ref={inputRef}
-            placeholder="Search across all scans..."
+            placeholder={t("search.placeholder")}
             value={query}
             onChange={(e) => onQueryChange(e.target.value)}
             className="h-10 pl-10 text-sm"
@@ -3716,7 +3725,7 @@ function GlobalSearchView({
         {!query.trim() ? (
           <div className="flex flex-col items-center justify-center py-16 text-center">
             <Search className="h-12 w-12 text-muted-foreground/30 mb-3" />
-            <p className="text-sm text-muted-foreground">Start typing to search across all scans</p>
+            <p className="text-sm text-muted-foreground">{t("search.empty")}</p>
             <p className="text-[11px] text-muted-foreground/70 mt-1">Search by name, symbol, category, or sector</p>
           </div>
         ) : results.length === 0 && !loading ? (
@@ -3779,6 +3788,7 @@ function GlobalSearchView({
 //  ScanDiffView — side-by-side comparison of two scans
 // --------------------------------------------------------------------------- //
 function ScanDiffView({ scanA, scanB }: { scanA: ScanStatus | null; scanB: ScanStatus | null }) {
+  const { t } = useLanguage();
   if (!scanA || !scanB) {
     return (
       <div>
@@ -3877,9 +3887,9 @@ function ScanDiffView({ scanA, scanB }: { scanA: ScanStatus | null; scanB: ScanS
           <CardContent className="pt-2">
             <div className="space-y-1">
               <div className="grid grid-cols-[1fr_80px_80px_80px] gap-2 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground pb-1 border-b border-border/30">
-                <div>Metric</div>
-                <div className="text-right text-sky-400">Scan A</div>
-                <div className="text-right text-violet-400">Scan B</div>
+                <div>{t("scanDiff.metric")}</div>
+                <div className="text-right text-sky-400">{t("scanDiff.scanA")}</div>
+                <div className="text-right text-violet-400">{t("scanDiff.scanB")}</div>
                 <div className="text-right">Δ Change</div>
               </div>
               {diffRows.map((row, i) => {
@@ -3917,15 +3927,15 @@ function ScanDiffView({ scanA, scanB }: { scanA: ScanStatus | null; scanB: ScanS
           <CardContent className="pt-2">
             <div className="grid grid-cols-3 gap-2 text-center">
               <div className="p-3 rounded-lg bg-sky-500/5 border border-sky-500/20">
-                <div className="text-[10px] text-muted-foreground uppercase">Only in A</div>
+                <div className="text-[10px] text-muted-foreground uppercase">{t("scanDiff.onlyInA")}</div>
                 <div className="text-2xl font-bold text-sky-400">{onlyInA.length}</div>
               </div>
               <div className="p-3 rounded-lg bg-emerald-500/5 border border-emerald-500/20">
-                <div className="text-[10px] text-muted-foreground uppercase">Common</div>
+                <div className="text-[10px] text-muted-foreground uppercase">{t("scanDiff.common")}</div>
                 <div className="text-2xl font-bold text-emerald-400">{commonProjects.length}</div>
               </div>
               <div className="p-3 rounded-lg bg-violet-500/5 border border-violet-500/20">
-                <div className="text-[10px] text-muted-foreground uppercase">Only in B</div>
+                <div className="text-[10px] text-muted-foreground uppercase">{t("scanDiff.onlyInB")}</div>
                 <div className="text-2xl font-bold text-violet-400">{onlyInB.length}</div>
               </div>
             </div>
@@ -3964,6 +3974,7 @@ function ScanDiffView({ scanA, scanB }: { scanA: ScanStatus | null; scanB: ScanS
 //  HelpView — onboarding guide and framework explanation
 // --------------------------------------------------------------------------- //
 function HelpView() {
+  const { t } = useLanguage();
   const sections = [
     {
       icon: Crosshair,
@@ -4063,7 +4074,7 @@ function HelpView() {
         <div className="rounded-xl border border-emerald-500/20 bg-gradient-to-br from-emerald-500/10 to-teal-600/5 p-4">
           <div className="flex items-center gap-2 mb-2">
             <Sparkles className="h-4 w-4 text-emerald-400" />
-            <h3 className="text-sm font-semibold text-emerald-400">Core Principle</h3>
+            <h3 className="text-sm font-semibold text-emerald-400">{t("help.corePrinciple")}</h3>
           </div>
           <p className="text-xs text-foreground/80 leading-relaxed">
             <span className="font-mono font-semibold">Evidence &gt; Narrative</span>
