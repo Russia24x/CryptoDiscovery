@@ -214,14 +214,54 @@
     "title": "How It Works",
     "description": "A quick guide to the Crypto Discovery Framework",
     "corePrinciple": "Core Principle",
+    "corePrincipleDesc": "This framework evaluates crypto projects by verifiable evidence — not social media buzz. Scores are intentionally conservative when data is missing.",
     "configure": "1. Configure Your Scan",
+    "configureItems": [
+      "Choose a Persona (Investor, Researcher, Developer, etc.) — each weights the 5 axes differently",
+      "Set Market Cap range to filter by project size",
+      "Select Sectors (DeFi, Infrastructure, RWA, etc.) or leave empty for all",
+      "Use Quick Presets for common configurations (DeFi Focus, Large Cap, Emerging)"
+    ],
     "run": "2. Run a Market Scan",
+    "runItems": [
+      "Click 'Scan Market' or press 'S' to start",
+      "The framework runs 8 phases: Discovery → Screening → Evidence → Evaluation → Scoring → Investment → Decision → Output",
+      "Watch the progress bar and phase log for real-time updates",
+      "Scan typically completes in 10-20 seconds"
+    ],
     "explore": "3. Explore Results",
+    "exploreItems": [
+      "Ranked Candidates grid shows all discovered projects sorted by quality score",
+      "Click any card to open the detailed analysis drawer",
+      "Switch between Grid and Analytics views for different visualizations",
+      "Use the Market Sentiment banner to gauge overall market health"
+    ],
     "understand": "4. Understand the 5 Axes",
+    "understandItems": [
+      "Invisible Utility — does the project hide blockchain complexity?",
+      "Economic Engine — real revenue, fees, and growth",
+      "Moat — competitive advantages (regulatory, network, distribution)",
+      "Token & Market Structure — tokenomics and liquidity",
+      "Governance / Legal / Security — team, audits, regulatory status"
+    ],
     "compareTrack": "5. Compare & Track",
+    "compareTrackItems": [
+      "Toggle Compare mode to select up to 4 projects for side-by-side comparison",
+      "Star projects to add them to your Watchlist (saved locally)",
+      "View Scan History to see trends across multiple scans",
+      "Use Scan Diff to compare metrics between two scans",
+      "Search across all scans with Ctrl+K or the Search All button"
+    ],
     "exportShare": "6. Export & Share",
+    "exportShareItems": [
+      "Export individual reports as Markdown or JSON",
+      "Copy a quick summary to clipboard for sharing",
+      "Export all scan results as CSV for spreadsheet analysis",
+      "Use keyboard shortcuts for faster workflow (see footer)"
+    ],
     "keyboardShortcuts": "Keyboard Shortcuts",
     "dataSources": "Data Sources",
+    "dataSourcesNote": "All data from public APIs. No API key required. CoinGecko rate limits may cause some data to be missing.",
     "disclaimer": "Disclaimer: This framework is a research and analysis tool, not personalized financial advice. Always do your own research (DYOR) before making investment decisions."
   },
   "footer": {

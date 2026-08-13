@@ -8,8 +8,8 @@ export type Language = "en" | "fa";
 
 const translations: Record<Language, Record<string, unknown>> = { en, fa };
 
-// Helper to get nested value from dot-notation key
-function getNestedValue(obj: Record<string, unknown>, path: string): string {
+// Helper to get nested value from dot-notation key (supports strings and arrays)
+function getNestedValue(obj: Record<string, unknown>, path: string): unknown {
   const keys = path.split(".");
   let current: unknown = obj;
   for (const key of keys) {
@@ -19,7 +19,7 @@ function getNestedValue(obj: Record<string, unknown>, path: string): string {
       return path; // fallback to key if not found
     }
   }
-  return typeof current === "string" ? current : path;
+  return current; // can be string, array, or other
 }
 
 // Interpolate {placeholder} values
@@ -32,7 +32,7 @@ interface LanguageContextValue {
   lang: Language;
   setLang: (lang: Language) => void;
   toggleLang: () => void;
-  t: (key: string, vars?: Record<string, string | number>) => string;
+  t: (key: string, vars?: Record<string, string | number>) => any;
   dir: "ltr" | "rtl";
 }
 
@@ -70,9 +70,12 @@ export function LanguageProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const t = React.useCallback(
-    (key: string, vars?: Record<string, string | number>) => {
-      const str = getNestedValue(translations[lang], key);
-      return interpolate(str, vars);
+    (key: string, vars?: Record<string, string | number>): any => {
+      const val = getNestedValue(translations[lang], key);
+      if (typeof val === "string") {
+        return interpolate(val, vars);
+      }
+      return val; // return arrays/objects as-is
     },
     [lang],
   );

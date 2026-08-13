@@ -1427,18 +1427,18 @@ export default function Home() {
                           <SelectValue />
                         </SelectTrigger>
                         <SelectContent>
-                          <SelectItem value="quality">Project Quality</SelectItem>
-                          <SelectItem value="token">Token Quality</SelectItem>
-                          <SelectItem value="confidence">Confidence</SelectItem>
-                          <SelectItem value="action">Action</SelectItem>
+                          <SelectItem value="quality">{t("results.projectQuality")}</SelectItem>
+                          <SelectItem value="token">{t("results.tokenQuality")}</SelectItem>
+                          <SelectItem value="confidence">{t("results.confidence")}</SelectItem>
+                          <SelectItem value="action">{t("results.action")}</SelectItem>
                         </SelectContent>
                       </Select>
                       <Select value={actionFilter} onValueChange={setActionFilter}>
                         <SelectTrigger className="h-8 w-[130px] text-xs">
-                          <SelectValue placeholder="Action" />
+                          <SelectValue placeholder={t("results.action")} />
                         </SelectTrigger>
                         <SelectContent>
-                          <SelectItem value="all">All Actions</SelectItem>
+                          <SelectItem value="all">{t("results.allActions")}</SelectItem>
                           {availableActions.map((a) => (
                             <SelectItem key={a} value={a.toLowerCase()}>{a}</SelectItem>
                           ))}
@@ -1447,10 +1447,10 @@ export default function Home() {
                       {availableSectors.length > 0 && (
                         <Select value={sectorFilter} onValueChange={setSectorFilter}>
                           <SelectTrigger className="h-8 w-[130px] text-xs">
-                            <SelectValue placeholder="Sector" />
+                            <SelectValue placeholder={t("results.allSectors")} />
                           </SelectTrigger>
                           <SelectContent>
-                            <SelectItem value="all">All Sectors</SelectItem>
+                            <SelectItem value="all">{t("results.allSectors")}</SelectItem>
                             {availableSectors.map((s) => (
                               <SelectItem key={s} value={s}>{s}</SelectItem>
                             ))}
@@ -2893,28 +2893,29 @@ function StatCard({
 //  ComparisonView — side-by-side project comparison
 // --------------------------------------------------------------------------- //
 function ComparisonView({ reports }: { reports: FullReport[] }) {
+  const { t } = useLanguage();
   if (reports.length === 0) return null;
 
   const rows: { label: string; getValue: (r: FullReport) => string; getColor?: (r: FullReport) => string }[] = [
-    { label: "Project Quality", getValue: (r) => r.project_quality_score.toFixed(1), getColor: (r) => scoreColor(r.project_quality_score) },
-    { label: "Token Quality", getValue: (r) => r.token_quality_score?.toFixed(1) ?? "—", getColor: (r) => (r.token_quality_score != null ? scoreColor(r.token_quality_score) : "text-muted-foreground") },
-    { label: "Confidence", getValue: (r) => `${r.confidence.toFixed(0)}%` },
-    { label: "Risk-Adjusted", getValue: (r) => r.decision.risk_adjusted_score.toFixed(0) },
-    { label: "Action", getValue: (r) => r.decision.action_label },
-    { label: "Valuation", getValue: (r) => r.valuation_label },
+    { label: t("results.projectQuality"), getValue: (r) => r.project_quality_score.toFixed(1), getColor: (r) => scoreColor(r.project_quality_score) },
+    { label: t("results.tokenQuality"), getValue: (r) => r.token_quality_score?.toFixed(1) ?? "—", getColor: (r) => (r.token_quality_score != null ? scoreColor(r.token_quality_score) : "text-muted-foreground") },
+    { label: t("results.confidence"), getValue: (r) => `${r.confidence.toFixed(0)}%` },
+    { label: t("detail.riskAdj"), getValue: (r) => r.decision.risk_adjusted_score.toFixed(0) },
+    { label: t("results.action"), getValue: (r) => r.decision.action_label },
+    { label: t("detail.valuationMultiples") ? t("detail.valuationMultiples") : "Valuation", getValue: (r) => r.valuation_label },
     { label: "Investment Attr.", getValue: (r) => r.investment_attractiveness_score?.toFixed(0) ?? "—" },
-    { label: "Evidence Grade", getValue: (r) => r.evidence_grade.split(" - ")[0] },
-    { label: "Cycle Phase", getValue: (r) => r.cycle_phase.replace("Phase ", "P") },
+    { label: t("detail.evidence"), getValue: (r) => r.evidence_grade.split(" - ")[0] },
+    { label: t("detail.cyclePhase"), getValue: (r) => r.cycle_phase.replace("Phase ", "P") },
     { label: "Category", getValue: (r) => r.candidate.category },
     { label: "Sector", getValue: (r) => r.candidate.sector },
-    { label: "TVL", getValue: (r) => fmtUsd(r.economic_engine.tvl) },
-    { label: "Revenue (24h)", getValue: (r) => fmtUsd(r.economic_engine.revenue) },
-    { label: "Fees (24h)", getValue: (r) => fmtUsd(r.economic_engine.fees) },
-    { label: "Market Cap", getValue: (r) => fmtUsd(r.tokenomics.market_cap) },
-    { label: "FDV", getValue: (r) => fmtUsd(r.tokenomics.fdv) },
-    { label: "Supply Growth", getValue: (r) => fmtPct(r.tokenomics.supply_growth_pct) },
-    { label: "Utility Level", getValue: (r) => `${r.tokenomics.utility_level}/4` },
-    { label: "Peer Percentile", getValue: (r) => (r.peer_benchmark.peer_percentile != null ? r.peer_benchmark.peer_percentile.toFixed(0) + "%" : "—") },
+    { label: t("metrics.tvl"), getValue: (r) => fmtUsd(r.economic_engine.tvl) },
+    { label: t("metrics.revenue24h"), getValue: (r) => fmtUsd(r.economic_engine.revenue) },
+    { label: t("metrics.fees24h"), getValue: (r) => fmtUsd(r.economic_engine.fees) },
+    { label: t("metrics.marketCap"), getValue: (r) => fmtUsd(r.tokenomics.market_cap) },
+    { label: t("metrics.fdv"), getValue: (r) => fmtUsd(r.tokenomics.fdv) },
+    { label: t("metrics.supplyGrowth"), getValue: (r) => fmtPct(r.tokenomics.supply_growth_pct) },
+    { label: t("metrics.utilityLevel"), getValue: (r) => `${r.tokenomics.utility_level}/4` },
+    { label: t("metrics.peerPercentile"), getValue: (r) => (r.peer_benchmark.peer_percentile != null ? r.peer_benchmark.peer_percentile.toFixed(0) + "%" : "—") },
   ];
 
   const axisRows = reports[0]?.axes.map((ax) => ax.name) ?? [];
@@ -3978,71 +3979,39 @@ function HelpView() {
   const sections = [
     {
       icon: Crosshair,
-      title: "1. Configure Your Scan",
+      title: t("help.configure"),
       color: "text-emerald-400",
-      items: [
-        "Choose a Persona (Investor, Researcher, Developer, etc.) — each weights the 5 axes differently",
-        "Set Market Cap range to filter by project size",
-        "Select Sectors (DeFi, Infrastructure, RWA, etc.) or leave empty for all",
-        "Use Quick Presets for common configurations (DeFi Focus, Large Cap, Emerging)",
-      ],
+      items: t("help.configureItems") as unknown as string[],
     },
     {
       icon: Zap,
-      title: "2. Run a Market Scan",
+      title: t("help.run"),
       color: "text-amber-400",
-      items: [
-        "Click 'Scan Market' or press 'S' to start",
-        "The framework runs 8 phases: Discovery → Screening → Evidence → Evaluation → Scoring → Investment → Decision → Output",
-        "Watch the progress bar and phase log for real-time updates",
-        "Scan typically completes in 10-20 seconds",
-      ],
+      items: t("help.runItems") as unknown as string[],
     },
     {
       icon: Gauge,
-      title: "3. Explore Results",
+      title: t("help.explore"),
       color: "text-sky-400",
-      items: [
-        "Ranked Candidates grid shows all discovered projects sorted by quality score",
-        "Click any card to open the detailed analysis drawer",
-        "Switch between Grid and Analytics views for different visualizations",
-        "Use the Market Sentiment banner to gauge overall market health",
-      ],
+      items: t("help.exploreItems") as unknown as string[],
     },
     {
       icon: ShieldAlert,
-      title: "4. Understand the 5 Axes",
+      title: t("help.understand"),
       color: "text-rose-400",
-      items: [
-        "Invisible Utility — does the project hide blockchain complexity?",
-        "Economic Engine — real revenue, fees, and growth",
-        "Moat — competitive advantages (regulatory, network, distribution)",
-        "Token & Market Structure — tokenomics and liquidity",
-        "Governance / Legal / Security — team, audits, regulatory status",
-      ],
+      items: t("help.understandItems") as unknown as string[],
     },
     {
       icon: GitCompare,
-      title: "5. Compare & Track",
+      title: t("help.compareTrack"),
       color: "text-violet-400",
-      items: [
-        "Toggle Compare mode to select up to 4 projects for side-by-side comparison",
-        "Star projects to add them to your Watchlist (saved locally)",
-        "View Scan History to see trends across multiple scans",
-        "Use Scan Diff to compare metrics between two scans",
-        "Search across all scans with Ctrl+K or the Search All button",
-      ],
+      items: t("help.compareTrackItems") as unknown as string[],
     },
     {
       icon: Download,
-      title: "6. Export & Share",
+      title: t("help.exportShare"),
       color: "text-teal-400",
-      items: [
-        "Export individual reports as Markdown or JSON",
-        "Copy a quick summary to clipboard for sharing",
-        "Export all scan results as CSV for spreadsheet analysis",
-        "Use keyboard shortcuts for faster workflow (see footer)",
-      ],
+      items: t("help.exportShareItems") as unknown as string[],
     },
   ];
 
