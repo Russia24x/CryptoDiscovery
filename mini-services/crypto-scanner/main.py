@@ -405,19 +405,31 @@ async def analyze_single_coin(req: AnalyzeRequest):
     llama_protos = await sources.fetch_defillama_protocols()
     fees_list = await sources.fetch_fees_overview()
     llama_entry = sources.match_llama_protocol(symbol, name, llama_protos)
-    # fees match by symbol then name
+    # fees match by symbol then name — when multiple entries share the same
+    # symbol (e.g. "SOL" matches both "Solana" and "Solana Name Service"),
+    # pick the one with the highest 24h fees (the real protocol/chain).
     fees_entry = None
+    symbol_matches: list[dict[str, Any]] = []
     for f in fees_list:
         if (f.get("symbol") or "").upper() == symbol:
-            fees_entry = f
-            break
+            symbol_matches.append(f)
+    if symbol_matches:
+        # Sort by fees_24h descending — the real protocol has higher fees
+        symbol_matches.sort(key=lambda x: x.get("fees_24h") or 0, reverse=True)
+        fees_entry = symbol_matches[0]
     if not fees_entry:
         nm = name.lower()
+        # Collect ALL name matches, then pick the one with highest fees
+        # (e.g. "Solana" matches both "Solana Name Service" and "Solana" —
+        # the real chain "Solana" has $708K fees vs $1.8K for the name service)
+        name_matches: list[dict[str, Any]] = []
         for f in fees_list:
             fname = (f.get("name") or "").lower()
             if fname and (fname == nm or fname.startswith(nm + " ") or nm.startswith(fname + " ")):
-                fees_entry = f
-                break
+                name_matches.append(f)
+        if name_matches:
+            name_matches.sort(key=lambda x: x.get("fees_24h") or 0, reverse=True)
+            fees_entry = name_matches[0]
 
     cand = CandidateInfo(
         name=name,

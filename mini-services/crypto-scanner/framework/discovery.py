@@ -117,12 +117,16 @@ async def discover_candidates(
         if sym and sym not in llama_by_symbol:
             llama_by_symbol[sym] = p
     # Build fees lookup by both symbol AND name (many fee protocols lack symbol)
+    # When multiple entries share the same symbol (e.g. "SOL" matches both
+    # "Solana" and "Solana Name Service"), keep the one with the highest fees_24h.
     fees_by_symbol: dict[str, dict[str, Any]] = {}
     fees_by_name: dict[str, dict[str, Any]] = {}
     for f in fees_list:
         sym = (f.get("symbol") or "").upper()
-        if sym and sym not in fees_by_symbol:
-            fees_by_symbol[sym] = f
+        if sym:
+            existing = fees_by_symbol.get(sym)
+            if existing is None or (f.get("fees_24h") or 0) > (existing.get("fees_24h") or 0):
+                fees_by_symbol[sym] = f
         name = (f.get("name") or "").lower()
         if name and name not in fees_by_name:
             fees_by_name[name] = f
