@@ -1618,3 +1618,68 @@ Stage Summary:
 - Telegram media extraction fixed: now shows photos and album grids (previously 0 photos, now 8/12 messages have media).
 - Multi-source data flow verified: CoinGecko + DeFiLlama + CMC Keyless (all free) + CMC Pro (optional) used throughout evidence pipeline and market overview for maximum truth and stability.
 - Total data sources: 14 (11 free + 3 optional API-key).
+
+---
+Task ID: 8
+Agent: main (orchestrator)
+Task: Fix Persian news missing images (blog/news/analysis categories), add CMC Pro exclusive endpoints (airdrops, categories, exchanges), update documentation.
+
+Work Log:
+- Investigated Persian RSS image issue: ArzDigital /breaking/feed has media:content images (working), but /feed (blog) and MihanBlockchain feeds have images ONLY in content:encoded (the full article body RSS extension), not in description or enclosure.
+- Found that ArzDigital's content:encoded starts with a base64 SVG placeholder (data:image/svg+xml;base64,...) that must be skipped.
+- Updated _fetch_rss_feed() in sources.py:
+  - Added content:encoded parsing (content RSS namespace)
+  - Added _first_real_img() helper that skips data: URIs (base64 placeholders) and returns the first real CDN image
+  - Image extraction priority: enclosure → media:content → media:thumbnail → content:encoded → description
+  - Result: 5/6 Persian articles now have images (previously only breaking news had them)
+
+- Researched CMC Pro API unique capabilities (not available from free sources):
+  - /v1/cryptocurrency/airdrop — structured airdrop data (total value, participants, requirements, dates)
+  - /v1/cryptocurrency/categories — per-category market cap, 24h/7d changes, volume, top 3 coins
+  - /v1/exchange/map — exchange rankings by volume
+  - These are genuinely exclusive — no free source (CoinGecko, DeFiLlama, CMC Keyless) provides this data.
+
+- Added 3 new CMC Pro fetchers to sources.py:
+  - fetch_cmc_categories() — category market cap data with 24h/7d changes
+  - fetch_cmc_airdrops(limit, status) — airdrop data (ONGOING/UPCOMING/ENDED)
+  - fetch_cmc_exchange_map(limit) — exchange rankings
+  - All return None when no API key, with 5-min TTL cache
+
+- Added 3 new endpoints to main.py:
+  - GET /cmc/airdrops?limit=&status= — returns cmc_pro_required=True when no key
+  - GET /cmc/categories — returns cmc_pro_required=True when no key
+  - GET /cmc/exchanges?limit= — returns cmc_pro_required=True when no key
+
+- Updated /sources endpoint: CMC Pro description now says "EXCLUSIVE: airdrops, categories, exchange rankings + cross-verification"
+
+- Created 3 Next.js proxy routes: /api/scanner/cmc/airdrops, /cmc/categories, /cmc/exchanges
+
+- Added CMC Pro types to scanner-types.ts: CmcAirdrop, CmcAirdropsResponse, CmcCategory, CmcCategoriesResponse, CmcExchange, CmcExchangesResponse
+
+- Updated market-intelligence-view.tsx:
+  - Added 2 new tabs: "Airdrops" (Gift icon, amber) and "Categories" (Boxes icon, cyan) — both with "PRO" badge
+  - Added CmcProRequired component — upgrade card with KeyRound icon, explanation, env var hint
+  - Added AirdropsTable component — logo, status badge, total value, participants, dates, website link
+  - Added CategoriesTable component — category name, token count, market cap, 24h%, volume, top coins
+  - Lazy-loading: CMC Pro data fetched only when user first clicks the tab
+  - Controlled Tabs (value/onValueChange) to track activeTab for lazy loading
+
+- Updated README.md documentation:
+  - Restructured "Key Features" into 4 main views with detailed feature lists
+  - Updated Data Sources section: 14 sources (11 free + 3 API-key) in table format
+  - Updated architecture diagram to show all data source groups
+  - Expanded API Endpoints section: 4 categories (Core, Explorer/Market, News/Telegram, CMC Pro)
+
+Browser QA via agent-browser:
+- Market Intelligence view: 9 tabs visible (7 free + 2 CMC Pro with PRO badges) ✓
+- Airdrops tab: shows CmcProRequired upgrade card with "Airdrops require CMC Pro API key" + env var hint ✓
+- Persian News tab: 37 images now present in DOM (previously 0 for blog/news/analysis) ✓
+- VLM confirmed: "article cards have thumbnail images, and they appear to be loading correctly" ✓
+- Dev log + scanner log: zero errors ✓
+- Lint: 0 errors, 0 warnings ✓
+
+Stage Summary:
+- Persian news image bug FIXED: content:encoded parsing with data: URI filtering now extracts real CDN images from all Persian RSS feeds (ArzDigital blog + MihanBlockchain news/markets).
+- CMC Pro exclusive data integrated: 3 new endpoints (airdrops, categories, exchanges) with graceful "upgrade required" UI when no API key. These provide data unavailable from any free source.
+- Documentation updated: README.md now reflects all 4 views, 14 data sources, 16 API endpoints.
+- Total data sources: 14 (11 free + 3 optional API-key).

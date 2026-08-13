@@ -340,3 +340,71 @@ export interface SourcesStatus {
   keyed_count: number;
   total_count: number;
 }
+
+// --------------------------------------------------------------------------- //
+//  CMC Pro exclusive data (from /api/scanner/cmc/*)
+//  These endpoints return cmc_pro_required=true when no API key is set.
+// --------------------------------------------------------------------------- //
+export interface CmcAirdrop {
+  id: number;
+  name: string;
+  symbol: string | null;
+  status: string;
+  description: string | null;
+  start_date: string | null;
+  end_date: string | null;
+  total_value_usd: number | null;
+  participants: number | null;
+  requirements: string[];
+  website: string | null;
+  logo: string | null;
+}
+
+export interface CmcAirdropsResponse {
+  cmc_pro_required?: boolean;
+  airdrops: CmcAirdrop[];
+  count: number;
+  status_filter?: string;
+  fetched_at?: string;
+  message?: string;
+}
+
+export interface CmcCategory {
+  id: number;
+  name: string;
+  title: string | null;
+  description: string | null;
+  num_tokens: number;
+  market_cap: number | null;
+  market_cap_change_24h: number | null;
+  market_cap_change_7d: number | null;
+  volume_24h: number | null;
+  top_coins: string[];
+  avg_price_change_24h: number | null;
+  last_updated: string | null;
+}
+
+export interface CmcCategoriesResponse {
+  cmc_pro_required?: boolean;
+  categories: CmcCategory[];
+  count: number;
+  fetched_at?: string;
+  message?: string;
+}
+
+export interface CmcExchange {
+  id: number;
+  name: string;
+  slug: string;
+  is_active: boolean;
+  first_historical_data: string | null;
+  last_historical_data: string | null;
+}
+
+export interface CmcExchangesResponse {
+  cmc_pro_required?: boolean;
+  exchanges: CmcExchange[];
+  count: number;
+  fetched_at?: string;
+  message?: string;
+}

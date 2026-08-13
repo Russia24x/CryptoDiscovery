@@ -42,12 +42,15 @@ import {
   Eye,
   Flame,
   Gauge,
+  Gift,
   Globe,
+  KeyRound,
   Layers,
   RefreshCw,
   Sparkles,
   TrendingDown,
   TrendingUp,
+  Users,
   Wallet,
 } from "lucide-react";
 
@@ -79,6 +82,10 @@ import {
 } from "@/components/ui/tooltip";
 import { useLanguage } from "@/lib/i18n/LanguageProvider";
 import type {
+  CmcAirdropsResponse,
+  CmcCategoriesResponse,
+  CmcAirdrop,
+  CmcCategory,
   FearGreedData,
   GlobalMarketData,
   MarketOverview,
@@ -1017,6 +1024,145 @@ function ErrorView({ message, onRetry }: { message: string; onRetry: () => void 
 }
 
 /* -------------------------------------------------------------------------- */
+/*  CMC Pro exclusive — Airdrops & Categories (require API key)               */
+/* -------------------------------------------------------------------------- */
+
+/** Upgrade card shown when CMC Pro API key is not configured. */
+function CmcProRequired({ title, description }: { title: string; description: string }) {
+  return (
+    <Card className="border-amber-500/30 bg-amber-500/5">
+      <CardContent className="flex flex-col items-center gap-3 py-12 text-center">
+        <div className="flex size-12 items-center justify-center rounded-full bg-amber-500/15 text-amber-500">
+          <KeyRound className="size-6" />
+        </div>
+        <div className="space-y-1">
+          <h3 className="text-sm font-semibold text-foreground">{title}</h3>
+          <p className="mx-auto max-w-md text-xs text-muted-foreground">{description}</p>
+        </div>
+        <div className="rounded-md border border-amber-500/20 bg-amber-500/10 px-3 py-1.5 text-[11px] text-amber-600 dark:text-amber-400">
+          Set <code className="font-mono">CMC_API_KEY</code> env var to unlock this data
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+/** Airdrops table — CMC Pro exclusive. */
+function AirdropsTable({ airdrops }: { airdrops: CmcAirdrop[] }) {
+  return (
+    <div className="overflow-x-auto">
+      <Table>
+        <TableHeader>
+          <TableRow className="hover:bg-transparent">
+            <TableHead className="text-xs">Project</TableHead>
+            <TableHead className="text-xs">Status</TableHead>
+            <TableHead className="text-right text-xs">Total Value</TableHead>
+            <TableHead className="text-right text-xs">Participants</TableHead>
+            <TableHead className="text-xs">Start</TableHead>
+            <TableHead className="text-xs">End</TableHead>
+            <TableHead className="text-xs">Link</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {airdrops.map((a) => (
+            <TableRow key={a.id} className="text-xs">
+              <TableCell className="font-medium">
+                <div className="flex items-center gap-2">
+                  {a.logo && (
+                    <img src={a.logo} alt={a.name} className="size-5 rounded-full" loading="lazy" />
+                  )}
+                  <div className="flex flex-col">
+                    <span>{a.name}</span>
+                    {a.symbol && <span className="text-[10px] text-muted-foreground">{a.symbol}</span>}
+                  </div>
+                </div>
+              </TableCell>
+              <TableCell>
+                <Badge
+                  variant="outline"
+                  className={
+                    a.status === "ONGOING"
+                      ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-500"
+                      : a.status === "UPCOMING"
+                        ? "border-sky-500/30 bg-sky-500/10 text-sky-500"
+                        : "border-muted text-muted-foreground"
+                  }
+                >
+                  {a.status}
+                </Badge>
+              </TableCell>
+              <TableCell className="text-right tabular-nums">
+                {a.total_value_usd != null ? `$${(a.total_value_usd / 1000).toFixed(1)}K` : "—"}
+              </TableCell>
+              <TableCell className="text-right tabular-nums">
+                {a.participants != null ? a.participants.toLocaleString() : "—"}
+              </TableCell>
+              <TableCell className="text-muted-foreground">
+                {a.start_date ? new Date(a.start_date).toLocaleDateString("en", { month: "short", day: "numeric" }) : "—"}
+              </TableCell>
+              <TableCell className="text-muted-foreground">
+                {a.end_date ? new Date(a.end_date).toLocaleDateString("en", { month: "short", day: "numeric" }) : "—"}
+              </TableCell>
+              <TableCell>
+                {a.website && (
+                  <a href={a.website} target="_blank" rel="noopener noreferrer" className="text-muted-foreground hover:text-foreground">
+                    <ExternalLink className="size-3.5" />
+                  </a>
+                )}
+              </TableCell>
+            </TableRow>
+          ))}
+        </TableBody>
+      </Table>
+    </div>
+  );
+}
+
+/** Categories table — CMC Pro exclusive. */
+function CategoriesTable({ categories }: { categories: CmcCategory[] }) {
+  return (
+    <div className="overflow-x-auto">
+      <Table>
+        <TableHeader>
+          <TableRow className="hover:bg-transparent">
+            <TableHead className="text-xs">Category</TableHead>
+            <TableHead className="text-right text-xs">Tokens</TableHead>
+            <TableHead className="text-right text-xs">Market Cap</TableHead>
+            <TableHead className="text-right text-xs">24h %</TableHead>
+            <TableHead className="text-right text-xs">Volume 24h</TableHead>
+            <TableHead className="text-xs">Top Coins</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {categories.map((c) => (
+            <TableRow key={c.id} className="text-xs">
+              <TableCell className="font-medium">{c.name}</TableCell>
+              <TableCell className="text-right tabular-nums text-muted-foreground">{c.num_tokens}</TableCell>
+              <TableCell className="text-right tabular-nums">
+                {c.market_cap != null ? `$${(c.market_cap / 1e9).toFixed(2)}B` : "—"}
+              </TableCell>
+              <TableCell className="text-right tabular-nums">
+                {c.market_cap_change_24h != null ? (
+                  <span className={c.market_cap_change_24h >= 0 ? "text-emerald-500" : "text-rose-500"}>
+                    {c.market_cap_change_24h >= 0 ? "+" : ""}{c.market_cap_change_24h.toFixed(2)}%
+                  </span>
+                ) : "—"}
+              </TableCell>
+              <TableCell className="text-right tabular-nums">
+                {c.volume_24h != null ? `$${(c.volume_24h / 1e6).toFixed(1)}M` : "—"}
+              </TableCell>
+              <TableCell className="text-muted-foreground">
+                <span className="truncate">{c.top_coins.join(", ") || "—"}</span>
+              </TableCell>
+            </TableRow>
+          ))}
+        </TableBody>
+      </Table>
+    </div>
+  );
+}
+
+/* -------------------------------------------------------------------------- */
 /*  Main component                                                            */
 /* -------------------------------------------------------------------------- */
 
@@ -1024,6 +1170,47 @@ export function MarketIntelligenceView({ onAnalyzeCoin }: MarketIntelligenceView
   const { t } = useLanguage();
   const { data, loading, refreshing, error, refresh } = useMarketOverview();
   const cacheAge = useCacheAge(data?.cached_at);
+
+  /* ----- CMC Pro exclusive data (airdrops + categories) — lazy-loaded on tab click ----- */
+  const [airdropsData, setAirdropsData] = React.useState<CmcAirdropsResponse | null>(null);
+  const [airdropsLoading, setAirdropsLoading] = React.useState(false);
+  const [airdropsFetched, setAirdropsFetched] = React.useState(false);
+  const [categoriesData, setCategoriesData] = React.useState<CmcCategoriesResponse | null>(null);
+  const [categoriesLoading, setCategoriesLoading] = React.useState(false);
+  const [categoriesFetched, setCategoriesFetched] = React.useState(false);
+  const [activeTab, setActiveTab] = React.useState("top");
+
+  const fetchAirdrops = React.useCallback(async () => {
+    setAirdropsLoading(true);
+    try {
+      const res = await fetch("/api/scanner/cmc/airdrops?limit=50&status=ONGOING");
+      if (res.ok) setAirdropsData(await res.json());
+    } catch {
+      /* non-critical */
+    } finally {
+      setAirdropsLoading(false);
+      setAirdropsFetched(true);
+    }
+  }, []);
+
+  const fetchCategories = React.useCallback(async () => {
+    setCategoriesLoading(true);
+    try {
+      const res = await fetch("/api/scanner/cmc/categories");
+      if (res.ok) setCategoriesData(await res.json());
+    } catch {
+      /* non-critical */
+    } finally {
+      setCategoriesLoading(false);
+      setCategoriesFetched(true);
+    }
+  }, []);
+
+  // Lazy-load CMC Pro data when the user first clicks the Airdrops or Categories tab
+  React.useEffect(() => {
+    if (activeTab === "airdrops" && !airdropsFetched) fetchAirdrops();
+    if (activeTab === "categories" && !categoriesFetched) fetchCategories();
+  }, [activeTab, airdropsFetched, categoriesFetched, fetchAirdrops, fetchCategories]);
 
   /* Translation helper with English fallback — `t()` returns the key itself
      when the translation is missing, so we fall back to the provided English
@@ -1174,7 +1361,7 @@ export function MarketIntelligenceView({ onAnalyzeCoin }: MarketIntelligenceView
             </div>
 
             {/* ---------- Tabbed tables ---------- */}
-            <Tabs defaultValue="top" className="gap-3">
+            <Tabs value={activeTab} onValueChange={setActiveTab} className="gap-3">
               <TabsList className="flex h-auto w-full flex-wrap gap-1 bg-muted/60 p-1 sm:w-fit">
                 <TabsTrigger value="top" className="gap-1.5 text-xs">
                   <BarChart3 className="size-3.5" />
@@ -1210,6 +1397,21 @@ export function MarketIntelligenceView({ onAnalyzeCoin }: MarketIntelligenceView
                   <Sparkles className="size-3.5 text-violet-500" />
                   Sectors
                   <Badge variant="secondary" className="ml-1 h-4 px-1 text-[10px]">{counts.sectors}</Badge>
+                </TabsTrigger>
+                {/* CMC Pro exclusive tabs — marked with key icon */}
+                <TabsTrigger value="airdrops" className="gap-1.5 text-xs">
+                  <Gift className="size-3.5 text-amber-500" />
+                  Airdrops
+                  <Badge variant="outline" className="ml-1 h-4 gap-0.5 border-amber-500/30 px-1 text-[9px] text-amber-500">
+                    <KeyRound className="size-2.5" />PRO
+                  </Badge>
+                </TabsTrigger>
+                <TabsTrigger value="categories" className="gap-1.5 text-xs">
+                  <Boxes className="size-3.5 text-cyan-500" />
+                  Categories
+                  <Badge variant="outline" className="ml-1 h-4 gap-0.5 border-amber-500/30 px-1 text-[9px] text-amber-500">
+                    <KeyRound className="size-2.5" />PRO
+                  </Badge>
                 </TabsTrigger>
               </TabsList>
 
@@ -1334,6 +1536,76 @@ export function MarketIntelligenceView({ onAnalyzeCoin }: MarketIntelligenceView
                   </CardHeader>
                   <CardContent className="px-4 pb-4">
                     <SectorsChart sectors={data.sectors} />
+                  </CardContent>
+                </Card>
+              </TabsContent>
+
+              {/* Airdrops — CMC Pro exclusive */}
+              <TabsContent value="airdrops">
+                <Card className="border-border/60 bg-card/40 backdrop-blur-sm p-0">
+                  <CardHeader className="px-4 py-3">
+                    <CardTitle className="text-sm flex items-center gap-2">
+                      <Gift className="size-4 text-amber-500" />
+                      Crypto Airdrops
+                      <Badge variant="outline" className="gap-0.5 border-amber-500/30 text-[10px] text-amber-500">
+                        <KeyRound className="size-3" />CMC PRO
+                      </Badge>
+                    </CardTitle>
+                    <CardDescription className="text-xs">
+                      Active airdrops — total value, participants, requirements. Exclusive to CoinMarketCap Pro API.
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent className="px-4 pb-4">
+                    {airdropsLoading && <Skeleton className="h-64 w-full" />}
+                    {!airdropsLoading && airdropsData?.cmc_pro_required && (
+                      <CmcProRequired
+                        title="Airdrops require CMC Pro API key"
+                        description="Airdrop data (total value, participants, requirements, dates) is exclusively available through the CoinMarketCap Pro API — no free source provides this structured data."
+                      />
+                    )}
+                    {!airdropsLoading && airdropsData && !airdropsData.cmc_pro_required && (
+                      <>
+                        <p className="mb-3 text-xs text-muted-foreground">
+                          Showing {airdropsData.count} ongoing airdrops
+                        </p>
+                        <AirdropsTable airdrops={airdropsData.airdrops} />
+                      </>
+                    )}
+                  </CardContent>
+                </Card>
+              </TabsContent>
+
+              {/* Categories — CMC Pro exclusive */}
+              <TabsContent value="categories">
+                <Card className="border-border/60 bg-card/40 backdrop-blur-sm p-0">
+                  <CardHeader className="px-4 py-3">
+                    <CardTitle className="text-sm flex items-center gap-2">
+                      <Boxes className="size-4 text-cyan-500" />
+                      CMC Categories
+                      <Badge variant="outline" className="gap-0.5 border-amber-500/30 text-[10px] text-amber-500">
+                        <KeyRound className="size-3" />CMC PRO
+                      </Badge>
+                    </CardTitle>
+                    <CardDescription className="text-xs">
+                      Market cap & volume by CoinMarketCap category — richer than inferred sectors, with 24h/7d changes.
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent className="px-4 pb-4">
+                    {categoriesLoading && <Skeleton className="h-64 w-full" />}
+                    {!categoriesLoading && categoriesData?.cmc_pro_required && (
+                      <CmcProRequired
+                        title="Categories require CMC Pro API key"
+                        description="CoinMarketCap's category taxonomy includes per-category market cap, 24h/7d changes, volume, and top 3 coins — data not available from free sources."
+                      />
+                    )}
+                    {!categoriesLoading && categoriesData && !categoriesData.cmc_pro_required && (
+                      <>
+                        <p className="mb-3 text-xs text-muted-foreground">
+                          Showing {categoriesData.count} categories
+                        </p>
+                        <CategoriesTable categories={categoriesData.categories} />
+                      </>
+                    )}
                   </CardContent>
                 </Card>
               </TabsContent>

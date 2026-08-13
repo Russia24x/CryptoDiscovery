@@ -307,6 +307,140 @@ def is_cmc_available() -> bool:
 
 
 # --------------------------------------------------------------------------- #
+#  CMC Pro exclusive endpoints — unique data NOT available from free sources
+# --------------------------------------------------------------------------- #
+# These endpoints require the CMC Pro API key and provide data that no free
+# source (CoinGecko, DeFiLlama, CMC Keyless) offers:
+#
+#   - /v1/cryptocurrency/categories  → market cap + volume per CMC category
+#   - /v1/cryptocurrency/airdrop     → upcoming / active / ended airdrops
+#   - /v1/exchange/map               → exchange rankings by volume
+#
+# When the key is absent, these return None and the frontend shows a
+# "CMC Pro required" placeholder instead of partial data.
+
+
+async def fetch_cmc_categories() -> list[dict[str, Any]] | None:
+    """Fetch all CMC cryptocurrency categories with market cap & volume.
+
+    Unique to CMC Pro — CoinGecko has categories but CMC's taxonomy includes
+    24h/7d market cap change per category, top 3 coins, and volume.
+    Returns None if no API key.
+    """
+    if not CMC_AVAILABLE:
+        return None
+    cache_key = "cmc_categories"
+    cached = cache_get(cache_key, ttl=300.0)
+    if cached is not None:
+        return cached
+    try:
+        async with httpx.AsyncClient() as c:
+            data = await _cmc_get(c, "/v1/cryptocurrency/categories")
+        if not isinstance(data, dict) or "data" not in data:
+            return None
+        out = []
+        for cat in (data.get("data") or [])[:100]:
+            out.append({
+                "id": cat.get("id"),
+                "name": cat.get("name"),
+                "title": cat.get("title"),
+                "description": cat.get("description"),
+                "num_tokens": cat.get("num_tokens"),
+                "market_cap": cat.get("market_cap"),
+                "market_cap_change_24h": cat.get("market_cap_change_24h"),
+                "market_cap_change_7d": cat.get("market_cap_change_7d"),
+                "volume_24h": cat.get("volume_24h"),
+                "top_coins": [c.get("name") for c in (cat.get("top_3_coins") or []) if isinstance(c, dict)],
+                "avg_price_change_24h": cat.get("avg_price_change_24h"),
+                "last_updated": cat.get("last_updated"),
+            })
+        cache_set(cache_key, out)
+        log.info("CMC Pro: fetched %d categories", len(out))
+        return out
+    except (httpx.HTTPError, ValueError) as exc:
+        log.warning("CMC categories failed: %s", exc)
+        return None
+
+
+async def fetch_cmc_airdrops(limit: int = 50, status: str = "ONGOING") -> list[dict[str, Any]] | None:
+    """Fetch cryptocurrency airdrops from CMC Pro.
+
+    Unique to CMC Pro — no free source provides structured airdrop data.
+    Status: ONGOING, UPCOMING, ENDED (default ONGOING).
+    Returns None if no API key.
+    """
+    if not CMC_AVAILABLE:
+        return None
+    cache_key = f"cmc_airdrops:{status}:{limit}"
+    cached = cache_get(cache_key, ttl=300.0)
+    if cached is not None:
+        return cached
+    try:
+        async with httpx.AsyncClient() as c:
+            data = await _cmc_get(c, "/v1/cryptocurrency/airdrop", limit=limit, status=status)
+        if not isinstance(data, dict) or "data" not in data:
+            return None
+        out = []
+        for a in (data.get("data") or []):
+            out.append({
+                "id": a.get("id"),
+                "name": a.get("name"),
+                "symbol": a.get("symbol"),
+                "status": a.get("status"),
+                "description": a.get("description"),
+                "start_date": a.get("start_date"),
+                "end_date": a.get("end_date"),
+                "total_value_usd": a.get("total_value"),
+                "participants": a.get("participants"),
+                "requirements": a.get("requirements") or [],
+                "website": (a.get("urls") or {}).get("website", [None])[0] if isinstance(a.get("urls"), dict) else None,
+                "logo": a.get("logo"),
+            })
+        cache_set(cache_key, out)
+        log.info("CMC Pro: fetched %d airdrops (status=%s)", len(out), status)
+        return out
+    except (httpx.HTTPError, ValueError) as exc:
+        log.warning("CMC airdrops failed: %s", exc)
+        return None
+
+
+async def fetch_cmc_exchange_map(limit: int = 50) -> list[dict[str, Any]] | None:
+    """Fetch top exchanges ranked by volume from CMC Pro.
+
+    Unique to CMC Pro — DeFiLlama has some CEX data but CMC has comprehensive
+    exchange rankings with spot/derivatives volume split.
+    Returns None if no API key.
+    """
+    if not CMC_AVAILABLE:
+        return None
+    cache_key = f"cmc_exchanges:{limit}"
+    cached = cache_get(cache_key, ttl=300.0)
+    if cached is not None:
+        return cached
+    try:
+        async with httpx.AsyncClient() as c:
+            data = await _cmc_get(c, "/v1/exchange/map", listing_status="active", limit=limit, sort="volume_24h")
+        if not isinstance(data, dict) or "data" not in data:
+            return None
+        out = []
+        for ex in (data.get("data") or []):
+            out.append({
+                "id": ex.get("id"),
+                "name": ex.get("name"),
+                "slug": ex.get("slug"),
+                "is_active": ex.get("is_active"),
+                "first_historical_data": ex.get("first_historical_data"),
+                "last_historical_data": ex.get("last_historical_data"),
+            })
+        cache_set(cache_key, out)
+        log.info("CMC Pro: fetched %d exchanges", len(out))
+        return out
+    except (httpx.HTTPError, ValueError) as exc:
+        log.warning("CMC exchange map failed: %s", exc)
+        return None
+
+
+# --------------------------------------------------------------------------- #
 #  CoinMarketCap Keyless Public API (always available, no key needed)
 # --------------------------------------------------------------------------- #
 CMC_KEYLESS_BASE = "https://api.coinmarketcap.com/data-api/v3"
@@ -689,7 +823,15 @@ async def _fetch_rss_feed(client: httpx.AsyncClient, name: str, url: str, catego
 
     The optional ``category`` tags every article from this feed (e.g. "breaking",
     "blog", "analysis") so the frontend can filter by content type.
+
+    Image extraction priority:
+      1. <enclosure type="image/*"> tag
+      2. media:content / media:thumbnail (MRSS namespace)
+      3. First real <img src="..."> in content:encoded (full article body),
+         skipping data: URIs (base64 SVG placeholders)
+      4. First real <img src="..."> in description
     """
+    import re as _re
     try:
         r = await client.get(url, timeout=TIMEOUT, headers={"User-Agent": "Mozilla/5.0 (crypto-scanner)"})
         if r.status_code != 200:
@@ -700,6 +842,20 @@ async def _fetch_rss_feed(client: httpx.AsyncClient, name: str, url: str, catego
         log.warning("RSS %s failed: %s", name, exc)
         return []
 
+    # Namespace for content:encoded (WordPress / standard RSS extension)
+    CONTENT_NS = "{http://purl.org/rss/1.0/modules/content/}"
+
+    def _first_real_img(html_text: str) -> str | None:
+        """Extract the first non-data: URI image from HTML."""
+        if not html_text:
+            return None
+        for m in _re.finditer(r'<img[^>]+src=["\']([^"\']+)["\']', html_text):
+            url = m.group(1)
+            # Skip base64 data: URIs (SVG placeholders, tiny inline images)
+            if not url.startswith("data:"):
+                return url
+        return None
+
     items = root.findall(".//item")
     out: list[dict[str, Any]] = []
     for it in items[:30]:
@@ -707,11 +863,17 @@ async def _fetch_rss_feed(client: httpx.AsyncClient, name: str, url: str, catego
         link = (it.findtext("link") or "").strip()
         pub = it.findtext("pubDate")
         desc_raw = it.findtext("description") or ""
-        # Try to extract an image from enclosure or media:content
+        # content:encoded (full article body — often has images that description lacks)
+        encoded_el = it.find(f"{CONTENT_NS}encoded")
+        encoded_raw = (encoded_el.text or "") if encoded_el is not None else ""
+
+        # Image extraction (priority order)
         image = None
+        # 1) enclosure
         enc = it.find("enclosure")
         if enc is not None and (enc.get("type") or "").startswith("image"):
             image = enc.get("url")
+        # 2) media:content / media:thumbnail
         if not image:
             mc = it.find("{http://search.yahoo.com/mrss/}content")
             if mc is not None:
@@ -720,12 +882,13 @@ async def _fetch_rss_feed(client: httpx.AsyncClient, name: str, url: str, catego
             mt = it.find("{http://search.yahoo.com/mrss/}thumbnail")
             if mt is not None:
                 image = mt.get("url")
-        # Fallback: try to extract an <img src="..."> from the description HTML
-        if not image and desc_raw:
-            import re as _re
-            img_match = _re.search(r'<img[^>]+src=["\']([^"\']+)["\']', desc_raw)
-            if img_match:
-                image = img_match.group(1)
+        # 3) content:encoded (richest source — has the full article with images)
+        if not image:
+            image = _first_real_img(encoded_raw)
+        # 4) description fallback
+        if not image:
+            image = _first_real_img(desc_raw)
+
         # categories from the feed
         cats = [c.text.strip() for c in it.findall("category") if c.text]
         # Inject the feed-level category if provided

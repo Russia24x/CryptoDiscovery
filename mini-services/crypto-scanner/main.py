@@ -111,7 +111,7 @@ async def data_sources_status():
             {"name": "DeFiLlama", "type": "free", "available": True,
              "description": "TVL, fees, revenue, protocol metadata"},
             {"name": "CoinMarketCap (Pro)", "type": "api_key", "available": sources.is_cmc_available(),
-             "description": "Cross-verification of price/mcap/supply (optional)"},
+             "description": "EXCLUSIVE: airdrops, categories, exchange rankings + cross-verification (optional)"},
             {"name": "CoinMarketCap (Keyless)", "type": "free", "available": True,
              "description": "Holder ratios, audit info, price ranges"},
             {"name": "CoinDesk RSS", "type": "free", "available": True,
@@ -614,6 +614,56 @@ async def get_telegram(channel: str = "Mastersharkcrypto", limit: int = 20):
     """
     data = await sources.fetch_telegram_channel(channel, limit=limit)
     return data
+
+
+# --------------------------------------------------------------------------- #
+#  CMC Pro exclusive data — airdrops, categories, exchanges
+# --------------------------------------------------------------------------- #
+# These endpoints surface data that is ONLY available with a CMC Pro API key.
+# When no key is configured, they return a clear "cmc_pro_required" flag so the
+# frontend can show an upgrade prompt instead of empty data.
+
+@app.get("/cmc/airdrops")
+async def get_cmc_airdrops(limit: int = 50, status: str = "ONGOING"):
+    """Fetch cryptocurrency airdrops (CMC Pro exclusive).
+
+    Status: ONGOING | UPCOMING | ENDED
+    Returns cmc_pro_required=True when no API key is set.
+    """
+    if not sources.is_cmc_available():
+        return {"cmc_pro_required": True, "airdrops": [], "count": 0,
+                "message": "Set CMC_API_KEY env var to unlock airdrop data"}
+    airdrops = await sources.fetch_cmc_airdrops(limit=limit, status=status)
+    return {"airdrops": airdrops or [], "count": len(airdrops or []),
+            "status_filter": status, "fetched_at": datetime.now(timezone.utc).isoformat()}
+
+
+@app.get("/cmc/categories")
+async def get_cmc_categories():
+    """Fetch CMC cryptocurrency categories with market cap (CMC Pro exclusive).
+
+    Returns cmc_pro_required=True when no API key is set.
+    """
+    if not sources.is_cmc_available():
+        return {"cmc_pro_required": True, "categories": [], "count": 0,
+                "message": "Set CMC_API_KEY env var to unlock category data"}
+    cats = await sources.fetch_cmc_categories()
+    return {"categories": cats or [], "count": len(cats or []),
+            "fetched_at": datetime.now(timezone.utc).isoformat()}
+
+
+@app.get("/cmc/exchanges")
+async def get_cmc_exchanges(limit: int = 50):
+    """Fetch top exchanges ranked by volume (CMC Pro exclusive).
+
+    Returns cmc_pro_required=True when no API key is set.
+    """
+    if not sources.is_cmc_available():
+        return {"cmc_pro_required": True, "exchanges": [], "count": 0,
+                "message": "Set CMC_API_KEY env var to unlock exchange rankings"}
+    exchanges = await sources.fetch_cmc_exchange_map(limit=limit)
+    return {"exchanges": exchanges or [], "count": len(exchanges or []),
+            "fetched_at": datetime.now(timezone.utc).isoformat()}
 
 
 if __name__ == "__main__":

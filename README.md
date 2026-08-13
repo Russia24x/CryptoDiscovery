@@ -28,7 +28,9 @@ Project Quality ≠ Token Quality ≠ Investment Attractiveness
 
 ## Key Features
 
-### Analysis Engine
+### User Interface — 4 Main Views
+
+#### 1. Discovery (Scan-Based)
 - **8-Phase Pipeline**: Discovery → Screening → Evidence → Evaluation → Scoring → Investment → Decision → Output
 - **5 Discovery Lenses**: Money Flow, Hidden Infrastructure, Bottleneck, Institutional Adoption, Emerging Rails
 - **5 Hard Veto Gates**: Fraud, Security, Custody, Backing Transparency, Legal Deception
@@ -37,24 +39,72 @@ Project Quality ≠ Token Quality ≠ Investment Attractiveness
 - **Cross-Verification Engine**: Tracks data sources and discrepancies
 - **Self-Correction Engine**: 7 bias checks (popular project, source, snapshot, precision, narrative, confirmation, anti-promise)
 - **Fee Stability Analysis**: Real 7d vs 30d fee volatility comparison
+- **Scan History**: Quality trend visualization across scans
+- **Scan Diff**: Side-by-side comparison of two scans
+- **Global Search**: Search across all completed scans with debounce
+- **Market Sentiment**: Composite score (Bullish/Bearish/Neutral)
 
-### User Interface
+#### 2. Coin Explorer (Manual Single-Coin Analysis)
+- Search any cryptocurrency by name/symbol (CoinGecko search API)
+- Select from 6 analysis personas (Investor, Institutional, Researcher, Developer, Trader, Comprehensive)
+- Run the full 8-phase framework on a single coin → complete 23-section report
+- Rich result card with quality score radial, 5 axes bars, valuation multiples, executive verdict, thesis, catalysts, severe risks
+- Deep links to website, Twitter/X, GitHub, block explorer
+
+#### 3. Market Intelligence (CoinMarketCap + DeFiLlama Replacement)
+- **Global market banner**: Total mcap, 24h change, BTC/ETH dominance, volume, active coins, markets
+- **Fear & Greed gauge**: 0-100 visual gauge with classification
+- **DeFi TVL total**: Aggregate TVL across all protocols
+- **9 tabbed data tables**:
+  - Top Coins (50 by mcap) · Gainers (24h) · Losers (24h) · Trending (24h)
+  - Top DeFi (50 by TVL) · Top Fees (30 by 24h fees) · Sectors (bar chart)
+  - **Airdrops** (CMC Pro exclusive) · **Categories** (CMC Pro exclusive)
+- Every coin row is clickable → switches to Coin Explorer for analysis
+- Cache age indicator + refresh button
+
+#### 4. News & Signals (Multi-Source Feed)
+- **English Crypto News**: CoinDesk, Cointelegraph, Decrypt, Bitcoinist RSS (+ optional CryptoPanic, CryptoCompare)
+- **Persian Crypto News**: ArzDigital (breaking + blog) + MihanBlockchain (news + market analysis)
+  - Category filtering: خبر فوری (breaking) · مقاله (blog) · خبر (news) · تحلیل (analysis)
+  - Full RTL text rendering with `dir="auto"` for mixed Persian/English content
+  - Image extraction from `content:encoded` (skips base64 placeholders)
+- **Telegram Channel Feed**: @Mastersharkcrypto (no bot token needed — uses t.me/s/ public web preview)
+  - Chat-style message bubbles with photos and album grids
+  - View counts, relative timestamps, per-message deep links
+  - Auto-refresh toggle (60s interval)
+- **Data sources badge row**: shows all 14 sources with availability + free/key status
+
+### General UI Features
 - **Bilingual UI**: English & Persian (فارسی) with automatic RTL layout
 - **Dark/Light Theme**: System-aware with manual toggle
 - **Keyboard Shortcuts**: S (scan), / (search), G/A (views), C (compare), W (watchlist), ⌘K (global search), Esc (close)
 - **IndexedDB Persistence**: Watchlist and recently viewed saved in browser
 - **Export**: Markdown, JSON, CSV (with formula injection protection)
-- **Scan History**: Quality trend visualization across scans
-- **Scan Diff**: Side-by-side comparison of two scans
-- **Global Search**: Search across all completed scans with debounce
-- **Market Sentiment**: Composite score (Bullish/Bearish/Neutral)
-- **Project Score History**: Track score changes across scans
 - **Social Links**: Website, Twitter/X, GitHub, Discord, Blockchain Explorer
 
-### Data Sources
-- **CoinGecko** (free, no key): Market data, prices, tokenomics, social links
-- **DeFiLlama** (free, no key): TVL, fees (7d/30d), revenue, protocol metadata
-- **CoinMarketCap Pro** (optional, with key): Cross-verification of market cap, volume, supply; backup data when CoinGecko is rate-limited; metadata (logo, links, description)
+### Data Sources (14 total: 11 free + 3 optional API-key)
+
+#### Free Sources (no key required)
+| Source | Data |
+|--------|------|
+| **CoinGecko** | Prices, market cap, supply, volume, coin search, trending |
+| **DeFiLlama** | TVL, fees (7d/30d), revenue, protocol metadata |
+| **CoinMarketCap Keyless** | Holder ratios, audit info, price ranges, ATH/ATL |
+| **CoinDesk RSS** | English crypto news |
+| **Cointelegraph RSS** | English crypto news |
+| **Decrypt RSS** | English crypto news |
+| **Bitcoinist RSS** | English crypto news |
+| **ArzDigital** | Persian breaking news + blog articles |
+| **MihanBlockchain** | Persian crypto news + market analysis |
+| **Fear & Greed (alternative.me)** | Market sentiment index (0-100) |
+| **Telegram (t.me/s/)** | Public channel web preview (no bot token needed) |
+
+#### Optional API-Key Sources (unlock exclusive data)
+| Source | Key Env Var | Exclusive Data |
+|--------|------------|----------------|
+| **CoinMarketCap Pro** | `CMC_API_KEY` | **Airdrops** (total value, participants, requirements) · **Categories** (per-category mcap, 24h/7d change, top coins) · **Exchange rankings** · Cross-verification of price/mcap/supply |
+| **CryptoPanic** | `CRYPTOPANIC_TOKEN` | Curated crypto news feed |
+| **CryptoCompare** | `CRYPTOCOMPARE_KEY` | Crypto news + price data |
 
 ## Architecture
 
@@ -91,13 +141,22 @@ Project Quality ≠ Token Quality ≠ Investment Attractiveness
 │         │              │                                  │
 │         ▼              ▼                                  │
 │  ┌──────────────────────────────────────────────────────┐  │
-│  │           Data Sources (No API Key Required)          │  │
-│  │  ┌────────────┐  ┌──────────────┐                    │  │
-│  │  │ CoinGecko  │  │  DeFiLlama   │                    │  │
-│  │  │ Prices     │  │  TVL/Fees    │                    │  │
-│  │  │ Tokenomics │  │  Revenue     │                    │  │
-│  │  │ Links      │  │  7d/30d      │                    │  │
-│  │  └────────────┘  └──────────────┘                    │  │
+│  │        Data Sources (11 Free + 3 Optional API-Key)     │  │
+│  │  ┌────────────┐  ┌──────────────┐  ┌────────────┐   │  │
+│  │  │ CoinGecko  │  │  DeFiLlama   │  │ CMC Keyless│   │  │
+│  │  │ Prices     │  │  TVL/Fees    │  │ Holders    │   │  │
+│  │  │ Tokenomics │  │  Revenue     │  │ Audits     │   │  │
+│  │  │ Search     │  │  7d/30d      │  │ ATH/ATL    │   │  │
+│  │  └────────────┘  └──────────────┘  └────────────┘   │  │
+│  │  ┌────────────┐  ┌──────────────┐  ┌────────────┐   │  │
+│  │  │ 4 EN RSS   │  │ 4 FA RSS     │  │ Telegram   │   │  │
+│  │  │ CoinDesk   │  │ ArzDigital   │  │ t.me/s/    │   │  │
+│  │  │ Cointel.   │  │ MihanBlock.  │  │ (no token) │   │  │
+│  │  └────────────┘  └──────────────┘  └────────────┘   │  │
+│  │  ┌──────────────────────────────────────────────┐    │  │
+│  │  │ CMC Pro (optional key): Airdrops · Categories│    │  │
+│  │  │ Exchanges · Cross-verification               │    │  │
+│  │  └──────────────────────────────────────────────┘    │  │
 │  └──────────────────────────────────────────────────────┘  │
 └─────────────────────────────────────────────────────────────┘
 ```
@@ -210,14 +269,37 @@ bun run dev
 
 ## API Endpoints
 
+### Core Scanner
 | Method | Path | Description |
 |--------|------|-------------|
-| GET | `/api/scanner/health` | Scanner service health check |
+| GET | `/api/scanner/health` | Scanner service health + cache stats |
+| GET | `/api/scanner/sources` | All 14 data sources status (free + API-key) |
 | POST | `/api/scanner/scan` | Start a new market scan |
 | GET | `/api/scanner/scan/:id` | Get scan status and results |
 | GET | `/api/scanner/scans` | List all scans |
 | GET | `/api/scanner/projects` | List all project reports |
 | GET | `/api/scanner/project/:id` | Get full 23-section project report |
+
+### Coin Explorer & Market Intelligence
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/scanner/search?q=` | Search coins by name/symbol (CoinGecko) |
+| POST | `/api/scanner/analyze` | Run 8-phase analysis on a single coin |
+| GET | `/api/scanner/market/overview` | Comprehensive market snapshot (6 sources in parallel) |
+
+### News & Telegram
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/scanner/news?limit=&source=` | English crypto news (4 RSS + optional API keys) |
+| GET | `/api/scanner/news/fa?limit=&category=` | Persian crypto news (ArzDigital + MihanBlockchain) |
+| GET | `/api/scanner/telegram?channel=&limit=` | Telegram channel feed (t.me/s/ public preview) |
+
+### CMC Pro Exclusive (require `CMC_API_KEY`)
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/scanner/cmc/airdrops?status=` | Crypto airdrops (ONGOING/UPCOMING/ENDED) |
+| GET | `/api/scanner/cmc/categories` | Market cap by CMC category |
+| GET | `/api/scanner/cmc/exchanges?limit=` | Exchange rankings by volume |
 
 ## Documentation
 
