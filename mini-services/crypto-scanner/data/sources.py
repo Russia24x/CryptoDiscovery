@@ -129,6 +129,12 @@ _BLOCKCHAIN_TO_CHAIN: dict[str, str] = {
     "ICP": "Internet Computer", "ALGO": "Algorand",
     "XRP": "Ripple", "ADA": "Cardano", "EGLD": "Elrond",
     "KAVA": "Kava", "TERRA": "Terra", "LUNA": "Terra",
+    # Additional L1/L2 blockchains
+    "TRX": "Tron", "TON": "Toncoin", "XLM": "Stellar",
+    "HBAR": "Hedera", "VET": "VeChain", "THETA": "Theta",
+    "FLOW": "Flow", "XTZ": "Tezos", "ZIL": "Zilliqa",
+    "IOTA": "IOTA", "WAVES": "Waves", "QTUM": "Qtum",
+    "MNT": "Mantle",
 }
 
 # Mapping of coin names to chain names (for fuzzy matching)
@@ -138,6 +144,14 @@ _BLOCKCHAIN_NAMES = {
     "polkadot": "Polkadot", "cosmos": "Cosmos", "fantom": "Fantom",
     "optimism": "Optimism", "arbitrum": "Arbitrum", "aptos": "Aptos",
     "near": "Near", "sui": "Sui", "sei": "Sei",
+    "tron": "Tron", "toncoin": "Toncoin", "stellar": "Stellar",
+    "hedera": "Hedera", "vechain": "VeChain", "theta": "Theta",
+    "flow": "Flow", "tezos": "Tezos", "zilliqa": "Zilliqa",
+    "iota": "IOTA", "waves": "Waves", "qtum": "Qtum",
+    "mantle": "Mantle", "elrond": "Elrond", "multiversx": "Elrond",
+    "cardano": "Cardano", "algorand": "Algorand", "ripple": "Ripple",
+    "celestia": "Celestia", "stacks": "Stacks", "thorchain": "THORChain",
+    "internet computer": "Internet Computer", "kava": "Kava",
 }
 
 
