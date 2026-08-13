@@ -67,7 +67,7 @@ async def _get_json(client: httpx.AsyncClient, url: str, **params: Any) -> Any:
 # --------------------------------------------------------------------------- #
 async def fetch_defillama_protocols() -> list[dict[str, Any]]:
     """Full protocol list with TVL, chain, category — slimmed to needed fields."""
-    async with httpx.AsyncClient() as c:
+    async with httpx.AsyncClient(follow_redirects=True) as c:
         data = await _get_json(c, DEFILLAMA_PROTOCOLS)
     if not isinstance(data, list):
         return []
@@ -89,7 +89,7 @@ async def fetch_fees_overview() -> list[dict[str, Any]]:
     containing the list of protocol fee data. Field names are:
     total24h, total7d, total30d (NOT fees_24h etc.)
     """
-    async with httpx.AsyncClient() as c:
+    async with httpx.AsyncClient(follow_redirects=True) as c:
         data = await _get_json(c, DEFILLAMA_FEES)
     # Handle both dict (new API) and list (old API) formats
     if isinstance(data, dict):
@@ -130,7 +130,7 @@ async def fetch_top_markets(vs: str = "usd", per_page: int = 100, pages: int = 1
     DeFiLlama-only discovery when it 429s.
     """
     out: list[dict[str, Any]] = []
-    async with httpx.AsyncClient() as c:
+    async with httpx.AsyncClient(follow_redirects=True) as c:
         for page in range(1, pages + 1):
             data = await _get_json(
                 c,
@@ -154,7 +154,7 @@ async def fetch_top_markets(vs: str = "usd", per_page: int = 100, pages: int = 1
 
 async def fetch_coin_detail(gecko_id: str) -> dict[str, Any] | None:
     """Full coin detail incl. market_data, tokenomics, links."""
-    async with httpx.AsyncClient() as c:
+    async with httpx.AsyncClient(follow_redirects=True) as c:
         return await _get_json(
             c,
             f"{COINGECKO_BASE}/coins/{gecko_id}",
@@ -245,7 +245,7 @@ async def fetch_cmc_quotes(symbols: list[str]) -> dict[str, dict[str, Any]] | No
     if not CMC_AVAILABLE or not symbols:
         return None
     sym_str = ",".join(symbols[:100])  # CMC allows up to 100 symbols
-    async with httpx.AsyncClient() as c:
+    async with httpx.AsyncClient(follow_redirects=True) as c:
         data = await _cmc_get(c, "/v2/cryptocurrency/quotes/latest", symbol=sym_str, convert="USD")
     if not isinstance(data, dict) or "data" not in data:
         return None
@@ -278,7 +278,7 @@ async def fetch_cmc_metadata(symbol: str) -> dict[str, Any] | None:
     """Fetch metadata (logo, links, category) for a single symbol."""
     if not CMC_AVAILABLE:
         return None
-    async with httpx.AsyncClient() as c:
+    async with httpx.AsyncClient(follow_redirects=True) as c:
         data = await _cmc_get(c, "/v2/cryptocurrency/info", symbol=symbol)
     if not isinstance(data, dict) or "data" not in data:
         return None
@@ -303,7 +303,7 @@ async def fetch_cmc_listings(limit: int = 100) -> list[dict[str, Any]] | None:
     """Fetch top cryptocurrencies by market cap (for discovery)."""
     if not CMC_AVAILABLE:
         return None
-    async with httpx.AsyncClient() as c:
+    async with httpx.AsyncClient(follow_redirects=True) as c:
         data = await _cmc_get(c, "/v1/cryptocurrency/listings/latest", limit=limit, convert="USD")
     if not isinstance(data, dict) or "data" not in data:
         return None
@@ -359,7 +359,7 @@ async def fetch_cmc_categories() -> list[dict[str, Any]] | None:
     if cached is not None:
         return cached
     try:
-        async with httpx.AsyncClient() as c:
+        async with httpx.AsyncClient(follow_redirects=True) as c:
             data = await _cmc_get(c, "/v1/cryptocurrency/categories")
         if not isinstance(data, dict) or "data" not in data:
             return None
@@ -402,7 +402,7 @@ async def fetch_cmc_airdrops(limit: int = 50, status: str = "ONGOING") -> list[d
     if cached is not None:
         return cached
     try:
-        async with httpx.AsyncClient() as c:
+        async with httpx.AsyncClient(follow_redirects=True) as c:
             data = await _cmc_get_strict(c, "/v1/cryptocurrency/airdrop", limit=limit, status=status)
         if not isinstance(data, dict) or "data" not in data:
             return None
@@ -446,7 +446,7 @@ async def fetch_cmc_exchange_map(limit: int = 50) -> list[dict[str, Any]] | None
     if cached is not None:
         return cached
     try:
-        async with httpx.AsyncClient() as c:
+        async with httpx.AsyncClient(follow_redirects=True) as c:
             data = await _cmc_get(c, "/v1/exchange/map", listing_status="active", limit=limit, sort="volume_24h")
         if not isinstance(data, dict) or "data" not in data:
             return None
@@ -482,7 +482,7 @@ async def fetch_cmc_global_metrics() -> dict[str, Any] | None:
     if cached is not None:
         return cached
     try:
-        async with httpx.AsyncClient() as c:
+        async with httpx.AsyncClient(follow_redirects=True) as c:
             data = await _cmc_get(c, "/v1/global-metrics/quotes/latest")
         if not isinstance(data, dict) or "data" not in data:
             return None
@@ -518,7 +518,7 @@ async def fetch_cmc_keyless_detail(slug: str) -> dict[str, Any] | None:
     Returns rich data including: price, market_cap, FDV, supply, volume,
     holder ratios, audit info, platform contracts, social links, TVL.
     """
-    async with httpx.AsyncClient() as c:
+    async with httpx.AsyncClient(follow_redirects=True) as c:
         data = await _get_json(c, f"{CMC_KEYLESS_BASE}/cryptocurrency/detail", slug=slug)
     if not isinstance(data, dict) or "data" not in data:
         return None
@@ -670,7 +670,7 @@ async def search_coins(query: str) -> list[dict[str, Any]]:
     cached = cache_get(cache_key, ttl=120.0)
     if cached is not None:
         return cached
-    async with httpx.AsyncClient() as c:
+    async with httpx.AsyncClient(follow_redirects=True) as c:
         data = await _get_json(c, f"{COINGECKO_BASE}/search", query=query.strip())
     if not isinstance(data, dict):
         return []
@@ -700,7 +700,7 @@ async def fetch_global_market() -> dict[str, Any] | None:
     cached = cache_get("global_market", ttl=120.0)
     if cached is not None:
         return cached
-    async with httpx.AsyncClient() as c:
+    async with httpx.AsyncClient(follow_redirects=True) as c:
         data = await _get_json(c, f"{COINGECKO_BASE}/global")
     if not isinstance(data, dict) or "data" not in data:
         return None
@@ -726,7 +726,7 @@ async def fetch_trending() -> list[dict[str, Any]]:
     cached = cache_get("trending", ttl=180.0)
     if cached is not None:
         return cached
-    async with httpx.AsyncClient() as c:
+    async with httpx.AsyncClient(follow_redirects=True) as c:
         data = await _get_json(c, f"{COINGECKO_BASE}/search/trending")
     if not isinstance(data, dict):
         return []
@@ -759,7 +759,7 @@ async def fetch_fear_greed() -> dict[str, Any] | None:
     if cached is not None:
         return cached
     try:
-        async with httpx.AsyncClient() as c:
+        async with httpx.AsyncClient(follow_redirects=True) as c:
             r = await c.get("https://api.alternative.me/fng/?limit=1", timeout=TIMEOUT)
             if r.status_code != 200:
                 return None
@@ -789,7 +789,7 @@ async def fetch_top_markets_extended(per_page: int = 250) -> list[dict[str, Any]
     if cached is not None:
         return cached
     out: list[dict[str, Any]] = []
-    async with httpx.AsyncClient() as c:
+    async with httpx.AsyncClient(follow_redirects=True) as c:
         data = await _get_json(
             c,
             f"{COINGECKO_BASE}/coins/markets",
@@ -988,7 +988,7 @@ async def fetch_crypto_news(limit: int = 40) -> list[dict[str, Any]]:
     all_articles: list[dict[str, Any]] = []
 
     # 1) RSS feeds (always available, no key)
-    async with httpx.AsyncClient() as c:
+    async with httpx.AsyncClient(follow_redirects=True) as c:
         tasks = [_fetch_rss_feed(c, name, url) for name, url in NEWS_FEEDS]
         results = await asyncio.gather(*tasks, return_exceptions=True)
         for res in results:
@@ -998,7 +998,7 @@ async def fetch_crypto_news(limit: int = 40) -> list[dict[str, Any]]:
     # 2) CryptoPanic (optional, free token) — high-quality curated
     if CRYPTOPANIC_TOKEN:
         try:
-            async with httpx.AsyncClient() as c:
+            async with httpx.AsyncClient(follow_redirects=True) as c:
                 r = await c.get(
                     "https://cryptopanic.com/api/v1/posts/",
                     params={"auth_token": CRYPTOPANIC_TOKEN, "kind": "news", "filter": "hot"},
@@ -1022,7 +1022,7 @@ async def fetch_crypto_news(limit: int = 40) -> list[dict[str, Any]]:
     # 3) CryptoCompare (optional, free key)
     if CRYPTOCOMPARE_KEY:
         try:
-            async with httpx.AsyncClient() as c:
+            async with httpx.AsyncClient(follow_redirects=True) as c:
                 r = await c.get(
                     "https://min-api.cryptocompare.com/data/v2/news/?lang=EN",
                     headers={"authorization": f"Apikey {CRYPTOCOMPARE_KEY}"},
@@ -1077,7 +1077,7 @@ async def fetch_crypto_news_fa(limit: int = 40, category: str = "") -> list[dict
     all_articles: list[dict[str, Any]] = []
 
     # Fetch all Persian RSS feeds in parallel
-    async with httpx.AsyncClient() as c:
+    async with httpx.AsyncClient(follow_redirects=True) as c:
         tasks = [
             _fetch_rss_feed(c, name, url, cat)
             for name, url, cat in NEWS_FEEDS_FA
@@ -1247,7 +1247,7 @@ async def fetch_telegram_channel(channel: str, limit: int = 20) -> dict[str, Any
 
     url = f"{TELEGRAM_BASE}/{channel}"
     try:
-        async with httpx.AsyncClient() as c:
+        async with httpx.AsyncClient(follow_redirects=True) as c:
             r = await c.get(url, timeout=TIMEOUT, headers={"User-Agent": "Mozilla/5.0 (crypto-scanner)"})
         if r.status_code != 200:
             log.warning("Telegram %s -> %s", channel, r.status_code)
@@ -1281,7 +1281,7 @@ async def fetch_price_cross_verified(coin_ids_gecko: list[str], symbols: list[st
     gecko_data = {}
     if coin_ids_gecko:
         try:
-            async with httpx.AsyncClient() as c:
+            async with httpx.AsyncClient(follow_redirects=True) as c:
                 data = await _get_json(
                     c,
                     f"{COINGECKO_BASE}/simple/price",
