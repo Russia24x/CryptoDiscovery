@@ -899,7 +899,7 @@ def cache_info():
 
 #### ۱. پایداری داده
 - [ ] **Persistence layer**: ذخیره scan‌ها و گزارش‌ها در SQLite (Prisma) به‌جای in-memory
-- [ ] **CoinGecko rate limit handling**: استفاده از Demo API key رایگان (۳۰ calls/min)
+- [x] **CoinGecko rate limit handling**: Demo API key فعال (۳۰ calls/min) ✓
 - [ ] **Webhook برای Telegram**: به‌جای polling، ثبت webhook برای real-time updates
 - [ ] **Retry logic**: exponential backoff برای API‌های ناپایدار
 
@@ -910,10 +910,11 @@ def cache_info():
 - [ ] **Backtesting**: مقایسه پیش‌بینی‌های فریمورک با عملکرد واقعی قیمت
 
 #### ۳. UI/UX
-- [ ] **Price charts**: افزودن نمودار قیمت (sparkline) در کارت‌های پروژه
+- [x] **Price charts**: endpoint نمودار قیمت اضافه شد (`/coingecko/chart/{id}`) ✓
 - [ ] **Dark/Light theme در charts**: نمودارهای SVG به theme واکنش نشان دهند
 - [ ] **Mobile app**: PWA با offline support برای watchlist
 - [ ] **Notifications**: push notification برای اخبار فوری و تغییرات امتیاز
+- [x] **Market overview در گزارش**: CMC Keyless data (holders, ATH/ATL, audits) ✓
 
 ### اولویت متوسط (Mid-term)
 
@@ -921,7 +922,7 @@ def cache_info():
 - [ ] **Messari**: endpoint رایگان برای metrics اضافی
 - [ ] **Santiment**: داده‌های on-chain (developer activity, social volume)
 - [ ] **Glassnode Lite**: on-chain indicators (هنگام در دسترس قرار گرفتن رایگان)
-- [ ] **Dune Analytics**: داشبورد‌های community برای TVL و volume
+- [x] **Dune Analytics**: یکپارچه‌سازی کامل + کلید فعال ✓
 
 #### ۵. تحلیل پیشرفته
 - [ ] **Correlation analysis**: همبستگی امتیاز فریمورک با تغییرات قیمت آینده

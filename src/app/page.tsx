@@ -258,37 +258,7 @@ interface FullReport {
   }[];
   fee_stability?: string | null;
   bias_checks?: string[];
-  market_overview?: {
-    price: number | null;
-    market_cap: number | null;
-    fdv: number | null;
-    cmc_rank: number | null;
-    volume_24h: number | null;
-    circulating_supply: number | null;
-    total_supply: number | null;
-    max_supply: number | null;
-    tvl: number | null;
-    holder_count: number | null;
-    top_10_holder_ratio: number | null;
-    top_100_holder_ratio: number | null;
-    ath: number | null;
-    atl: number | null;
-    audited: boolean | null;
-    platform_count: number | null;
-    percent_change_24h: number | null;
-    percent_change_7d: number | null;
-    percent_change_30d: number | null;
-    price_low_24h: number | null;
-    price_high_24h: number | null;
-    price_low_30d: number | null;
-    price_high_30d: number | null;
-    price_low_52w: number | null;
-    price_high_52w: number | null;
-    market_cap_dominance: number | null;
-    description: string | null;
-    audit_infos: { auditor: string; status: string; time: string; url: string }[] | null;
-    social_links: { website: string; twitter: string; github: string; discord: string; explorer: string } | null;
-  } | null;
+  market_overview?: Record<string, unknown> | null;
 }
 
 // --------------------------------------------------------------------------- //
@@ -3077,89 +3047,91 @@ function ReportDetail({
         )}
 
         {/* Market Overview (CMC Keyless data) */}
-        {report.market_overview && (
+        {report.market_overview && (() => {
+          const mo = report.market_overview as Record<string, any>;
+          return (
           <section>
             <SectionTitle icon={ChartNoAxesColumn} title="Market Overview" />
             <div className="grid grid-cols-2 gap-2">
-              {report.market_overview.cmc_rank != null && (
+              {mo.cmc_rank != null && (
                 <div className="p-2 rounded-lg border border-border/40 bg-card/20">
                   <div className="text-[9px] text-muted-foreground uppercase">CMC Rank</div>
-                  <div className="text-sm font-semibold">#{report.market_overview.cmc_rank}</div>
+                  <div className="text-sm font-semibold">#{mo.cmc_rank}</div>
                 </div>
               )}
-              {report.market_overview.holder_count != null && (
+              {mo.holder_count != null && (
                 <div className="p-2 rounded-lg border border-border/40 bg-card/20">
                   <div className="text-[9px] text-muted-foreground uppercase">Holders</div>
-                  <div className="text-sm font-semibold">{report.market_overview.holder_count.toLocaleString()}</div>
+                  <div className="text-sm font-semibold">{Number(mo.holder_count).toLocaleString()}</div>
                 </div>
               )}
-              {report.market_overview.top_10_holder_ratio != null && (
+              {mo.top_10_holder_ratio != null && (
                 <div className="p-2 rounded-lg border border-border/40 bg-card/20">
                   <div className="text-[9px] text-muted-foreground uppercase">Top 10 Holders</div>
-                  <div className="text-sm font-semibold">{report.market_overview.top_10_holder_ratio.toFixed(2)}%</div>
+                  <div className="text-sm font-semibold">{Number(mo.top_10_holder_ratio).toFixed(2)}%</div>
                 </div>
               )}
-              {report.market_overview.top_100_holder_ratio != null && (
+              {mo.top_100_holder_ratio != null && (
                 <div className="p-2 rounded-lg border border-border/40 bg-card/20">
                   <div className="text-[9px] text-muted-foreground uppercase">Top 100 Holders</div>
-                  <div className="text-sm font-semibold">{report.market_overview.top_100_holder_ratio.toFixed(2)}%</div>
+                  <div className="text-sm font-semibold">{Number(mo.top_100_holder_ratio).toFixed(2)}%</div>
                 </div>
               )}
-              {report.market_overview.ath != null && (
+              {mo.ath != null && (
                 <div className="p-2 rounded-lg border border-border/40 bg-card/20">
                   <div className="text-[9px] text-muted-foreground uppercase">ATH</div>
-                  <div className="text-sm font-semibold">{fmtUsd(report.market_overview.ath)}</div>
+                  <div className="text-sm font-semibold">{fmtUsd(Number(mo.ath))}</div>
                 </div>
               )}
-              {report.market_overview.atl != null && (
+              {mo.atl != null && (
                 <div className="p-2 rounded-lg border border-border/40 bg-card/20">
                   <div className="text-[9px] text-muted-foreground uppercase">ATL</div>
-                  <div className="text-sm font-semibold">{fmtUsd(report.market_overview.atl)}</div>
+                  <div className="text-sm font-semibold">{fmtUsd(Number(mo.atl))}</div>
                 </div>
               )}
-              {report.market_overview.price_high_52w != null && (
+              {mo.price_high_52w != null && (
                 <div className="p-2 rounded-lg border border-border/40 bg-card/20">
                   <div className="text-[9px] text-muted-foreground uppercase">52W High</div>
-                  <div className="text-sm font-semibold">{fmtUsd(report.market_overview.price_high_52w)}</div>
+                  <div className="text-sm font-semibold">{fmtUsd(Number(mo.price_high_52w))}</div>
                 </div>
               )}
-              {report.market_overview.price_low_52w != null && (
+              {mo.price_low_52w != null && (
                 <div className="p-2 rounded-lg border border-border/40 bg-card/20">
                   <div className="text-[9px] text-muted-foreground uppercase">52W Low</div>
-                  <div className="text-sm font-semibold">{fmtUsd(report.market_overview.price_low_52w)}</div>
+                  <div className="text-sm font-semibold">{fmtUsd(Number(mo.price_low_52w))}</div>
                 </div>
               )}
-              {report.market_overview.platform_count != null && (
+              {mo.platform_count != null && (
                 <div className="p-2 rounded-lg border border-border/40 bg-card/20">
                   <div className="text-[9px] text-muted-foreground uppercase">Platforms</div>
-                  <div className="text-sm font-semibold">{report.market_overview.platform_count}</div>
+                  <div className="text-sm font-semibold">{mo.platform_count}</div>
                 </div>
               )}
-              {report.market_overview.market_cap_dominance != null && (
+              {mo.market_cap_dominance != null && (
                 <div className="p-2 rounded-lg border border-border/40 bg-card/20">
                   <div className="text-[9px] text-muted-foreground uppercase">MC Dominance</div>
-                  <div className="text-sm font-semibold">{report.market_overview.market_cap_dominance.toFixed(2)}%</div>
+                  <div className="text-sm font-semibold">{Number(mo.market_cap_dominance).toFixed(2)}%</div>
                 </div>
               )}
-              {report.market_overview.audited != null && (
+              {mo.audited != null && (
                 <div className="p-2 rounded-lg border border-border/40 bg-card/20">
                   <div className="text-[9px] text-muted-foreground uppercase">Audited</div>
-                  <div className="text-sm font-semibold">{report.market_overview.audited ? "✓ Yes" : "✗ No"}</div>
+                  <div className="text-sm font-semibold">{mo.audited ? "✓ Yes" : "✗ No"}</div>
                 </div>
               )}
-              {report.market_overview.percent_change_30d != null && (
+              {mo.percent_change_30d != null && (
                 <div className="p-2 rounded-lg border border-border/40 bg-card/20">
                   <div className="text-[9px] text-muted-foreground uppercase">30d Change</div>
-                  <div className={cn("text-sm font-semibold", report.market_overview.percent_change_30d >= 0 ? "text-emerald-400" : "text-rose-400")}>
-                    {report.market_overview.percent_change_30d >= 0 ? "+" : ""}{report.market_overview.percent_change_30d.toFixed(2)}%
+                  <div className={cn("text-sm font-semibold", Number(mo.percent_change_30d) >= 0 ? "text-emerald-400" : "text-rose-400")}>
+                    {Number(mo.percent_change_30d) >= 0 ? "+" : ""}{Number(mo.percent_change_30d).toFixed(2)}%
                   </div>
                 </div>
               )}
             </div>
             {/* Audit details */}
-            {report.market_overview.audit_infos && report.market_overview.audit_infos.length > 0 && (
+            {mo.audit_infos && Array.isArray(mo.audit_infos) && mo.audit_infos.length > 0 && (
               <div className="mt-2 space-y-1">
-                {report.market_overview.audit_infos.slice(0, 3).map((a, i) => (
+                {mo.audit_infos.slice(0, 3).map((a: any, i: number) => (
                   <div key={i} className="flex items-center gap-2 text-[10px] text-muted-foreground">
                     <BadgeCheck className="h-3 w-3 text-emerald-500" />
                     <span>{a.auditor}</span>
@@ -3169,7 +3141,8 @@ function ReportDetail({
               </div>
             )}
           </section>
-        )}
+          );
+        })()}
 
         <div className="pt-2 border-t border-border/40 text-[10px] text-muted-foreground font-mono">
           Data cutoff: {new Date(report.data_cutoff).toISOString().slice(0, 16).replace("T", " ")} UTC ·
