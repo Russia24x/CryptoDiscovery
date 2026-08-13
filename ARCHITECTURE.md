@@ -901,7 +901,7 @@ def cache_info():
 - [x] **Persistence layer**: ذخیره scan‌ها و گزارش‌ها در SQLite ✓
 - [x] **CoinGecko rate limit handling**: Demo API key فعال (۳۰ calls/min) ✓
 - [ ] **Webhook برای Telegram**: به‌جای polling، ثبت webhook برای real-time updates
-- [ ] **Retry logic**: exponential backoff برای API‌های ناپایدار
+- [x] **Retry logic** ✓: exponential backoff برای API‌های ناپایدار
 
 #### ۲. بهبود فریمورک
 - [x] **Historical scoring**: ذخیره امتیاز پروژه در SQLite برای trend analysis ✓
@@ -926,13 +926,13 @@ def cache_info():
 - [x] **Dune Analytics**: یکپارچه‌سازی کامل + کلید فعال ✓
 
 #### ۵. تحلیل پیشرفته
-- [ ] **Correlation analysis**: همبستگی امتیاز فریمورک با تغییرات قیمت آینده
+- [x] **Correlation analysis** ✓: همبستگی امتیاز فریمورک با تغییرات قیمت آینده
 - [ ] **Sector rotation**: ردیابی جابجایی سرمایه بین بخش‌ها
 - [ ] **Whale tracking**: ردیابی حرکت نهنگ‌ها (از داده Telegram/on-chain)
 - [ ] **Sentiment analysis**: تحلیل احساسات از اخبار فارسی و انگلیسی با NLP
 
 #### ۶. Community Features
-- [ ] **Shared scans**: اشتراک‌گذاری نتایج scan با URL
+- [x] **Shared scans** ✓: اشتراک‌گذاری نتایج scan با URL
 - [ ] **Custom watchlists**: لیست‌های متعدد با دسته‌بندی
 - [ ] **Notes & tags**: یادداشت کاربر روی هر پروژه
 - [ ] **Export portfolio**: خروجی CSV/JSON برای portfolio tracker‌ها
