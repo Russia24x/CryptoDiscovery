@@ -2392,3 +2392,30 @@ Stage Summary:
 - Scanner health 200, frontend 200
 - Pending user decisions: examples/websocket/ and upload/ disposition
 - CMC key now active — cross-verification fully enabled (was the TODO from last session)
+
+---
+Task ID: run-dev-sh-default
+Agent: main
+Task: Per user instruction — kill all tasks/pids, then run dev server via .zscripts/dev.sh (the pre-existing default infra script).
+
+Work Log:
+- Killed all existing processes: next dev, next-server, start-dev.sh, uvicorn, bun run dev, any prior dev.sh
+- Verified nothing running before launch
+- Launched .zscripts/dev.sh via setsid (fully detached so it survives session end)
+- dev.sh executed its full pipeline:
+  1. bun install (dependencies)
+  2. bun run db:push (database setup)
+  3. bun run dev (Next.js dev server, PID 5442)
+  4. Health check on localhost:3000 → passed (GET / 200)
+  5. Scanned mini-services/ — crypto-scanner correctly skipped (no package.json; it's a Python FastAPI service, not a Bun service)
+- dev.sh does NOT start the crypto-scanner (it only handles Bun-based mini-services). Started crypto-scanner separately via its own pre-existing start.sh.
+- Verified all health:
+  - frontend (3000): 200
+  - scanner (3003): 200, CMC API key detected (cross-verification enabled)
+  - All proxy endpoints: /api/scanner/health 200, /api/scanner/scans 200, /api/scanner/sources 200
+
+Stage Summary:
+- Infrastructure running via pre-existing default scripts only: .zscripts/dev.sh (Next.js) + mini-services/crypto-scanner/start.sh (scanner)
+- No new monitoring/watchdog added per standing advisor instruction
+- Both services healthy, all API endpoints responding 200
+- dev.log clean (no errors)
