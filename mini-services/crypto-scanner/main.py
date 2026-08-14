@@ -573,12 +573,32 @@ async def backtest():
                 if detail:
                     md = detail.get("market_data", {})
                     price_now = md.get("current_price", {}).get("usd")
-                    # Fetch historical price for comparison (30d ago)
-                    chart = await sources.fetch_price_chart(gecko_id, days=30)
+                    # Fetch historical price: use days since the score was
+                    # registered, NOT a fixed 30d window. The old code used
+                    # days=30 which gave "30 days ago from now" — but for a
+                    # score registered yesterday, that's 29 days of irrelevant
+                    # price movement before the score even existed.
+                    # price_then = price at approximately the score timestamp.
+                    try:
+                        score_dt = datetime.fromisoformat(
+                            timestamp.replace("Z", "+00:00")
+                        )
+                    except (ValueError, TypeError):
+                        score_dt = None
+                    if score_dt:
+                        days_ago = max(
+                            1,
+                            (datetime.now(timezone.utc) - score_dt).days,
+                        )
+                    else:
+                        days_ago = 30  # fallback if timestamp unparseable
+                    chart = await sources.fetch_price_chart(
+                        gecko_id, days=min(days_ago, 365)
+                    )
                     if chart and chart.get("prices"):
                         prices = chart["prices"]
                         if len(prices) >= 2:
-                            price_then = prices[0][1]  # oldest price in 30d range
+                            price_then = prices[0][1]  # oldest = ~score time
             except Exception:  # noqa: BLE001
                 pass
 
@@ -671,7 +691,25 @@ async def correlation_analysis():
             continue
 
         try:
-            chart = await sources.fetch_price_chart(gecko_id, days=30)
+            # Use days since the score was registered (same fix as /backtest).
+            # The old code used days=30 which is wrong for scores registered
+            # less than 30 days ago — it measured price movement BEFORE the
+            # score, not AFTER.
+            try:
+                score_dt = datetime.fromisoformat(
+                    entry["timestamp"].replace("Z", "+00:00")
+                )
+            except (ValueError, TypeError):
+                score_dt = None
+            if score_dt:
+                days_ago = max(
+                    1, (datetime.now(timezone.utc) - score_dt).days
+                )
+            else:
+                days_ago = 30
+            chart = await sources.fetch_price_chart(
+                gecko_id, days=min(days_ago, 365)
+            )
             if chart and chart.get("prices") and len(chart["prices"]) >= 2:
                 price_then = chart["prices"][0][1]
                 price_now = chart["prices"][-1][1]
@@ -704,13 +742,19 @@ async def correlation_analysis():
     correlation = num / (den_s * den_c) if den_s > 0 and den_c > 0 else 0
     r_squared = correlation ** 2
 
-    interpretation = (
-        "Strong positive — high scores predict price gains" if correlation > 0.5 else
-        "Moderate positive — scores weakly predict price" if correlation > 0.2 else
-        "No correlation — scores don't predict price" if abs(correlation) <= 0.2 else
-        "Negative — high scores predict price drops" if correlation < -0.2 else
-        "Strong negative — scores inversely predict price"
-    )
+    # Interpretation — check extreme cases FIRST so they're reachable.
+    # The old order checked correlation < -0.2 before < -0.5, so
+    # "Strong negative" was never reachable (any corr < -0.2 hit "Negative").
+    if correlation > 0.5:
+        interpretation = "Strong positive — high scores predict price gains"
+    elif correlation > 0.2:
+        interpretation = "Moderate positive — scores weakly predict price"
+    elif correlation >= -0.2:
+        interpretation = "No correlation — scores don't predict price"
+    elif correlation > -0.5:
+        interpretation = "Negative — high scores predict price drops"
+    else:
+        interpretation = "Strong negative — scores inversely predict price"
 
     return {
         "correlation": round(correlation, 4),
