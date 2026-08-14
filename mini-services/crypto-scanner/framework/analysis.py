@@ -441,9 +441,9 @@ def _build_investment_analysis(
     return InvestmentAnalysis(
         fdv_revenue=round(fdv_rev, 2) if fdv_rev is not None else None,
         mc_revenue=round(mc_rev, 2) if mc_rev is not None else None,
-        fdv_fees=round(fdv_fees, 2) if fdv_fees else None,
+        fdv_fees=round(fdv_fees, 2) if fdv_fees is not None else None,
         mc_fees=round(mc / annual_fees, 2) if (mc and annual_fees > 0) else None,
-        mc_tvl=round(mc_tvl, 2) if mc_tvl else None,
+        mc_tvl=round(mc_tvl, 2) if mc_tvl is not None else None,
         p_r=round(p_r, 2) if p_r is not None else None,
         p_f=round(p_f, 2) if p_f is not None else None,
         p_t=round(p_t, 2) if p_t is not None else None,
@@ -715,7 +715,7 @@ def _build_cross_verifications(ev: EvidenceBundle) -> list:
                 metric="Market Cap",
                 source_a="CoinGecko" if ev.market_cap_usd else "CoinMarketCap",
                 value_a=ev.market_cap_usd,
-                source_b="DeFiLlama",
+                source_b="CoinMarketCap",
                 value_b=None,
                 status="single-source",
             ))
