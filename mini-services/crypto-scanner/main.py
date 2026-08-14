@@ -76,11 +76,34 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="Crypto Market Discovery Framework", version="1.0.0", lifespan=lifespan)
 
+# CORS — restrict to known origins.
+#
+# In production the browser only ever talks to the Next.js app (same-origin
+# /api/scanner/* routes proxy to this service server-side). Direct browser
+# access to port 3003 is a dev/debug convenience only, so we restrict to:
+#   - localhost variants (dev)
+#   - the Caddy gateway origin (port 81)
+#   - explicit extra origins via the SCANNER_CORS_ORIGINS env var (comma-sep)
+#
+# Never use allow_origins=["*"] in production — it permits any website to
+# call this service directly, bypassing the Next.js proxy.
+import os as _os
+_default_origins = [
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+    "http://localhost:81",
+    "http://127.0.0.1:81",
+]
+_extra = _os.environ.get("SCANNER_CORS_ORIGINS", "")
+if _extra:
+    _default_origins.extend([o.strip() for o in _extra.split(",") if o.strip()])
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_origins=_default_origins,
+    allow_credentials=False,
+    allow_methods=["GET", "POST", "PUT", "DELETE"],
+    allow_headers=["Content-Type", "Authorization"],
 )
 
 
