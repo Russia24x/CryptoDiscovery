@@ -11,6 +11,7 @@ and evidence-grade metadata used by the evaluator.
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Any
 
@@ -172,6 +173,8 @@ async def collect(
                 log.info("Blockchain TVL: %s (%s) = $%.2fB across %d protocols",
                          candidate.symbol, chain_name,
                          chain_data["tvl"] / 1e9, chain_data["protocol_count"])
+        except asyncio.CancelledError:
+            raise
         except Exception:  # noqa: BLE001
             pass
 
@@ -195,6 +198,8 @@ async def collect(
             if detail:
                 _apply_gecko_detail(b, detail)
                 b.sources += 1
+        except asyncio.CancelledError:
+            raise
         except Exception:  # noqa: BLE001
             pass
 
@@ -245,6 +250,8 @@ async def collect(
                             b.twitter_handle = tw_url.rstrip("/").split("/")[-1]
                         if not b.github_url and cmc_meta.get("source_code"):
                             b.github_url = cmc_meta["source_code"]
+        except asyncio.CancelledError:
+            raise
         except Exception:  # noqa: BLE001
             pass
 
@@ -359,6 +366,8 @@ async def collect(
                 b.cmc_high_52w = cmc_kl["high_52w"]
             if cmc_kl.get("market_cap_dominance"):
                 b.cmc_market_cap_dominance = cmc_kl["market_cap_dominance"]
+    except asyncio.CancelledError:
+        raise
     except Exception:  # noqa: BLE001
         pass
 
@@ -382,6 +391,8 @@ async def collect(
                 if team_conc is not None and team_conc > 20:
                     b.high_customer_concentration = True
                 log.info("Dune: token concentration for %s integrated (Grade A)", candidate.symbol)
+        except asyncio.CancelledError:
+            raise
         except Exception:  # noqa: BLE001
             pass
 
@@ -396,6 +407,8 @@ async def collect(
                 if dune_revenue.get("total_fees_24h") is not None:
                     b.economic.fees = dune_revenue["total_fees_24h"]
                 log.info("Dune: real revenue for %s integrated (Revenue ≠ Fees verified)", candidate.symbol)
+        except asyncio.CancelledError:
+            raise
         except Exception:  # noqa: BLE001
             pass
 
@@ -408,6 +421,8 @@ async def collect(
                 if dune_users.get("dau") is not None:
                     b.economic.customer_count = dune_users["dau"]
                 log.info("Dune: active users for %s integrated (bot-filtered DAU)", candidate.symbol)
+        except asyncio.CancelledError:
+            raise
         except Exception:  # noqa: BLE001
             pass
 
@@ -424,7 +439,11 @@ async def collect(
     # category + infrastructure
     b.category = candidate.category
     infra_cats = {"oracle", "rpc", "bridge", "infrastructure", "payments", "data", "liquid staking", "dex", "lending"}
-    b.is_infrastructure = any(x in candidate.category.lower() for x in infra_cats)
+    # Only SET True, never overwrite a True set earlier (e.g. blockchain tokens
+    # like SOL/ETH get is_infrastructure=True at line 165). The old unconditional
+    # assignment reverted blockchain tokens to False because their category
+    # ("Smart Contract Platform", "Layer 1") isn't in infra_cats.
+    b.is_infrastructure = b.is_infrastructure or any(x in candidate.category.lower() for x in infra_cats)
     return b
 
 
