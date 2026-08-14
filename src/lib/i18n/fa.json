@@ -642,7 +642,9 @@
     "clipboardNotAvailable": "Clipboard API در دسترس نیست",
     "copiedToClipboard": "📋 در کلیپ‌بورد کپی شد",
     "reportSummaryReady": "خلاصه گزارش آماده جای‌گذاری است",
-    "couldNotCopy": "کپی در کلیپ‌بورد ناموفق بود"
+    "couldNotCopy": "کپی در کلیپ‌بورد ناموفق بود",
+    "networkError": "⚠️ ارتباط قطع شد",
+    "networkErrorDesc": "ارتباط با اسکنر حین polling قطع شد. تلاش مجدد ادامه دارد..."
   },
   "comparison": {
     "title": "مقایسه پروژه‌ها",

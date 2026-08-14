@@ -499,10 +499,16 @@ export default function Home() {
       if (pollRef.current) clearInterval(pollRef.current);
       return;
     }
+    // Capture scan_id in closure — it doesn't change during polling.
+    // Depend only on scan_id + status (NOT the whole activeScan object)
+    // so the interval isn't torn down and rebuilt on every progress update.
+    const scanId = activeScan.scan_id;
+    let errorShown = false;
     pollRef.current = setInterval(async () => {
       try {
-        const r = await fetch(`/api/scanner/scan/${activeScan.scan_id}`);
+        const r = await fetch(`/api/scanner/scan/${scanId}`);
         if (r.ok) {
+          errorShown = false; // reset on success
           const data: ScanStatus = await r.json();
           setActiveScan(data);
           if (data.status === "completed" || data.status === "failed") {
@@ -526,12 +532,28 @@ export default function Home() {
             }
           }
         }
-      } catch {}
+      } catch {
+        // #12 fix: was empty catch {} — network drop during scan gave no
+        // feedback to user. Now shows a toast on first failure (guarded by
+        // errorShown flag to prevent toast spam on every 2s retry).
+        if (!errorShown) {
+          errorShown = true;
+          toast({
+            title: t("toast.networkError"),
+            description: t("toast.networkErrorDesc"),
+            variant: "destructive",
+          });
+        }
+      }
     }, 2000);
     return () => {
       if (pollRef.current) clearInterval(pollRef.current);
     };
-  }, [activeScan, refreshScans]);
+    // #11 fix: depend on scan_id + status only, NOT the whole activeScan.
+    // The old [activeScan, refreshScans] dep caused the interval to be
+    // cleared and recreated every 2s (because progress changed on each
+    // poll), leading to timing jitter and missed updates.
+  }, [activeScan?.scan_id, activeScan?.status, refreshScans, t]);
 
   const startScan = async () => {
     setError(null);

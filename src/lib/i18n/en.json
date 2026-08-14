@@ -642,7 +642,9 @@
     "clipboardNotAvailable": "Clipboard API not available",
     "copiedToClipboard": "📋 Copied to clipboard",
     "reportSummaryReady": "Report summary ready to paste",
-    "couldNotCopy": "Could not copy to clipboard"
+    "couldNotCopy": "Could not copy to clipboard",
+    "networkError": "⚠️ Connection lost",
+    "networkErrorDesc": "Lost connection to scanner during polling. Will keep retrying..."
   },
   "comparison": {
     "title": "Project Comparison",
