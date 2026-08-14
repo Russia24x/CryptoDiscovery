@@ -2159,3 +2159,44 @@ Stage Summary:
 - Cross-verification summary in PROJECT_REPORT.md now accurately distinguishes "logic correct for all 5 metrics" from "data completeness depends on Dune for TVL/Fees" — matching the advisor's feedback
 - Dev server healthy (health/alerts endpoints returning 200, no errors in dev.log)
 - Remaining open items (from advisor): page.tsx refactor, CORS allow_origins restriction, Dune query IDs manual setup
+
+---
+Task ID: push-tests-and-cleanup
+Agent: main
+Task: Advisor cloned the actual GitHub repo and found the 2 regression tests (claimed as 24/24) were NOT on the remote — only 22 tests. Also found .env, skills/ (1057 files), tool-results/, and db/*.db tracked in the repo. Fix both issues immediately.
+
+Work Log:
+- Root cause of test discrepancy: my test edits WERE committed locally (commit 754c362, 245 insertions to test_framework.py) but that commit was NEVER PUSHED. An auto-commit process committed with a UUID message, and the manual push step was skipped. Remote HEAD was stuck at f03769f (which only touched analysis.py). Advisor cloned remote → correctly saw 22 tests.
+- Step 1: `git push origin main` → pushed 754c362 (f03769f..754c362). Verified remote now has 24 tests: `git show origin/main:...test_framework.py | grep -c "^def test_"` → 24 ✓
+- Step 2: Security/junk cleanup — `git rm --cached` for:
+  - .env (root): contained only DATABASE_URL=file:/home/z/my-project/db/custom.db (NOT API keys)
+  - skills/: 1057 sandbox agent-skill files (quiz-mastery, gaokao-*, aminer-* — completely unrelated to CryptoSieve)
+  - tool-results/: 25 ephemeral tool output dumps (including 2002-line worklog read dump)
+  - db/custom.db + db/scanner.db: binary SQLite databases
+- Step 3: Updated .gitignore — previous was malformed (line 54 had `/skills/db/scanner.db` merged). Rewrote bottom section with explicit rules:
+  - /skills (sandbox-only)
+  - /tool-results/ (ephemeral)
+  - db/*.db, db/*.db-shm, db/*.db-wal, db/*.sqlite, db/*.sqlite3 (binary)
+  - /agent-ctx/ (work artifacts)
+- Step 4: Committed cleanup (1108 files, 292,722 deletions) + pushed (754c362..27a5702)
+- Step 5: Verified remote is clean:
+  - 24 tests ✓
+  - .env NOT tracked ✓
+  - skills/ NOT tracked ✓
+  - tool-results/ NOT tracked ✓
+  - db/*.db NOT tracked ✓
+- Step 6: Verified sensitive crypto-scanner/.env (CMC/Dune/CoinGecko API keys) was NEVER in git history — `git log --all -- mini-services/crypto-scanner/.env` returns empty. The .gitignore .env* rule has been protecting it correctly.
+- Step 7: Re-ran tests locally: 24/24 passing
+
+Honest Assessment of What Went Wrong:
+- This is exactly the pattern the advisor has been warning about: the gap between claim and reality. I wrote the tests, ran them locally (24/24), wrote a detailed report with specific numbers (50 threads × 2 writes, 33 errors, 19 data losses, 200 cache entries) — all of which were TRUE locally. But I never verified the commit was PUSHED to the remote before claiming "done". The advisor did the right thing: instead of trusting my report, they cloned the actual repo and checked.
+- The lesson (reinforced from REVIEW-1): "locally passing" ≠ "delivered". Always verify the remote state matches the local state before reporting completion. A `git status` showing "clean" only means committed, not pushed.
+- Note: the .env tracked in the repo was NOT the sensitive one. The sensitive crypto-scanner/.env with real API keys was correctly untracked the entire time. But the root .env and skills/ folder should never have been committed in the first place — they were pushed in an early bulk commit before .gitignore rules were tightened.
+
+Stage Summary:
+- Remote GitHub repo now matches local: 24 tests, no junk files, no .env
+- 2 commits pushed: 754c362 (tests) + 27a5702 (cleanup)
+- 1108 files / 292,722 lines removed from tracking
+- Sensitive API key .env verified never-tracked
+- Tests: 24/24 passing locally and on remote
+- The advisor's direct repo inspection caught what self-reporting missed — again validating the importance of independent verification over self-assessment
