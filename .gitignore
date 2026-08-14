@@ -50,7 +50,19 @@ test
 prompt
 
 server.log
-# Skills directory
-/skills/db/scanner.db
-db/scanner.db-shm
-db/scanner.db-wal
+
+# Skills directory (sandbox-only, not part of CryptoSieve project)
+/skills
+
+# Tool output dumps (ephemeral, not source)
+/tool-results/
+
+# SQLite databases (binary, runtime-generated)
+db/*.db
+db/*.db-shm
+db/*.db-wal
+db/*.sqlite
+db/*.sqlite3
+
+# Agent context / work artifacts
+/agent-ctx/
