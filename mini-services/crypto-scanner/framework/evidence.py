@@ -558,7 +558,10 @@ def _apply_gecko_detail(b: EvidenceBundle, d: dict[str, Any]) -> None:
             locked_ratio = (ts - cs) / ts
             b.tokenomics.staking_pct = round(locked_ratio * 50, 1)  # 50% of locked supply
         else:
-            b.tokenomics.staking_pct = 20.0  # conservative default when no supply data
+            # No supply data available — leave staking_pct as None
+            # (unknown) rather than guessing 20.0. The 'Never guess missing
+            # data' principle requires us to admit ignorance.
+            pass
 
     # Insider allocation heuristic: use public_supply vs total
     if cs and ts and ts > 0:
@@ -624,7 +627,9 @@ def _apply_llama_detail(b: EvidenceBundle, p: dict[str, Any]) -> None:
     if b.chain_count <= 1:
         b.chain_dependency = True
 
-    b.economic.customer_concentration = "medium"  # default placeholder
+    # Customer concentration: leave as None (unknown) when no data.
+    # The old hardcoded 'medium' was a placeholder that violated 'Never guess
+    # missing data' — it asserted knowledge we don't have from public APIs.
     b.economic.recurrence = "recurring" if tvl > 0 else "none"
 
 
@@ -673,10 +678,13 @@ def _apply_category_inferences(b: EvidenceBundle, category: str) -> None:
 
     # Stablecoin / RWA → custody & backing matter
     if "stablecoin" in c or "rwa" in c:
-        # We have no direct backing data from public APIs, so we mark it
-        # as needing verification rather than triggering a veto.
-        b.regulatory_uncertainty = False
-        b.has_regulatory_license = True  # assume for major stablecoins (verification listed)
+        # We have no direct backing or regulatory data from public APIs.
+        # The old code unconditionally set has_regulatory_license=True for
+        # ANY stablecoin/RWA — an unverified claim that could mislead
+        # investors. Now we leave has_regulatory_license=False (default)
+        # and set regulatory_uncertainty=True so the report flags that
+        # regulatory status needs verification, rather than asserting it.
+        b.regulatory_uncertainty = True
 
     # bridges → bridge dependency
     if "bridge" in c:
