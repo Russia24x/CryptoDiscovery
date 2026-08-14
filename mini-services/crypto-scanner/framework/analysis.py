@@ -538,7 +538,7 @@ def _build_catalysts(ev: EvidenceBundle, cycle: CyclePhase) -> list[Catalyst]:
     if ev.has_regulatory_license:
         out.append(Catalyst(description="Institutional / regulatory license in place", positive=True, eta="ongoing"))
     if (ev.economic.fee_growth_pct or 0) > 20:
-        out.append(Catalyst(description=f"Revenue growing +{ev.economic.fee_growth_pct:.0f}% WoW", positive=True, eta="current"))
+        out.append(Catalyst(description=f"Fee growing +{ev.economic.fee_growth_pct:.0f}% WoW", positive=True, eta="current"))
     if ev.chain_count >= 3:
         out.append(Catalyst(description=f"Multi-chain deployment ({ev.chain_count} chains)", positive=True, eta="ongoing"))
     if ev.tokenomics.buyback:

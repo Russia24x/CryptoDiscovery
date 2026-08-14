@@ -44,7 +44,7 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         # Catalysts
         "catalyst.multichain": "Multi-chain deployment ({chains} chains)",
         "catalyst.reg_license": "Institutional / regulatory license in place",
-        "catalyst.rev_growing": "Revenue growing +{growth:.0f}% WoW",
+        "catalyst.rev_growing": "Fee growing +{growth:.0f}% WoW",
         "catalyst.buyback": "Active buyback program",
         "catalyst.burn": "Token burn mechanism",
         "catalyst.unlock": "Major token unlock cliff approaching",
@@ -133,7 +133,7 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         # Catalysts
         "catalyst.multichain": "استقرار چندزنجیره‌ای ({chains} زنجیره)",
         "catalyst.reg_license": "مجوز نهادی / تنظیمی در دست",
-        "catalyst.rev_growing": "رشد درآمد +{growth:.0f}% هفتگی",
+        "catalyst.rev_growing": "رشد کارمزد +{growth:.0f}% هفتگی",
         "catalyst.buyback": "برنامه فعال بازخرید",
         "catalyst.burn": "مکانیزم سوزاندن توکن",
         "catalyst.unlock": "صعودی توکن عمده در راه است",
