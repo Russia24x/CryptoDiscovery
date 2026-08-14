@@ -1,219 +1,107 @@
-# RULES.md — CryptoSieve Project Rules
+# RULES.md — Project Governance Rules
 
-## Git & Repository Rules
-
-### NEVER-FORCE-PUSH
-
-```
-git push --force  →  مطلقاً ممنوعه
-```
-
-**قانون:**
-- اگر `git push` عادی rejected شد (non-fast-forward error):
-  1. **STOP فوری** — هیچ تغییری انجام نده
-  2. خطا را گزارش بده (به کاربر نشان بده)
-  3. منتظر تصمیم کاربر بمون
-- هرگز `--force` یا `-f` به push اضافه نکن
-- حتی اگر مطمئن هستی که مشکلی نیست، باز هم force نزن
-- این قانون برای جلوگیری از از دست رفتن commit‌های remote است
-
-**استثنا:** هیچ استثنایی وجود ندارد.
+> **این فایل منبع حقیقت (single source of truth) برای قوانین حاکمیتی پروژه‌ی CryptoSieve است.**
+> هر session (انسان یا ایجنت) باید این فایل را **قبل از هر کاری** بخواند.
+> قوانین زیر هم‌سطح‌اند و استثنا ندارند مگر صراحتاً ذکر شود.
+>
+> This file is the single source of truth for CryptoSieve governance rules.
+> Every session (human or agent) MUST read it before doing anything else.
+> The rules below are peer-level and have no exceptions unless explicitly stated.
 
 ---
 
-### SESSION-START-SYNC-CHECK
+## ۱. NEVER-FORCE-PUSH
 
-در ابتدای هر session (و بعد از هر gap زمانی، مثلاً بعد از پیام جدید کاربر)،
-قبل از هر تغییر جدید در کد:
+**هرگز `git push --force` یا `git push -f` یا `git push --force-with-lease` نزن.**
 
-**مراحل:**
+اگر push به‌دلیل reject شدن (non-fast-forward) شکست خورد:
+- **توقف فوری** — هیچ تلاش برای دور زدن نکن
+- علت reject را بررسی کن (`git fetch origin && git log origin/main..HEAD`)
+- اگه local commit‌هایی داریم که روی remote نیستند: آن‌ها را به‌صورت یک merge commit تمیز روی remote بریز، نه force
+- اگه remote commit‌هایی داریم که local نداره: ابتدا `git pull --rebase origin main`، conflict را حل کن، بعد push
+
+**استثنا: هیچ.** حتی اگه فکر می‌کنی history کثیفه و باید rewrite بشه — این تصمیم فقط توسط انسان گرفته می‌شه، نه ایجنت.
+
+---
+
+## ۲. SESSION-START-SYNC-CHECK
+
+**در ابتدای هر session و بعد از هر gap زمانی (بیش از چند دقیقه بی‌کار)، قبل از هر تغییر:**
 
 ```bash
-# Step 1: Fetch latest from remote
-git fetch origin
-
-# Step 2: Check status
-git status
+git fetch origin && git status
 ```
 
-**بررسی:**
-- اگر `behind` از `origin/main` دیده شد:
-  1. **STOP فوری**
-  2. گزارش بده: "Local is behind origin/main by N commits"
-  3. منتظر تصمیم کاربر بمون (یا pull یا rebase یا تصمیم دیگر)
+قوانین تفسیر:
 
-- اگر `diverged` از `origin/main` دیده شد:
-  1. **STOP فوری**
-  2. گزارش بده: "Local has diverged from origin/main"
-  3. منتظر تصمیم کاربر بمون
+| وضعیت `git status` | اقدام |
+|---|---|
+| `up to date with 'origin/main'` | ادامه بده |
+| `behind 'origin/main' by N commits` | `git pull --rebase origin main`، بعد ادامه بده |
+| `ahead of 'origin/main' by N commits` | ادامه بده — commit‌های local معتبرن، بعداً push کن |
+| `diverged from 'origin/main'` | **توقف فوری، منتظر تصمیم کاربر بمون** — هیچ merge/rebase/force خودکار نکن |
 
-- اگر `clean` / `up-to-date` بود:
-  1. ادامه بده با کار جدید
-  2. لاگ بزن: "Sync check passed — local is up-to-date with origin/main"
+**نکته**: sandbox environment ممکن است بین session‌ها working tree یا `.git` را reset کند. اگه فایل‌هایی که باید وجود داشته باشن غیب شده‌ن (مثل `db.py`، `tests/`، `ARCHITECTURE.md`)، این یک نشونه‌ی reset است. در این حالت:
+1. `git remote -v` را چک کن — اگه خالی است، remote را دوباره اضافه کن: `git remote add origin <url>`
+2. `git fetch origin`
+3. اگه local فقط scaffold است و remote canonical است (تأیید شده توسط انسان): `git reset --hard origin/main` برای بازگرداندن state معتبر
+4. **هرگز فایل‌های از دست رفته را از صفر بازنویسی نکن** — همیشه از remote recover کن
 
----
-
-## Code Quality Rules
-
-### Before Any Commit
-
-1. **Lint check** — `bun run lint` باید بدون خطا باشد
-2. **TypeScript check** — `npx tsc --noEmit 2>&1 | grep "^src/"` باید بدون خطا باشد
-3. **No console.log** — هیچ `console.log` در کد production نباید باشد
-4. **No secrets** — هیچ secret یا API key در کد نباید باشد
-5. **No hardcoded strings** — تمام رشته‌های UI باید از سیستم i18n استفاده کنند
-
-### Commit Message Format
-
-```
-<type>: <short description>
-
-<optional longer description>
-```
-
-**Types:**
-- `feat` — ویژگی جدید
-- `fix` — رفع باگ
-- `refactor` — بازسازی کد بدون تغییر رفتار
-- `docs` — تغییر مستندات
-- `i18n` — تغییر ترجمه
-- `chore` — کارهای نگهداری
-
-**مثال:**
-```
-feat: add scan diff view with metrics comparison
-
-- Side-by-side scan comparison with delta indicators
-- Project overlap analysis (Only in A/B, Common)
-- Metrics table with trend icons
-```
-
-### After Any Push
-
-1. Verify push succeeded (check exit code)
-2. If push fails with non-fast-forward → STOP (see NEVER-FORCE-PUSH)
-3. Report push result to user
+**استثنا: هیچ.**
 
 ---
 
-## Architecture Rules
+## ۳. NO-AUTO-CRON
 
-### File Size Limits
+> هرگز cron با قدرت commit+push خودکار نساز — نه با هر بازه‌ای، نه با هر kind ای —
+> مگر ۵ gate مستندشده در ARCHITECTURE.md §7.5 پیاده و تأیید شده باشن.
+>
+> استثنا: هیچ.
 
-| فایل | حداکثر خطوط | اقدام اگر تجاوز کرد |
-|------|-------------|-------------------|
-| `src/app/page.tsx` | ۵۰۰۰ | تقسیم به کامپوننت‌های جداگانه |
-| Python files | ۵۰۰ | تقسیم به ماژول‌های کوچکتر |
-| Translation JSON | بدون محدودیت | — |
+**توضیح**: یک cron بی‌ناظر که خودش commit+push می‌کند، دقیقاً همون ریسکیه که در REVIEW-1 به‌عنوان P0 هشدار داده شد. هیچ‌کس تصمیم نمی‌گیرد آیا تغییر آماده‌ی push هست یا نه.
 
-### Component Structure
+این قانون شامل می‌شود:
+- `cron` tool با هر `kind` (cron / fixed_rate / one_time)
+- `cron` tool با هر `payload.kind` (agentTurn / webDevReview)
+- هر مکانیزم دیگه‌ای که به‌صورت زمان‌بندی‌شده کد را تغییر داده و push می‌کند
 
-هر کامپوننت باید:
-1. `"use client"` در ابتدا (اگر از hooks استفاده می‌کند)
-2. TypeScript interfaces برای props
-3. `useLanguage()` برای ترجمه
-4. Props قابل تست و مستقل
+**پیش‌شرط re-enable** (همه باید پیاده و تأیید شده باشن —见 ARCHITECTURE.md §7.5):
+- [ ] Pre-push sync check (`git fetch` + behind/diverged → STOP)
+- [ ] Test gate (`python tests/test_framework.py` باید pass شود)
+- [ ] Read-only default (commit+push فقط با gate صریح)
+- [ ] لاگ قابل رصد (`cron-audit.log`)
+- [ ] Human review cadence (روزانه)
 
-### API Route Pattern
-
-تمام API routes باید:
-1. `try-catch` با error handling مناسب
-2. `scannerJson()` به‌جای `scannerFetch()` برای error handling خودکار
-3. Timeout در سطح client (۳۰ ثانیه)
-4. HTTP status codes صحیح (۲۰۰، ۴۰۴، ۵۰۲، ۵۰۳)
-
-### Python Service Rules
-
-1. **No `except Exception`** — همیشه exception type مشخص شود
-2. **No `datetime.utcnow()`** — از `datetime.now(timezone.utc)` استفاده شود
-3. **Type hints** برای تمام توابع
-4. **Docstrings** برای توابع public
-5. **Pydantic models** برای تمام ورودی/خروجی API
+**تا این ۵ مورد پیاده نشن، هیچ auto-commit cron فعالی نباید وجود داشته باشد.**
 
 ---
 
-## i18n Rules
+## ۴. NO-AUTO-COMMIT-WITHOUT-PUSH-VERIFICATION
 
-### Adding Translation Keys
+**هرگز ادعا نکن کار «تحویل شده» بدون تأیید صریح push.**
 
-1. کلید را به `en.json` اضافه کن
-2. کلید معادل را به `fa.json` اضافه کن
-3. در کامپوننت از `t("section.key")` استفاده کن
-4. هرگز رشته hardcoded در UI نگذار
+`git status` تمیز فقط یعنی committed، نه pushed. قبل از گزارش completion:
+1. `git push origin main` را اجرا کن
+2. خروجی را چک کن: باید `<old>..<new>  main -> main` ببینی
+3. `git log origin/main -1` را چک کن: باید hash جدید را نشان بده
+4. فقط وقتی هر سه تأیید شدن، «done» را گزارش بده
 
-### Translation Quality
+این قانون مستقیماً از یافته‌ی advisor review ناشی می‌شه: تست‌های رگرسیون لوکال ۲۴/۲۴ بودن ولی commit هرگز push نشده بود، و advisor با clone کردن remote فقط ۲۲ تست دید.
 
-- فارسی: استفاده از اصطلاحات استاندارد مالی/کریپتوی فارسی
-- انگلیسی: استفاده از terminology استاندارد صنعت
-- RTL: `dir="rtl"` به‌طور خودکار توسط LanguageProvider تنظیم می‌شود
-- Brand names (CoinGecko, DeFiLlama) همیشه به انگلیسی باقی می‌مانند
+**استثنا: هیچ.**
 
 ---
 
-## Testing Rules
+## ۵. INCREMENTAL-COMMITS
 
-### Before Merge
+**برای refactor یا تغییرات بزرگ، هر بخش را جداگانه commit کن — نه یک commit غول‌پیکر.**
 
-1. **Lint** — `bun run lint` (0 errors)
-2. **TypeScript** — `npx tsc --noEmit` (0 errors in `src/`)
-3. **Browser test** — صفحه بارگذاری می‌شود بدون console error
-4. **Scan test** — یک اسکن کامل انجام می‌شود بدون خطا
-5. **Bilingual test** — تغییر زبان کار می‌کند با RTL
+هر commit باید:
+- یک واحد منطقی تغییر را شامل بشه
+- بعد از آن `bun run lint` سبز باشه
+- بعد از آن `python tests/test_framework.py` سبز باشه (اگه منطق backend را تغییر داد)
+- پیام commit واضم و توصیفی داشته باشه
 
-### Performance Benchmarks
+**دلیل**: یک commit ۲۰۰۰ خطی اگه چیزی بشکنه، bisect غیرممکن می‌شه. commit‌های کوچک اجازه‌ی rollback و review می‌دن.
 
-| متریک | هدف |
-|-------|------|
-| Page load | < ۵۰۰ms |
-| Scan completion (5 projects) | < ۳۰s |
-| Detail drawer open | < ۵۰۰ms |
-| Language toggle | < ۱۰۰ms |
-
----
-
-## Framework Rules (CryptoSieve 3.0)
-
-### Core Principles
-1. **Evidence > Narrative** — هر ادعا باید با داده پشتیبانی شود
-2. **Revenue ≠ Fees** — Fees × 12 = annualized run-rate، نه Revenue واقعی
-3. **Project Quality ≠ Token Quality ≠ Investment Attractiveness** — سه امتیاز جداگانه
-4. **Never guess missing data** — اگر Evidence کافی نیست، Confidence را پایین بیاور
-
-### Data Handling
-1. هیچ‌گاه داده جعل نکن
-2. مقادیر گمشده را بی‌سروصدا پر نکن
-3. همیشه Primary Evidence را از Secondary Evidence متمایز کن
-4. تاریخ و منبع هر داده حساس به زمان را ثبت کن
-
-### Valuation Multiples
-- **P/R** = Market Cap ÷ Annualized Revenue (فقط Revenue واقعی)
-- **P/F** = FDV ÷ Annualized Fees (صراحتاً ≠ Revenue)
-- **P/T** = Market Cap ÷ TVL
-- اگر Revenue واقعی موجود نیست، P/R = N/A و P/F با کپ امتیاز استفاده می‌شود
-
----
-
-## Maintenance Checklist
-
-### Weekly
-- [ ] `git fetch origin && git status` — sync check
-- [ ] `bun run lint` — lint check
-- [ ] `npx tsc --noEmit` — TS check
-- [ ] Run a test scan — verify data quality
-- [ ] Check CoinGecko API availability
-
-### Monthly
-- [ ] Review and update dependencies (`bun update`)
-- [ ] Check for Python package updates
-- [ ] Review error logs in `service.log`
-- [ ] Update translations if new features added
-- [ ] Review and update README.md and DEVELOPMENT.md
-
-### Before Release
-- [ ] All tests passing
-- [ ] Documentation updated
-- [ ] No console errors in browser
-- [ ] No TypeScript errors
-- [ ] Lint clean
-- [ ] Both languages working with RTL
-- [ ] Performance benchmarks met
+**استثنا: هیچ.**
