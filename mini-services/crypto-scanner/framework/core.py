@@ -206,20 +206,39 @@ def action_from_scores(
 
     blended = 0.4 * project_quality + 0.3 * token_q + 0.3 * inv_a
 
-    # confidence gate: low confidence caps the action level
-    if confidence < 45:
-        return 1, "Watch (Low confidence)"
-    if confidence < 60:
-        return 2, "Deep Research (Confidence building)"
-
+    # Base level from blended score (WITHOUT confidence interference).
     if blended >= 85:
-        return 5, "High Conviction"
-    if blended >= 75:
-        return 4, "Core Position Candidate"
-    if blended >= 65:
-        return 3, "Small Position"
-    if blended >= 55:
-        return 2, "Deep Research"
-    if blended >= 45:
-        return 1, "Watch"
-    return 0, "Ignore"
+        base_level, base_label = 5, "High Conviction"
+    elif blended >= 75:
+        base_level, base_label = 4, "Core Position Candidate"
+    elif blended >= 65:
+        base_level, base_label = 3, "Small Position"
+    elif blended >= 55:
+        base_level, base_label = 2, "Deep Research"
+    elif blended >= 45:
+        base_level, base_label = 1, "Watch"
+    else:
+        base_level, base_label = 0, "Ignore"
+
+    # Confidence gate: CAP DOWNWARD only — never raise a bad project.
+    #
+    # The old code returned early on low confidence BEFORE checking blended,
+    # which meant blended=10 + confidence=50 → "Deep Research" (level 2),
+    # while the same project with confidence=65 → "Ignore" (level 0).
+    # Low confidence was ELEVATING bad projects — the opposite of the gate's
+    # purpose (which is to cap the max, not override the base).
+    #
+    # Now: compute base first, then cap at the confidence-appropriate max.
+    # A project that already scores below the cap stays at its base level.
+    if confidence < 45:
+        # Low confidence caps at level 1 (Watch)
+        if base_level > 1:
+            return 1, "Watch (Low confidence)"
+        return base_level, base_label
+    if confidence < 60:
+        # Medium confidence caps at level 2 (Deep Research)
+        if base_level > 2:
+            return 2, "Deep Research (Confidence building)"
+        return base_level, base_label
+
+    return base_level, base_label

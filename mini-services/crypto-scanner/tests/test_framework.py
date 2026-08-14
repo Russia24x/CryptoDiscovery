@@ -249,6 +249,73 @@ def test_action_ignore_for_low_scores():
     assert level == 0
 
 
+def test_action_low_confidence_never_elevates_bad_project():
+    """Low confidence must CAP a good project, not ELEVATE a bad one.
+
+    Regression guard for advisor audit finding #2. The old code returned
+    early on low confidence BEFORE checking the blended score:
+        if confidence < 60:
+            return 2, "Deep Research (Confidence building)"
+    This meant blended=10 + confidence=50 → "Deep Research" (level 2),
+    while the same project with confidence=65 → "Ignore" (level 0).
+    Low confidence was ELEVATING bad projects — the opposite of the gate's
+    purpose (cap the max, not override the base).
+
+    Fix: compute base level from blended FIRST, then cap DOWNWARD only.
+    """
+    # The advisor's exact example: blended=10, confidence=50
+    # Old behavior: level 2 (Deep Research) — WRONG
+    # New behavior: level 0 (Ignore) — base score is terrible, cap doesn't raise it
+    level, label = action_from_scores(
+        project_quality=10, token_quality=10, investment_attractiveness=10,
+        confidence=50, veto_triggered=False,
+    )
+    assert level == 0, (
+        f"Low confidence must not elevate a bad project: blended=10 should "
+        f"stay Ignore (0), got level {level} '{label}'"
+    )
+
+    # Same project with higher confidence should also be Ignore
+    level_hi, _ = action_from_scores(
+        project_quality=10, token_quality=10, investment_attractiveness=10,
+        confidence=65, veto_triggered=False,
+    )
+    assert level_hi == 0, "blended=10 is Ignore regardless of confidence"
+
+    # Contrast: a GOOD project IS capped by low confidence (cap works)
+    level_good_low, label_good_low = action_from_scores(
+        project_quality=90, token_quality=90, investment_attractiveness=90,
+        confidence=50, veto_triggered=False,
+    )
+    assert level_good_low == 2, (
+        f"Good project (blended=90) with medium confidence should be capped "
+        f"at level 2 (Deep Research), got {level_good_low}"
+    )
+
+    # Same good project with high confidence → High Conviction (no cap)
+    level_good_hi, _ = action_from_scores(
+        project_quality=90, token_quality=90, investment_attractiveness=90,
+        confidence=80, veto_triggered=False,
+    )
+    assert level_good_hi == 5, "High confidence + good scores → High Conviction"
+
+    # Medium project: base=2 (Deep Research), low confidence caps at 1
+    level_med, label_med = action_from_scores(
+        project_quality=55, token_quality=55, investment_attractiveness=55,
+        confidence=40, veto_triggered=False,
+    )
+    assert level_med == 1, (
+        f"Medium project (blended=55) with low confidence should cap at 1 "
+        f"(Watch), got {level_med} '{label_med}'"
+    )
+    # Same medium project with high confidence → level 2 (its base)
+    level_med_hi, _ = action_from_scores(
+        project_quality=55, token_quality=55, investment_attractiveness=55,
+        confidence=70, veto_triggered=False,
+    )
+    assert level_med_hi == 2, "Medium project with high confidence stays at base 2"
+
+
 # ========================================================================== #
 #  Revenue ≠ Fees principle
 # ========================================================================== #
