@@ -2304,3 +2304,57 @@ Stage Summary:
 - RULES.md §2 (SESSION-START-SYNC-CHECK) followed: caught and recovered from sandbox reset
 - Next priorities: #2 CORS restriction, #3 Dune query IDs
 - Note: scanner .env file (CMC/Dune/CoinGecko API keys) was lost in sandbox reset — advisor needs to re-provide CMC key. Scanner running with free APIs only.
+
+---
+Task ID: cors-restriction
+Agent: main
+Task: Priority #2 — restrict CORS allow_origins=["*"] in scanner main.py. Per advisor instruction: do NOT add any monitoring/watchdog systems; run infrastructure with its own pre-existing default scripts.
+
+Work Log:
+- Sync check (RULES.md §2): clean working tree, up to date with origin/main
+- Inventoried pre-existing infra scripts: start-dev.sh (Next.js, has its own internal watchdog loop), mini-services/crypto-scanner/start.sh (scanner). Did NOT add any new monitoring.
+- Started both services with their pre-existing scripts (start-dev.sh via setsid for detachment, scanner via start.sh)
+- Located CORS config: main.py lines 79-84, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"]
+- Understood architecture: browser → Next.js /api/scanner/* (same-origin proxy) → scanner:3003 (server-side). Browser never directly hits port 3003 in production. So CORS only matters for direct dev/debug access.
+- Replaced allow_origins=["*"] with explicit allowlist: localhost:3000, 127.0.0.1:3000, localhost:81, 127.0.0.1:81 + env var SCANNER_CORS_ORIGINS for extras
+- Tightened: allow_credentials=false, allow_methods=explicit list, allow_headers=explicit list
+- Verified CORS behavior:
+  - localhost:3000 preflight → 200 (allowed)
+  - evil.example.com preflight → 400 (rejected)
+  - Next.js proxy /api/scanner/health → 200 with real JSON data
+- lint clean, tests 24/24
+- Committed (76832e6) + pushed (5208b97..76832e6) + verified local=remote
+
+Stage Summary:
+- CORS now restricted to known origins; wildcard removed
+- No new monitoring added — only pre-existing start-dev.sh and start.sh used
+- Priority #2 complete. Next: #3 Dune query IDs.
+
+---
+Task ID: dune-query-templates
+Agent: main
+Task: Priority #3 — Dune query IDs setup. Cannot create actual Dune queries (requires Dune account + web UI), so provided SQL templates + configuration helper + documentation.
+
+Work Log:
+- Investigated Dune integration: 3 query IDs needed (DUNE_QUERY_TOKEN_CONCENTRATION, DUNE_QUERY_REAL_REVENUE, DUNE_QUERY_ACTIVE_USERS), all via env vars, all currently empty
+- Read the 3 consumer functions in sources.py to extract exact required output column names:
+  - fetch_dune_token_concentration: top_10_pct, top_100_pct, whale_count, team_concentration
+  - fetch_dune_real_revenue: total_fees_24h, revenue_24h, revenue_fee_ratio, annual_revenue, annual_fees
+  - fetch_dune_active_users: dau, mau, dau_mau_ratio, new_users_24h, retention_7d
+- Created dune-queries/ directory with:
+  - 01_token_concentration.sql (Ethereum ERC20 transfer template, parameter: token_symbol)
+  - 02_real_revenue_vs_fees.sql (Revenue ≠ Fees implementation, parameter: protocol)
+  - 03_active_users_bot_filtered.sql (DAU/MAU with >1000 tx/day bot filter, parameter: protocol)
+  - README.md (step-by-step setup: create query on Dune → publish → copy ID → set env var → verify)
+- Created configure-dune.sh: interactive helper that prompts for API key + 3 query IDs, backs up .env, writes new entries
+- Each SQL file header documents: purpose, how to use, required output columns
+- Templates are Ethereum-focused; README notes adaptation needed for other chains
+- Verified: main.py syntax OK, tests 24/24, scanner health 200, frontend health 200
+- Committed (661764a) + pushed (76832e6..661764a) + verified local=remote
+
+Stage Summary — All 3 advisor priorities complete:
+- #1 page.tsx refactor: 4756 → 3923 lines (-17.5%), 2 commits (format-utils + ReportDetail extraction)
+- #2 CORS restriction: allow_origins=["*"] → explicit allowlist (localhost + gateway + env var)
+- #3 Dune query IDs: SQL templates + helper script + README (user creates queries on Dune UI, then runs configure-dune.sh)
+
+No new monitoring systems added per advisor instruction. Infrastructure runs via pre-existing start-dev.sh (Next.js) and start.sh (scanner) only.
