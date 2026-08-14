@@ -2419,3 +2419,38 @@ Stage Summary:
 - No new monitoring/watchdog added per standing advisor instruction
 - Both services healthy, all API endpoints responding 200
 - dev.log clean (no errors)
+
+---
+Task ID: advisor-audit-12-findings
+Agent: main
+Task: Advisor deep audit found 12 bugs (4 critical, 8 medium). Fix all, following RULES.md throughout (sync check §2, incremental commits §5, push verification §4, §6 auto-commit is not delivery).
+
+Work Log:
+- Sync check: clean, synced with remote. Scanner restarted (sandbox instability).
+- All 12 findings fixed across 8 commits, each with lint+test green and push verified:
+
+| # | Finding | Severity | Commit | Fix |
+|---|---------|----------|--------|-----|
+| 1 | backtest/correlation price_then uses now-30d not score-time | critical | 16b456f | Compute days_ago from score timestamp |
+| 2 | confidence gate elevates bad projects | critical | 8ff3b75 | Cap DOWNWARD only, never raise; +regression test |
+| 3 | is_infrastructure wiped for big blockchains | critical | b40730b | `b.is_infrastructure = b.is_infrastructure or ...` |
+| 4 | 7x except Exception without CancelledError | critical | b40730b | Added asyncio.CancelledError: raise guards |
+| 5 | correlation 'Strong negative' label unreachable | medium | 16b456f | Reorder if/elif, extremes first |
+| 6 | cross-verification source_b='DeFiLlama' (wrong) | medium | 77b90e8 | Changed to 'CoinMarketCap' |
+| 7 | fdv_fees/mc_tvl truthy check | medium | 77b90e8 | `if x is not None` instead of `if x` |
+| 8 | catalyst 'Revenue growing' from fee_growth_pct | medium | d0a7c05 | Changed to 'Fee growing' / 'رشد کارمزد' |
+| 9 | hardcoded placeholders (staking_pct, etc) | medium | 057f2a6 | Left as None (unknown) instead of guessing |
+| 10 | 3 unconditional bias checks + popular_names=6 | medium | 526fc3a | Made conditional; expanded to 29 names |
+| 11 | polling depends on whole activeScan object | medium | 29df998 | Depend on scan_id+status only |
+| 12 | empty catch {} in poll | medium | 29df998 | Added toast on network error (guarded) |
+
+- 1 regression test added: test_action_low_confidence_never_elevates_bad_project (37→38 tests)
+- Hit 1 divergence during push (session auto-commit duplicate) — resolved with git pull --rebase + skip per RULES.md §2
+
+Stage Summary:
+- All 12 advisor findings addressed
+- 8 commits, all pushed + verified (local=remote)
+- Tests: 37 → 38 (1 new regression test for #2)
+- Lint clean throughout
+- Both services healthy (scanner 200, frontend 200)
+- RULES.md followed: §2 (sync), §4 (push verify), §5 (incremental), §6 (no auto-commit trust)
