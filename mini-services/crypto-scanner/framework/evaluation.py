@@ -144,7 +144,7 @@ def score_economic_engine(
         subs["Fee Generation"] = 0.5
 
     # Growth
-    g = econ.revenue_growth_pct or 0.0
+    g = econ.fee_growth_pct or 0.0
     if g >= 100:
         subs["Growth"] = 9.0
     elif g >= 50:

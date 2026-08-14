@@ -115,7 +115,7 @@ class EconomicEngine(BaseModel):
     fees_30d: Optional[float] = None      # 30d fees (for stability check)
     revenue: Optional[float] = None
     net_revenue: Optional[float] = None
-    revenue_growth_pct: Optional[float] = None
+    fee_growth_pct: Optional[float] = None
     aum: Optional[float] = None
     tvl: Optional[float] = None
     customer_count: Optional[int] = None

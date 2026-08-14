@@ -1401,7 +1401,7 @@ export default function Home() {
                         >
                           <div className="flex h-7 w-7 items-center justify-center rounded-full bg-muted/40 border border-border/40 overflow-hidden flex-shrink-0">
                             {report.image ? (
-                              <img src={report.image} alt={report.symbol} className="h-full w-full object-cover" />
+                              <img src={report.image} alt={`${report.name || report.symbol} logo`} loading="lazy" className="h-full w-full object-cover" />
                             ) : (
                               <span className="text-[9px] font-bold text-muted-foreground">{report.symbol.slice(0, 3)}</span>
                             )}
@@ -2433,7 +2433,7 @@ function ProjectCard({
         <div className="flex items-start gap-3 mb-3">
           <div className="flex h-10 w-10 items-center justify-center rounded-full bg-muted/40 border border-border/40 overflow-hidden flex-shrink-0">
             {report.image ? (
-              <img src={report.image} alt={report.symbol} className="h-full w-full object-cover" />
+              <img src={report.image} alt={`${report.name || report.symbol} logo`} loading="lazy" className="h-full w-full object-cover" />
             ) : (
               <span className="text-xs font-bold text-muted-foreground">
                 {report.symbol.slice(0, 3)}
@@ -2640,7 +2640,7 @@ function ComparisonView({ reports }: { reports: FullReport[] }) {
             <div key={r.id} className="flex items-center gap-2 p-2 rounded-lg border border-border/40 bg-card/40">
               <div className="flex h-8 w-8 items-center justify-center rounded-full bg-muted/40 border border-border/40 overflow-hidden flex-shrink-0">
                 {r.candidate.image ? (
-                  <img src={r.candidate.image} alt={r.candidate.symbol} className="h-full w-full object-cover" />
+                  <img src={r.candidate.image} alt={`${r.candidate.name || r.candidate.symbol} logo`} loading="lazy" className="h-full w-full object-cover" />
                 ) : (
                   <span className="text-[10px] font-bold">{r.candidate.symbol.slice(0, 3)}</span>
                 )}
@@ -3056,7 +3056,7 @@ function WatchlistView({
                   >
                     <div className="flex h-9 w-9 items-center justify-center rounded-full bg-muted/40 border border-border/40 overflow-hidden flex-shrink-0">
                       {r.image ? (
-                        <img src={r.image} alt={r.symbol} className="h-full w-full object-cover" />
+                        <img src={r.image} alt={`${r.name || r.symbol} logo`} loading="lazy" className="h-full w-full object-cover" />
                       ) : (
                         <span className="text-[10px] font-bold text-muted-foreground">
                           {r.symbol.slice(0, 3)}
@@ -3450,7 +3450,7 @@ function GlobalSearchView({
                   >
                     <div className="flex h-9 w-9 items-center justify-center rounded-full bg-muted/40 border border-border/40 overflow-hidden flex-shrink-0">
                       {result.report.image ? (
-                        <img src={result.report.image} alt={result.report.symbol} className="h-full w-full object-cover" />
+                        <img src={result.report.image} alt={`${result.report.name || result.report.symbol} logo`} loading="lazy" className="h-full w-full object-cover" />
                       ) : (
                         <span className="text-[10px] font-bold text-muted-foreground">{result.report.symbol.slice(0, 3)}</span>
                       )}

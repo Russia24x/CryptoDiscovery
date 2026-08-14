@@ -634,7 +634,7 @@ def _apply_fees_overview(b: EvidenceBundle, f: dict[str, Any]) -> None:
     if f24 > 0 and f7d > 0:
         avg7 = f7d / 7.0
         if avg7 > 0:
-            b.economic.revenue_growth_pct = round(((f24 - avg7) / avg7) * 100, 1)
+            b.economic.fee_growth_pct = round(((f24 - avg7) / avg7) * 100, 1)
 
     # net revenue proxy: monthly fees / 30
     if f30d > 0:

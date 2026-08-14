@@ -429,8 +429,8 @@ def _build_investment_analysis(
 
     # timing: blend momentum (24h change) + cycle position
     timing = 50.0
-    if ev.economic.revenue_growth_pct is not None:
-        timing = max(0.0, min(100.0, 50.0 + ev.economic.revenue_growth_pct * 0.5))
+    if ev.economic.fee_growth_pct is not None:
+        timing = max(0.0, min(100.0, 50.0 + ev.economic.fee_growth_pct * 0.5))
 
     # investment attractiveness = blend of project, token, valuation, timing
     inv_attr = None
@@ -439,8 +439,8 @@ def _build_investment_analysis(
         inv_attr = round(max(0.0, min(100.0, inv_attr)), 1)
 
     return InvestmentAnalysis(
-        fdv_revenue=round(fdv_rev, 2) if fdv_rev else None,
-        mc_revenue=round(mc_rev, 2) if mc_rev else None,
+        fdv_revenue=round(fdv_rev, 2) if fdv_rev is not None else None,
+        mc_revenue=round(mc_rev, 2) if mc_rev is not None else None,
         fdv_fees=round(fdv_fees, 2) if fdv_fees else None,
         mc_fees=round(mc / annual_fees, 2) if (mc and annual_fees > 0) else None,
         mc_tvl=round(mc_tvl, 2) if mc_tvl else None,
@@ -537,8 +537,8 @@ def _build_catalysts(ev: EvidenceBundle, cycle: CyclePhase) -> list[Catalyst]:
     out: list[Catalyst] = []
     if ev.has_regulatory_license:
         out.append(Catalyst(description="Institutional / regulatory license in place", positive=True, eta="ongoing"))
-    if (ev.economic.revenue_growth_pct or 0) > 20:
-        out.append(Catalyst(description=f"Revenue growing +{ev.economic.revenue_growth_pct:.0f}% WoW", positive=True, eta="current"))
+    if (ev.economic.fee_growth_pct or 0) > 20:
+        out.append(Catalyst(description=f"Revenue growing +{ev.economic.fee_growth_pct:.0f}% WoW", positive=True, eta="current"))
     if ev.chain_count >= 3:
         out.append(Catalyst(description=f"Multi-chain deployment ({ev.chain_count} chains)", positive=True, eta="ongoing"))
     if ev.tokenomics.buyback:
@@ -805,7 +805,7 @@ def _build_bias_checks(ev: EvidenceBundle, project_quality: float, candidate) ->
     checks.append("ℹ️ Source Bias: Primary sources are English-language (CoinGecko, DeFiLlama).")
 
     # Snapshot Bias
-    if ev.economic.fees and not ev.economic.revenue_growth_pct:
+    if ev.economic.fees and not ev.economic.fee_growth_pct:
         checks.append("⚠️ Snapshot Bias: Fees data is point-in-time, not trend-verified.")
 
     # Precision Illusion
@@ -867,8 +867,8 @@ def _build_catalysts_i18n(ev: EvidenceBundle, cycle: CyclePhase, lang: str) -> l
     out: list[Catalyst] = []
     if ev.has_regulatory_license:
         out.append(Catalyst(description=_t("catalyst.reg_license", lang), positive=True, eta="ongoing"))
-    if (ev.economic.revenue_growth_pct or 0) > 20:
-        out.append(Catalyst(description=_t("catalyst.rev_growing", lang, growth=ev.economic.revenue_growth_pct), positive=True, eta="current"))
+    if (ev.economic.fee_growth_pct or 0) > 20:
+        out.append(Catalyst(description=_t("catalyst.rev_growing", lang, growth=ev.economic.fee_growth_pct), positive=True, eta="current"))
     if ev.chain_count >= 3:
         out.append(Catalyst(description=_t("catalyst.multichain", lang, chains=ev.chain_count), positive=True, eta="ongoing"))
     if ev.tokenomics.buyback:
@@ -971,7 +971,7 @@ def _build_bias_checks_i18n(ev: EvidenceBundle, project_quality: float, candidat
     if candidate.name.lower() in popular_names:
         checks.append(_t("bias.popular", lang))
     checks.append(_t("bias.source", lang))
-    if ev.economic.fees and not ev.economic.revenue_growth_pct:
+    if ev.economic.fees and not ev.economic.fee_growth_pct:
         checks.append(_t("bias.snapshot", lang))
     if project_quality > 0 and ev.grade.value.startswith("D"):
         checks.append(_t("bias.precision", lang))
