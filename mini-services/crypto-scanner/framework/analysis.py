@@ -967,16 +967,32 @@ def _data_to_verify_i18n(ev: EvidenceBundle, lang: str) -> list[str]:
 
 def _build_bias_checks_i18n(ev: EvidenceBundle, project_quality: float, candidate, lang: str) -> list[str]:
     checks = []
-    popular_names = {"aave", "uniswap", "bitcoin", "ethereum", "solana", "chainlink"}
+    # Expanded from 6 to 20+ major crypto projects for better coverage.
+    popular_names = {
+        "aave", "uniswap", "bitcoin", "ethereum", "solana", "chainlink",
+        "cardano", "avalanche", "polkadot", "polygon", "litecoin",
+        "ripple", "xrp", "stellar", "cosmos", "near", "aptos", "sui",
+        "arbitrum", "optimism", "maker", "dai", "usdc", "usdt",
+        "tether", "binance", "bnb", "dogecoin", "shiba inu",
+    }
     if candidate.name.lower() in popular_names:
         checks.append(_t("bias.popular", lang))
-    checks.append(_t("bias.source", lang))
+    # Source bias: only relevant when we have few sources (Grade B or worse).
+    # With 3+ sources (Grade A), cross-verification mitigates the language bias.
+    if ev.sources < 3:
+        checks.append(_t("bias.source", lang))
     if ev.economic.fees and not ev.economic.fee_growth_pct:
         checks.append(_t("bias.snapshot", lang))
     if project_quality > 0 and ev.grade.value.startswith("D"):
         checks.append(_t("bias.precision", lang))
     if ev.is_infrastructure and project_quality < 30:
         checks.append(_t("bias.narrative", lang))
-    checks.append(_t("bias.confirmation", lang))
-    checks.append(_t("bias.anti_promise", lang))
+    # Confirmation bias: most dangerous when project scores HIGH (you want
+    # to believe a good project is good). Not relevant for low-scoring projects.
+    if project_quality >= 60:
+        checks.append(_t("bias.confirmation", lang))
+    # Anti-promise: most relevant when recommending action (Deep Research or
+    # higher). For Ignore/Watch, overconfidence isn't the risk.
+    if project_quality >= 55:
+        checks.append(_t("bias.anti_promise", lang))
     return checks
