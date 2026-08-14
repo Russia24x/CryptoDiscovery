@@ -2358,3 +2358,37 @@ Stage Summary — All 3 advisor priorities complete:
 - #3 Dune query IDs: SQL templates + helper script + README (user creates queries on Dune UI, then runs configure-dune.sh)
 
 No new monitoring systems added per advisor instruction. Infrastructure runs via pre-existing start-dev.sh (Next.js) and start.sh (scanner) only.
+
+---
+Task ID: advisor-instruction-5-steps
+Agent: main
+Task: Execute advisor's 5-step instruction (sync check, RULES.md §6, low-risk cleanup, test expansion, suspicious files report).
+
+Work Log:
+- Step 0 (sync check): clean working tree, all key files present. .env written with 3 API keys (CMC, Dune, CoinGecko) — gitignored, never tracked. Scanner restarted, confirmed CMC + Dune now available=True.
+- Step 1 (RULES.md §6): added Rule 6 "SESSION-AUTO-COMMIT-IS-NOT-DELIVERY" with advisor-approved verbatim text. Committed dbb2c87, pushed, verified. Formally closes the 'session auto-commit gates' backlog — rather than engineering gates on framework behavior we don't control, we document that auto-commit is a background safety-net only.
+- Step 2 (low-risk cleanup, 1 batch commit 6c4018d):
+  1. main.py: uvicorn.run("main:app",...) -> uvicorn.run(app,...) — pass app object directly
+  2. analysis.py: "if fdv_rev else None" -> "if fdv_rev is not None else None" (same for mc_rev) — truthiness treated 0.0 as falsy; explicit None-check preserves legitimate 0.0 valuations
+  3. Renamed revenue_growth_pct -> fee_growth_pct across 4 files (11 occurrences) — metric is computed from 24h fees vs 7d fee avg, so it measures FEE growth not revenue growth. Old name was semantically wrong and conflicted with Revenue != Fees principle
+  4. Untracked .zscripts/dev.pid + added *.pid, .zscripts/dev.pid, .zscripts/dev.log to .gitignore
+  5. 5 <img> tags in page.tsx: added loading="lazy" + improved alt from bare symbol to descriptive "${name} logo"
+  All verified: lint clean, Python syntax OK, 24/24 tests, pushed + verified.
+- Step 3 (test expansion, commit 079997e): added 13 tests (24 -> 37 total):
+  - 5 cross-verification tests: verified when agree, discrepancy when disagree, single-source honest fallback (fees even reports 'Dune not configured'), fees uses Dune, threshold boundaries
+  - 5 evidence grade tests: A(3+ sources), B(2), C(1), D(0), grade->confidence mapping (A=92,B=78,C=58,D=35, monotonic)
+  - 3 veto gate tests: opaque_custody, backing_transparency_failure, legal_deception (completes all 7 veto conditions)
+  All 37/37 passing. lint clean. pushed + verified.
+- Step 4 (suspicious files report — no action taken, awaiting user decision):
+  - examples/websocket/ (frontend.tsx 6310B + server.ts 3536B, dated May 12): a websocket demo/reference template. NOT referenced anywhere in src/ or mini-services/. Likely came with the sandbox scaffold as a socket.io reference. Decision needed: keep as reference, or remove?
+  - upload/Pasted Content_1786580940808.txt (38KB, 2337 lines, dated Aug 13): Persian-language pasted content — appears to be the original framework merge consultation from an earlier conversation. NOT referenced anywhere. Tracked in git because it was committed before .gitignore was tightened. Decision needed: keep as historical record, or remove?
+- Step 5 (this report).
+
+Stage Summary:
+- 3 commits pushed: dbb2c87 (RULES §6), 6c4018d (cleanup), 079997e (tests)
+- All pushed + verified per RULES.md §4 (local=remote for each)
+- Tests: 24 -> 37 (13 new, all locking real behavior)
+- API keys restored (CMC + Dune + CoinGecko all active)
+- Scanner health 200, frontend 200
+- Pending user decisions: examples/websocket/ and upload/ disposition
+- CMC key now active — cross-verification fully enabled (was the TODO from last session)
