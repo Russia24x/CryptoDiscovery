@@ -2941,3 +2941,60 @@ No bugs found in: /score-history/{symbol} beyond S1 (S2 is docstring-only). The 
 No bugs found in: the parallel-gather pattern in /dune/insights/{symbol} (line 1168-1173) — `return_exceptions=True` + `isinstance(x, dict)` check correctly handles None returns and Exceptions.
 
 No code was modified. No commits were made. This report is read-only.
+
+---
+Task ID: minor-findings-backlog
+Agent: main
+Task: Document ~15 minor findings as backlog (per advisor decision: don't fix now — fatigue risk too high after this session's volume).
+
+Advisor's reasoning: with the volume of fixes today (11 commits, 20+ findings), the risk of fatigue-driven accuracy drop in further fixes is real. Better to document as backlog and come back fresh, exactly as we did with "session auto-commit gates".
+
+MINOR FINDINGS BACKLOG (low-priority polish, not user-impacting):
+
+From main.py audit:
+- A3: /alerts uses db._get_conn() (private) — should use public db function
+- A4: /alerts docstring says "more than threshold" but code uses >= (off-by-epsilon)
+- S2: /score-history docstring omits symbol + scan_id from returned fields
+- D3: /dune/* response shape inconsistency between available/unavailable (3 different shapes)
+- D4: redundant local import in /dune/insights
+
+From schemas.py audit:
+- SC4: free-form string fields (direction, source) should be Enums
+- SC5: default direction "—" not in documented value set
+- SC-extra: InvestmentAnalysis.cycle_phase is duplicate/orphan field (frontend reads report.cycle_phase at top level, not this one) — likely dead code
+
+From frontend audit (hub-view):
+- 1.2: discrepancyPct returns null when a=0 but b=50 (should return 100)
+- 1.3: "rate-limited" label shown whenever arrays empty (not actual 429)
+- 1.4: silent hide on error (return null) — should show muted "unavailable"
+- 1.5: defiTvl != null && > 0 hides legitimate $0
+- 1.6: hardcoded t.me URL instead of backend channel_url
+- 1.7: srcList.length || total_count fallback can mislead
+
+From frontend audit (coin-explorer):
+- 2.5: missing tf in search effect deps (stale error msg after lang change)
+- 2.6: silent JSON parse swallow in search
+
+From frontend audit (market-intelligence):
+- 3.1-3.2: empty catch {} in Airdrops + Categories fetchers
+- 3.3: no AbortController in useMarketOverview (race)
+- 3.6: Airdrops filtered to ONGOING silently
+
+From frontend audit (news-feed):
+- 4.1: hardcoded Persian URL
+- 4.3: dead code branch (void secondsSince)
+- 4.4: empty catch in Telegram fetch
+- 4.5: Telegram auto-refresh overlap race
+
+PATTERN LESSON (for future code review):
+3 recurring patterns caused almost every real finding in this audit:
+1. Defaults that hide missing data (Optional=None instead of fake values)
+2. Labels that mistake "unknown" for "verified" (cross-verify ?? 1, single-source)
+3. Missing input validation (threshold, limit, negative weights)
+When reviewing new code, check these 3 patterns first.
+
+Session stats:
+- 11 commits, ~30 findings fixed (8 critical + ~20 medium)
+- Tests: 37 → 44 (7 regression tests added)
+- All pushed + verified (RULES.md §4)
+- All followed RULES.md §2 (sync), §5 (incremental), §6 (no auto-commit trust)
