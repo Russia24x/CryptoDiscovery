@@ -3052,3 +3052,30 @@ Stage Summary:
 - Weakest-link penalty now triggered by REAL weaknesses (12/12), not missing-data-as-zero
 - Advisor's hypothesis confirmed: now it's a design decision, not a bug
 - Ready for advisor's decision on weakest-link formula (option 1: radius-based)
+
+---
+Task ID: weakest-link-radius-formula
+Agent: main
+Task: Apply advisor's mathematical refinement (10.0/3.0 slope, no flat zone) + scan 7 to close root-cause investigation.
+
+Work Log:
+- Applied radius-based formula: penalty = (3.0 - min_sub) * (10.0/3.0)
+- Advisor's insight: old *5.0 coefficient created flat zone (1.0 and 0.0 both = 10.0). New 10.0/3.0 slope is fully linear, max stays 10.0, no clamp needed.
+- Added test with 5 data points + monotonicity assertion across 7 points
+- Scan 7 (CoinGecko confirmed available, 12/12 gecko_id present):
+  avg=26.8, range 17.8-38.1, 75% under 30 (was 92%)
+
+FINAL ROOT-CAUSE ANSWER ("why 10-30?"):
+1. Retention sub-factor: always 0.0 (None treated as worst) → fixed, +2.3
+2. Token Utility: 0.0 when gecko_id missing (fallback mode) → fixed via category propagation
+3. has_api/has_sdk/has_docs: False when no GitHub repo → fixed via three-state, +1.2
+4. Weakest-link penalty: flat +10 for ANY sub<3 → fixed via radius-based, +3.2
+Total: 20.0 → 26.8 (+6.8, +34%)
+
+The remaining 75% under 30 is now from REAL weaknesses (Regulatory Moat, Distribution Moat, Buyback/Burn absent) — legitimate, not bugs.
+
+Stage Summary:
+- Root-cause investigation complete with empirical proof
+- 4 commits: 348a456 (category prop), 7019f7b (3-state), 41ca147 (retention), df4645f (radius formula)
+- Tests: 44 → 47 (+3 regression)
+- The "why 10-30?" mystery from early worklog is now fully explained and fixed
