@@ -2471,3 +2471,25 @@ Stage Summary:
 - These two are likely the biggest behavioral fixes of the entire audit — they affect category classification (which feeds discovery lenses, sector filters, and 12 evidence flags) and the "anonymous team" severe risk that appeared on every report
 - After this fix, project scores should shift significantly — the advisor's recommendation to fix these before moving to main.py/schemas.py/frontend was correct
 - 42/42 tests passing, lint clean, scanner healthy, frontend healthy
+
+---
+Task ID: wire-category-fix-through-collect
+Agent: main
+Task: Advisor found the #13 fix from commit 0fc3670 was silently undone by 3 pre-existing lines in collect(): line 375 passed candidate.category ("other") to _apply_category_inferences, line 440 unconditionally overwrote b.category with candidate.category, line 446 used candidate.category.lower() for is_infrastructure check.
+
+Work Log:
+- Verified advisor's finding: all 3 lines confirmed (375, 440, 446 in evidence.py)
+- Applied 3 wiring fixes:
+  1. line 375: _apply_category_inferences(b, b.category) — pass the REAL CoinGecko category
+  2. line 440: conditional — if not b.category or b.category == candidate.category: b.category = candidate.category (preserve CoinGecko value)
+  3. line 446: b.is_infrastructure = b.is_infrastructure or any(x in b.category.lower() ...) — use b.category not candidate.category
+- Added end-to-end regression test test_collect_preserves_gecko_categories_end_to_end that calls collect() (not _apply_gecko_detail in isolation) with mock Cardano + mock sources
+- VERIFIED the test catches the regression: temporarily reverted all 3 fixes → test failed with "Got 'other' (the heuristic overwrote the real value)". Restored fix → test passes.
+- Test also confirms #14 benefit extends: Cardano (not blockchain-detected) now gets team_transparent=True via _apply_category_inferences with real category, so anonymous_team=False
+- Tests: 42 → 43. Lint clean. Committed 8346123, pushed, verified local=remote.
+
+Stage Summary:
+- The #13 fix is now ACTUALLY wired through the collect() pipeline
+- End-to-end test proves it (would have caught the original gap)
+- #14 benefit extended beyond blockchain tokens to any project with real CoinGecko category
+- Lesson reinforced: unit tests that call functions in isolation can miss wiring bugs — always have at least one end-to-end test through the real pipeline
