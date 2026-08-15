@@ -2454,3 +2454,20 @@ Stage Summary:
 - Lint clean throughout
 - Both services healthy (scanner 200, frontend 200)
 - RULES.md followed: §2 (sync), §4 (push verify), §5 (incremental), §6 (no auto-commit trust)
+
+---
+Task ID: advisor-audit-13-14-root-cause
+Agent: main
+Task: Advisor deep audit of discovery.py + evidence.py found 2 root-cause bugs (#13, #14) — likely the real reason most projects score 10-30.
+
+Work Log:
+- #13 (critical): _guess_category() matches ~30 hardcoded names → Cardano, Polkadot, Avalanche, Cosmos, NEAR, Sui, etc. all get category="other". This depressed 3 discovery lenses, silently excluded projects on sector filter, and skipped ALL _apply_category_inferences (12 evidence flags). The CoinGecko /coins/{id} endpoint already returns a rich 'categories' array that _apply_gecko_detail was FETCHING but IGNORING. Fix: read d['categories'] in _apply_gecko_detail, update b.category with first meaningful entry. No new API call — just use data already arriving.
+- #14 (critical): anonymous_team=True set at EvidenceBundle.__init__ and NEVER set to False anywhere. Every project (Bitcoin, Ethereum, Solana) showed "Anonymous team" as severe risk. Fix: derive b.anonymous_team = not b.team_transparent at end of build_evidence_bundle. The sister flag team_transparent was already correctly set by blockchain detection, governance data, and category inferences.
+- Added 4 regression tests: test_gecko_categories_override_guess_category, test_gecko_categories_empty_falls_back_to_guess, test_anonymous_team_false_when_team_transparent, test_anonymous_team_true_when_no_transparency_evidence
+- Tests: 38 → 42. Lint clean. Committed 0fc3670, pushed, verified local=remote.
+
+Stage Summary:
+- Both root-cause bugs fixed in 1 commit (0fc3670)
+- These two are likely the biggest behavioral fixes of the entire audit — they affect category classification (which feeds discovery lenses, sector filters, and 12 evidence flags) and the "anonymous team" severe risk that appeared on every report
+- After this fix, project scores should shift significantly — the advisor's recommendation to fix these before moving to main.py/schemas.py/frontend was correct
+- 42/42 tests passing, lint clean, scanner healthy, frontend healthy
