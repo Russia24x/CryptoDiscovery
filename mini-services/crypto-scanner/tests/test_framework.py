@@ -204,6 +204,72 @@ def test_custom_weights_reject_negative_values():
     assert not accepted, "All-zero weights should be rejected (sum out of range)"
 
 
+def test_invisible_utility_none_is_neutral_not_worst():
+    """Missing API/SDK/docs evidence (None) must score NEUTRAL, not worst (1.0).
+
+    Regression guard for the root-cause finding of 'why do most projects
+    score 10-30?'. The old code used two-state bool: has_api=False (unknown
+    or absent) scored 1.0 (worst). This penalized ALL projects without a
+    GitHub repo (stablecoins, exchange tokens, RWA) — even when we simply
+    LACKED evidence, not confirmed absence.
+
+    Fix: three-state (True/False/None). None=unknown scores neutral (2.5),
+    the midpoint — not a guess in either direction. Per 'Never guess
+    missing data' principle.
+    """
+    from framework.evaluation import score_invisible_utility
+    from models.schemas import EvidenceGrade
+
+    # Case A: all None (unknown) — should be neutral, NOT worst
+    result_none = score_invisible_utility(
+        has_api=None, has_sdk=None, has_docs=None,
+        developer_count=0, github_stars=0,
+        is_infrastructure=False, is_user_facing_app=False,
+        switching_cost_signal=False,
+        evidence_grade=EvidenceGrade.B, sources=2,
+    )
+    # Sub-factors for unknown should be 2.5 (neutral), not 1.0 (worst)
+    assert result_none.sub_factors["Integration Simplicity"] == 2.5, (
+        f"Unknown API should be neutral 2.5, got {result_none.sub_factors['Integration Simplicity']}"
+    )
+    assert result_none.sub_factors["API Usability"] == 2.5, (
+        f"Unknown API usability should be neutral 2.5, got {result_none.sub_factors['API Usability']}"
+    )
+    assert result_none.sub_factors["Documentation"] == 2.5, (
+        f"Unknown docs should be neutral 2.5, got {result_none.sub_factors['Documentation']}"
+    )
+
+    # Case B: confirmed True (API + SDK + docs) — should be best
+    result_true = score_invisible_utility(
+        has_api=True, has_sdk=True, has_docs=True,
+        developer_count=10, github_stars=5000,
+        is_infrastructure=True, is_user_facing_app=False,
+        switching_cost_signal=True,
+        evidence_grade=EvidenceGrade.A, sources=3,
+    )
+    assert result_true.sub_factors["Integration Simplicity"] == 4.0
+    assert result_true.sub_factors["API Usability"] == 4.0
+    assert result_true.sub_factors["Documentation"] == 4.0
+
+    # Case C: confirmed False (no API) — should be worst (1.0)
+    result_false = score_invisible_utility(
+        has_api=False, has_sdk=False, has_docs=False,
+        developer_count=0, github_stars=0,
+        is_infrastructure=False, is_user_facing_app=False,
+        switching_cost_signal=False,
+        evidence_grade=EvidenceGrade.B, sources=2,
+    )
+    assert result_false.sub_factors["Integration Simplicity"] == 1.0
+    assert result_false.sub_factors["Documentation"] == 1.0
+
+    # KEY ASSERTION: None score must be HIGHER than False score.
+    # This proves missing evidence is not treated as confirmed absence.
+    assert result_none.score > result_false.score, (
+        f"None (unknown) should score higher than False (confirmed absent): "
+        f"None={result_none.score}, False={result_false.score}"
+    )
+
+
 # ========================================================================== #
 #  PHASE 6: Valuation Multiples (P/R, P/F, P/T)
 # ========================================================================== #

@@ -59,9 +59,12 @@ class EvidenceBundle:
         self.category = ""
 
         # invisible utility signals
-        self.has_api = False
-        self.has_sdk = False
-        self.has_docs = False
+        # None = unknown (not computed yet), True = confirmed present,
+        # False = confirmed absent. Default None — never guess "absent"
+        # when we simply lack evidence (per "Never guess missing data").
+        self.has_api: bool | None = None
+        self.has_sdk: bool | None = None
+        self.has_docs: bool | None = None
         self.developer_count = 0
         self.github_stars = 0
         self.is_infrastructure = False
@@ -531,20 +534,40 @@ def _apply_gecko_detail(b: EvidenceBundle, d: dict[str, Any]) -> None:
     if isinstance(img_data, dict):
         b.image_url = img_data.get("large") or img_data.get("thumb") or img_data.get("small")
 
-    if repo:
-        b.has_docs = True
+    # Developer evidence — each signal derived independently, never guessed.
+    # The old code set has_api=has_sdk=has_docs=True all together when a
+    # GitHub repo was present, and left them all False otherwise. This was
+    # a "Never guess missing data" violation: absence of a GitHub repo was
+    # treated as absence of API/SDK/docs, which is wrong (many DeFi protocols
+    # publish SDKs via npm/pypi without GitHub, have docs on their site, etc).
+    # Now each field is derived from its own signal, and stays None when we
+    # genuinely don't know.
+    #
+    # has_sdk: GitHub repo is a STRONG signal (SDKs usually open-source)
+    if repo and isinstance(repo, list) and len(repo) > 0:
         b.has_sdk = True
-        b.has_api = True
-        # Use real GitHub stars from CoinGecko developer_data if available,
-        # otherwise estimate from community signal (not a flat 1500 placeholder)
-        dev_data = d.get("developer_data") or {}
-        real_stars = dev_data.get("stars") or 0
-        if real_stars > 0:
-            b.github_stars = real_stars
-        else:
-            # Estimate from Twitter followers as a proxy (10:1 ratio is typical)
-            cd_followers = (d.get("community_data") or {}).get("twitter_followers") or 0
-            b.github_stars = max(100, min(50000, cd_followers // 10))
+    #
+    # has_docs: homepage URL is a WEAK signal (site may have docs section)
+    # but not all homepages are docs. Use it as a weak positive, not a hard
+    # True/False. Stays None when no homepage.
+    if site:
+        b.has_docs = True  # weak signal: site likely has docs section
+    #
+    # has_api: CoinGecko doesn't expose an "has API" field. We genuinely
+    # don't know unless we probe. Leave None (unknown) rather than guess.
+
+    # GitHub stars — use real data from CoinGecko developer_data, or estimate
+    # from community signal (not a flat 1500 placeholder).
+    # NOTE: this no longer depends on has_sdk — even projects without a
+    # GitHub repo can have community signal worth tracking.
+    dev_data = d.get("developer_data") or {}
+    real_stars = dev_data.get("stars") or 0
+    if real_stars > 0:
+        b.github_stars = real_stars
+    else:
+        # Estimate from Twitter followers as a proxy (10:1 ratio is typical)
+        cd_followers = (d.get("community_data") or {}).get("twitter_followers") or 0
+        b.github_stars = max(100, min(50000, cd_followers // 10))
 
     # community data
     cd = d.get("community_data") or {}

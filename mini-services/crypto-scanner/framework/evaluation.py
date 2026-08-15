@@ -43,9 +43,9 @@ def _confidence_from(grade: EvidenceGrade, sources: int, freshness_factor: float
 # --------------------------------------------------------------------------- #
 def score_invisible_utility(
     *,
-    has_api: bool,
-    has_sdk: bool,
-    has_docs: bool,
+    has_api: bool | None,
+    has_sdk: bool | None,
+    has_docs: bool | None,
     developer_count: int,
     github_stars: int,
     is_infrastructure: bool,
@@ -54,20 +54,40 @@ def score_invisible_utility(
     evidence_grade: EvidenceGrade,
     sources: int,
 ) -> AxisScore:
-    s = 1.0
+    # Three-state sub-factor scoring: True=positive, False=negative,
+    # None=neutral (unknown). Per "Never guess missing data" principle:
+    # when we lack evidence, we don't default to the worst score (1.0),
+    # we default to a neutral midpoint (~2.5-3.0 out of 5).
+    NEUTRAL = 2.5  # midpoint of the 1.0-4.0 positive/negative range
     subs: dict[str, float] = {}
     subs["User Abstraction"] = 3.0 if is_infrastructure else (5.0 if is_user_facing_app else 1.0)
-    subs["Integration Simplicity"] = 4.0 if has_api else 1.0
-    subs["API Usability"] = 4.0 if (has_api and has_sdk) else (2.0 if has_api else 1.0)
+    # Integration Simplicity: True=4.0 (API confirmed), False=1.0 (no API),
+    # None=2.5 (unknown — don't penalize for missing evidence)
+    subs["Integration Simplicity"] = (
+        4.0 if has_api is True else (1.0 if has_api is False else NEUTRAL)
+    )
+    # API Usability: True+SDK=4.0, True no SDK=2.0, False=1.0, None=2.5
+    if has_api is True and has_sdk is True:
+        subs["API Usability"] = 4.0
+    elif has_api is True:
+        subs["API Usability"] = 2.0
+    elif has_api is False:
+        subs["API Usability"] = 1.0
+    else:  # has_api is None (unknown)
+        subs["API Usability"] = NEUTRAL
     subs["Developer Experience"] = min(8.0, 2.0 + developer_count * 0.5)
-    subs["Documentation"] = 4.0 if has_docs else 1.0
+    # Documentation: True=4.0 (docs confirmed), False=1.0 (no docs),
+    # None=2.5 (unknown)
+    subs["Documentation"] = (
+        4.0 if has_docs is True else (1.0 if has_docs is False else NEUTRAL)
+    )
     subs["Switching Cost"] = 5.0 if switching_cost_signal else 2.0
     subs["Community Signal"] = min(7.0, 1.0 + github_stars / 1000.0)
     s = sum(subs.values()) / len(subs)
     s = _clamp(s)
     conf = _confidence_from(evidence_grade, sources)
     reason = (
-        "Infrastructure-layer with API/SDK abstraction" if is_infrastructure and has_api
+        "Infrastructure-layer with API/SDK abstraction" if is_infrastructure and has_api is True
         else "Consumer-facing app, limited invisible utility" if is_user_facing_app
         else "Limited developer-facing abstraction"
     )
