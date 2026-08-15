@@ -309,6 +309,16 @@ def build_report(
     # report id
     rid = hashlib.sha1(f"{candidate.symbol}:{scan_id}:{time.time()}".encode()).hexdigest()[:12]
 
+    # Update candidate.category from the evidence bundle. collect() in
+    # evidence.py reads CoinGecko's real 'categories' field and updates
+    # ev.category, but the candidate object still has the heuristic
+    # _guess_category() value (e.g. 'other' for Cardano/Morpho). Without
+    # this, the report's candidate.category was always the stale heuristic,
+    # not the real CoinGecko category — making #13's fix invisible in
+    # reports even though the evidence logic was correct.
+    if ev.category and ev.category != candidate.category:
+        candidate.category = ev.category
+
     return ProjectReport(
         id=rid,
         candidate=candidate,
