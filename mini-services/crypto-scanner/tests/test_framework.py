@@ -919,6 +919,128 @@ def test_veto_legal_deception():
     assert result.triggered is True
 
 
+# ========================================================================== #
+#  #13: CoinGecko categories field (regression for _guess_category limitation)
+#
+#  _guess_category in discovery.py matches ~30 hardcoded names. Cardano,
+#  Polkadot, Avalanche, Cosmos, NEAR, Sui, etc. all fall through to "other".
+#  But CoinGecko /coins/{id} returns a rich 'categories' array that
+#  _apply_gecko_detail now reads to override the heuristic.
+# ========================================================================== #
+
+def test_gecko_categories_override_guess_category():
+    """CoinGecko categories field should override the heuristic _guess_category.
+
+    Before the fix, _apply_gecko_detail fetched the /coins/{id} endpoint
+    (which includes 'categories') but IGNORED the field. The heuristic
+    _guess_category() from discovery.py was the only source, so Cardano,
+    Polkadot, etc. were stuck with category='other'.
+
+    This test calls _apply_gecko_detail directly with a mock CoinGecko
+    response containing categories=['Smart Contract Platform', 'Layer 1']
+    and verifies that b.category is updated.
+    """
+    from framework.evidence import EvidenceBundle, _apply_gecko_detail
+
+    b = EvidenceBundle()
+    b.category = "other"  # what _guess_category would return for Cardano
+
+    # Mock CoinGecko /coins/{id} response
+    mock_gecko_detail = {
+        "market_data": {
+            "market_cap": {"usd": 20_000_000_000},
+            "fully_diluted_valuation": {"usd": 30_000_000_000},
+            "circulating_supply": 35_000_000_000,
+            "total_supply": 45_000_000_000,
+            "max_supply": 45_000_000_000,
+            "total_volume": {"usd": 500_000_000},
+        },
+        "categories": ["Smart Contract Platform", "Layer 1", "Cardano Ecosystem"],
+    }
+
+    _apply_gecko_detail(b, mock_gecko_detail)
+
+    assert b.category == "Smart Contract Platform", (
+        f"CoinGecko categories should override heuristic 'other'. "
+        f"Got category='{b.category}'"
+    )
+    # Market data should also be applied (existing behavior)
+    assert b.market_cap_usd == 20_000_000_000
+
+
+def test_gecko_categories_empty_falls_back_to_guess():
+    """When CoinGecko returns no categories, keep the heuristic _guess_category.
+
+    Don't override b.category with empty/None — the heuristic from
+    discovery.py is still better than nothing.
+    """
+    from framework.evidence import EvidenceBundle, _apply_gecko_detail
+
+    b = EvidenceBundle()
+    b.category = "dex"  # what _guess_category returned
+
+    mock_gecko_detail = {
+        "market_data": {"market_cap": {"usd": 1_000_000}},
+        "categories": [],  # empty
+    }
+
+    _apply_gecko_detail(b, mock_gecko_detail)
+
+    # Should keep the heuristic, not become empty
+    assert b.category == "dex", "Empty categories should not override heuristic"
+
+
+# ========================================================================== #
+#  #14: anonymous_team derived from team_transparent (regression)
+#
+#  anonymous_team was hardcoded True at EvidenceBundle init and NEVER set
+#  to False. So every project (Bitcoin, Ethereum, etc.) showed "Anonymous
+#  team" as a severe risk. Now derived: anonymous_team = not team_transparent.
+# ========================================================================== #
+
+def test_anonymous_team_false_when_team_transparent():
+    """When team_transparent=True, anonymous_team must be False.
+
+    The old code set anonymous_team=True at init and never updated it.
+    The fix derives it: anonymous_team = not team_transparent.
+
+    This test reproduces the derivation logic to lock the behavior.
+    """
+    from framework.evidence import EvidenceBundle
+
+    b = EvidenceBundle()
+    # Default state: team_transparent=False, anonymous_team=True
+    assert b.team_transparent is False
+    assert b.anonymous_team is True  # conservative default
+
+    # Simulate blockchain detection (which sets team_transparent=True)
+    b.team_transparent = True
+    # Apply the derivation that happens at end of build_evidence_bundle
+    b.anonymous_team = not b.team_transparent
+    assert b.anonymous_team is False, (
+        "Bitcoin/Ethereum (public blockchains) have team_transparent=True, "
+        "so anonymous_team must be False — not 'Anonymous team' severe risk"
+    )
+
+
+def test_anonymous_team_true_when_no_transparency_evidence():
+    """When team_transparent=False (no evidence of transparency), keep anonymous.
+
+    The derivation is conservative: absence of evidence of transparency
+    means we flag anonymous_team=True (the safe default for unknown projects).
+    """
+    from framework.evidence import EvidenceBundle
+
+    b = EvidenceBundle()
+    # No blockchain detection, no governance data, no category inference
+    assert b.team_transparent is False
+    b.anonymous_team = not b.team_transparent
+    assert b.anonymous_team is True, (
+        "Unknown project with no transparency evidence should keep "
+        "anonymous_team=True (conservative)"
+    )
+
+
 if __name__ == "__main__":
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     passed = 0

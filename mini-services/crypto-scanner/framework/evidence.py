@@ -444,6 +444,14 @@ async def collect(
     # assignment reverted blockchain tokens to False because their category
     # ("Smart Contract Platform", "Layer 1") isn't in infra_cats.
     b.is_infrastructure = b.is_infrastructure or any(x in candidate.category.lower() for x in infra_cats)
+
+    # Anonymous team — was hardcoded True at init (line 72) and NEVER set to
+    # False anywhere, so EVERY project (including Bitcoin, Ethereum) showed
+    # "Anonymous team" as a severe risk in the report and RiskHeatmap.
+    # Derive from team_transparent: if we have evidence of team transparency
+    # (set by blockchain detection, governance data, or category inferences),
+    # then anonymous_team must be False. Otherwise keep the conservative default.
+    b.anonymous_team = not b.team_transparent
     return b
 
 
@@ -461,6 +469,20 @@ def _apply_gecko_detail(b: EvidenceBundle, d: dict[str, Any]) -> None:
     b.market.daily_volume = md.get("total_volume", {}).get("usd")
     b.market_cap_usd = b.tokenomics.market_cap
     b.fdv_usd = b.tokenomics.fdv
+
+    # Categories — CoinGecko /coins/{id} returns a 'categories' array
+    # (e.g. ["Smart Contract Platform", "Layer 1", "Solana Ecosystem"]).
+    # This is RICH real data, but was previously fetched and ignored.
+    # Use it to override the heuristic _guess_category() from discovery.py,
+    # which only matches ~30 hardcoded names and returns "other" for
+    # Cardano, Polkadot, Avalanche, Cosmos, NEAR, Sui, etc.
+    categories = d.get("categories") or []
+    if categories and isinstance(categories, list):
+        # Pick the first meaningful category (skip empty strings)
+        for cat in categories:
+            if cat and isinstance(cat, str) and cat.strip():
+                b.category = cat.strip()
+                break
 
     # inflation: if max supply exists, derive annualized growth from circulating vs total
     cs = b.tokenomics.circulating_supply or 0.0
