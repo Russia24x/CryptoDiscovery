@@ -158,7 +158,15 @@ def build_severe_risks(active: dict[str, bool]) -> list[SevereRisk]:
 def weakest_link_penalty(min_axis_score: float, min_sub_score: float | None) -> tuple[float, bool]:
     """
     Returns (penalty_amount, high_risk_flag).
-    If any axis < 4 → penalty; if any critical sub-factor < 3 → high risk.
+    If any axis < 4 → penalty; if any critical sub-factor < 3 → high risk + penalty.
+
+    Sub-factor penalty is radius-based (linear, no flat zone):
+      penalty = (3.0 - min_sub_score) * (10.0 / 3.0)
+    This replaces the old flat +10.0 which gave the same penalty for
+    min_sub=1.0 and min_sub=0.0 (a flat zone in the bottom third of the
+    range). Now a project with a genuinely zero sub-factor gets ~10.0,
+    while a marginally-below-3 sub-factor (e.g. 2.9) gets ~0.33.
+    The max penalty remains exactly 10.0 (when min_sub=0.0), same as before.
     """
     penalty = 0.0
     high_risk = False
@@ -166,7 +174,10 @@ def weakest_link_penalty(min_axis_score: float, min_sub_score: float | None) -> 
         penalty += (4.0 - min_axis_score) * 6.0  # up to 24 pts
     if min_sub_score is not None and min_sub_score < 3.0:
         high_risk = True
-        penalty += 10.0
+        # Radius-based: linear from 0 (at 3.0) to 10.0 (at 0.0).
+        # (10.0/3.0) ≈ 3.33, so the slope makes penalty = 10.0 exactly
+        # when min_sub_score = 0.0, with no flat zone and no clamp needed.
+        penalty += (3.0 - min_sub_score) * (10.0 / 3.0)
     return penalty, high_risk
 
 

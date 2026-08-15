@@ -124,10 +124,53 @@ def test_weakest_link_penalty_below_4():
     assert high_risk is False
 
 def test_weakest_link_penalty_sub_factor_below_3():
-    """Sub-factor below 3.0 should flag high risk."""
+    """Sub-factor below 3.0 should flag high risk + radius-based penalty.
+
+    Old formula was flat +10.0 for ANY sub < 3.0. New formula is radius-based:
+    penalty = (3.0 - min_sub_score) * (10.0/3.0), linear from 0 (at 3.0) to
+    10.0 (at 0.0), with no flat zone.
+    """
+    # min_sub=2.0 → (3.0-2.0)*(10/3) ≈ 3.33
     penalty, high_risk = weakest_link_penalty(min_axis_score=5.0, min_sub_score=2.0)
     assert high_risk is True
-    assert penalty == 10.0
+    assert abs(penalty - (1.0 * 10.0/3.0)) < 0.01  # ≈ 3.33
+
+def test_weakest_link_penalty_radius_based_no_flat_zone():
+    """The radius-based formula must have NO flat zone — a genuinely zero
+    sub-factor must get MORE penalty than a 1.0 sub-factor.
+
+    This is the key fix: the old flat +10.0 gave the SAME penalty for
+    min_sub=1.0 and min_sub=0.0 (a flat zone in the bottom third).
+    The new linear formula differentiates them.
+    """
+    # min_sub=0.0 → (3.0-0.0)*(10/3) = 10.0 exactly (max, same as old cap)
+    penalty_zero, _ = weakest_link_penalty(min_axis_score=5.0, min_sub_score=0.0)
+    assert abs(penalty_zero - 10.0) < 0.01, f"min_sub=0.0 should be 10.0, got {penalty_zero}"
+
+    # min_sub=1.0 → (3.0-1.0)*(10/3) ≈ 6.67 (LESS than 10)
+    penalty_one, _ = weakest_link_penalty(min_axis_score=5.0, min_sub_score=1.0)
+    assert abs(penalty_one - (2.0 * 10.0/3.0)) < 0.01, f"min_sub=1.0 should be ~6.67, got {penalty_one}"
+
+    # KEY: zero sub-factor must get MORE penalty than 1.0 (no flat zone)
+    assert penalty_zero > penalty_one, (
+        f"Genuinely zero (0.0) must get more penalty than 1.0: "
+        f"0.0→{penalty_zero}, 1.0→{penalty_one}"
+    )
+
+    # min_sub=2.9 → (3.0-2.9)*(10/3) ≈ 0.33 (marginal, small penalty)
+    penalty_marginal, _ = weakest_link_penalty(min_axis_score=5.0, min_sub_score=2.9)
+    assert abs(penalty_marginal - (0.1 * 10.0/3.0)) < 0.01, f"min_sub=2.9 should be ~0.33, got {penalty_marginal}"
+
+    # min_sub=1.5 → (3.0-1.5)*(10/3) = 5.0
+    penalty_mid, _ = weakest_link_penalty(min_axis_score=5.0, min_sub_score=1.5)
+    assert abs(penalty_mid - 5.0) < 0.01, f"min_sub=1.5 should be 5.0, got {penalty_mid}"
+
+    # Monotonic: as min_sub decreases, penalty increases (no flat zone anywhere)
+    prev = -1
+    for sub in [2.9, 2.5, 2.0, 1.5, 1.0, 0.5, 0.0]:
+        p, _ = weakest_link_penalty(min_axis_score=5.0, min_sub_score=sub)
+        assert p > prev, f"Penalty must increase as sub decreases: sub={sub} penalty={p} prev={prev}"
+        prev = p
 
 def test_weakest_link_no_penalty_when_healthy():
     """Healthy scores should incur no penalty."""
