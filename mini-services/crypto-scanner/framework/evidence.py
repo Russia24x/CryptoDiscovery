@@ -372,7 +372,7 @@ async def collect(
         pass
 
     # 4) Category-derived signals
-    _apply_category_inferences(b, candidate.category)
+    _apply_category_inferences(b, b.category)
 
     # 4b) Dune Analytics on-chain data (Grade A — when configured)
     # Dune reads directly from blockchain transactions, providing the highest
@@ -437,13 +437,21 @@ async def collect(
         b.grade = EvidenceGrade.D
 
     # category + infrastructure
-    b.category = candidate.category
+    # Only set b.category from candidate if we haven't already got a better
+    # value from CoinGecko detail (_apply_gecko_detail at line 199 reads the
+    # rich 'categories' array). The old unconditional b.category =
+    # candidate.category overwrote the real CoinGecko category with the
+    # heuristic _guess_category() 'other', silently undoing the fix.
+    if not b.category or b.category == candidate.category:
+        b.category = candidate.category
     infra_cats = {"oracle", "rpc", "bridge", "infrastructure", "payments", "data", "liquid staking", "dex", "lending"}
     # Only SET True, never overwrite a True set earlier (e.g. blockchain tokens
     # like SOL/ETH get is_infrastructure=True at line 165). The old unconditional
     # assignment reverted blockchain tokens to False because their category
     # ("Smart Contract Platform", "Layer 1") isn't in infra_cats.
-    b.is_infrastructure = b.is_infrastructure or any(x in candidate.category.lower() for x in infra_cats)
+    # Also: use b.category (real CoinGecko value) not candidate.category
+    # (heuristic), so category-based infrastructure detection works.
+    b.is_infrastructure = b.is_infrastructure or any(x in b.category.lower() for x in infra_cats)
 
     # Anonymous team — was hardcoded True at init (line 72) and NEVER set to
     # False anywhere, so EVERY project (including Bitcoin, Ethereum) showed

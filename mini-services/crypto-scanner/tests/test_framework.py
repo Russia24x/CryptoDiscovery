@@ -1041,6 +1041,107 @@ def test_anonymous_team_true_when_no_transparency_evidence():
     )
 
 
+# ========================================================================== #
+#  #13 (end-to-end): CoinGecko categories must survive the full collect()
+#  pipeline, not just _apply_gecko_detail in isolation.
+#
+#  The first fix (commit 0fc3670) added _apply_gecko_detail category reading,
+#  but THREE lines later in collect() undid it:
+#    line 375: _apply_category_inferences(b, candidate.category)  # "other"
+#    line 440: b.category = candidate.category                    # overwrite!
+#    line 446: any(x in candidate.category.lower() ...)           # "other"
+#
+#  The isolated test passed because it called _apply_gecko_detail directly,
+#  never going through collect(). This test calls collect() end-to-end
+#  with mocked sources to prove the fix actually holds in the pipeline.
+# ========================================================================== #
+
+def test_collect_preserves_gecko_categories_end_to_end():
+    """CoinGecko categories must survive the full collect() pipeline.
+
+    This is the end-to-end regression test that the first #13 fix lacked.
+    It calls collect() (not _apply_gecko_detail in isolation) with a mock
+    Cardano candidate (category='other' from _guess_category) and a mocked
+    sources.fetch_coin_detail that returns categories=['Smart Contract
+    Platform', 'Layer 1'].
+
+    Before the wiring fix:
+      - _apply_gecko_detail sets b.category = 'Smart Contract Platform' (correct)
+      - line 440 overwrites b.category = candidate.category = 'other' (BROKEN)
+      - _apply_category_inferences gets 'other', skips all 12 flags (BROKEN)
+      - is_infrastructure check uses 'other', misses (BROKEN)
+
+    After the wiring fix:
+      - _apply_gecko_detail sets b.category = 'Smart Contract Platform'
+      - line 440 is conditional: only sets if b.category is empty/matches
+      - _apply_category_inferences gets b.category = 'Smart Contract Platform'
+      - is_infrastructure check uses b.category (real value)
+    """
+    import asyncio
+    from unittest.mock import AsyncMock, patch
+    from framework.evidence import collect
+    from models.schemas import CandidateInfo
+
+    # Cardano as it comes from discovery.py — _guess_category returns "other"
+    candidate = CandidateInfo(
+        name="Cardano",
+        symbol="ADA",
+        category="other",  # what _guess_category returns (the bug)
+        sector="Other",
+        description="test",
+        key_signal="test",
+        initial_priority="Medium",
+        gecko_id="cardano",
+    )
+
+    # Mock CoinGecko /coins/{id} response with real categories
+    mock_gecko_detail = {
+        "market_data": {
+            "market_cap": {"usd": 20_000_000_000},
+            "fully_diluted_valuation": {"usd": 30_000_000_000},
+            "circulating_supply": 35_000_000_000,
+            "total_supply": 45_000_000_000,
+            "max_supply": 45_000_000_000,
+            "total_volume": {"usd": 500_000_000},
+        },
+        "categories": ["Smart Contract Platform", "Layer 1", "Cardano Ecosystem"],
+    }
+
+    # Mock sources.fetch_coin_detail to return our mock data
+    from unittest.mock import MagicMock
+    mock_sources = MagicMock()
+    mock_sources._sync_chain_mapping = AsyncMock(return_value=None)
+    mock_sources.is_blockchain_token.return_value = None  # Cardano is not auto-detected as blockchain
+    mock_sources.fetch_defillama_chain_tvl = AsyncMock(return_value=None)
+    mock_sources.fetch_coin_detail = AsyncMock(return_value=mock_gecko_detail)
+    mock_sources.is_cmc_available.return_value = False
+    mock_sources.is_dune_available.return_value = False
+
+    with patch("framework.evidence.sources", mock_sources):
+        b = asyncio.get_event_loop().run_until_complete(collect(candidate))
+
+    # The real CoinGecko category must survive — not be overwritten by "other"
+    assert b.category == "Smart Contract Platform", (
+        f"collect() must preserve CoinGecko categories. Got '{b.category}' "
+        f"(the heuristic 'other' overwrote the real value)."
+    )
+
+    # _apply_category_inferences must have run with the REAL category.
+    # "smart contract" triggers team_transparent=True + centralized_governance=False.
+    # If it got "other" instead, these would be at defaults.
+    assert b.team_transparent is True, (
+        "Smart Contract Platform category should set team_transparent=True "
+        "via _apply_category_inferences — proves it got the real category, not 'other'"
+    )
+    assert b.centralized_governance is False, (
+        "Smart Contract Platform category should set centralized_governance=False"
+    )
+    # And anonymous_team should be False (derived from team_transparent)
+    assert b.anonymous_team is False, (
+        "Cardano with real category → team_transparent=True → anonymous_team=False"
+    )
+
+
 if __name__ == "__main__":
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     passed = 0
