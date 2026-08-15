@@ -404,9 +404,17 @@ async def fetch_top_markets(vs: str = "usd", per_page: int = 100, pages: int = 1
 
 
 async def fetch_coin_detail(gecko_id: str) -> dict[str, Any] | None:
-    """Full coin detail incl. market_data, tokenomics, links."""
+    """Full coin detail incl. market_data, tokenomics, links.
+
+    Cached for 90s so repeated calls (e.g. /analyze fetches detail, then
+    collect() fetches it again) don't double-hit CoinGecko.
+    """
+    cache_key = f"gecko_detail:{gecko_id}"
+    cached = cache_get(cache_key, ttl=90.0)
+    if cached is not None:
+        return cached
     async with httpx.AsyncClient(follow_redirects=True) as c:
-        return await _get_json(
+        out = await _get_json(
             c,
             f"{COINGECKO_BASE}/coins/{gecko_id}",
             localization="false",
@@ -416,6 +424,9 @@ async def fetch_coin_detail(gecko_id: str) -> dict[str, Any] | None:
             developer_data="true",
             sparkline="false",
         )
+        if out:
+            cache_set(cache_key, out)
+        return out
 
 
 # --------------------------------------------------------------------------- #

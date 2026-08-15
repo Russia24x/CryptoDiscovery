@@ -804,12 +804,18 @@ async def analyze_single_coin(req: AnalyzeRequest):
     """
     if not req.gecko_id:
         raise HTTPException(400, "gecko_id is required")
-    log.info("Manual analyze: %s (persona=%s, lang=%s)", req.gecko_id, req.persona.value, req.lang)
+    # Validate gecko_id format — CoinGecko IDs are lowercase alphanumeric + hyphens
+    # (e.g. "bitcoin", "usd-coin", "binancecoin"). Reject anything that could
+    # cause malformed API calls or be a path-injection vector.
+    gid = req.gecko_id.strip().lower()
+    if not gid or not all(c.isalnum() or c == "-" for c in gid):
+        raise HTTPException(422, f"invalid gecko_id format: {req.gecko_id!r} (expected lowercase alphanumeric + hyphens)")
+    log.info("Manual analyze: %s (persona=%s, lang=%s)", gid, req.persona.value, req.lang)
 
     # Build a CandidateInfo from the CoinGecko coin detail
-    detail = await sources.fetch_coin_detail(req.gecko_id)
+    detail = await sources.fetch_coin_detail(gid)
     if not detail:
-        raise HTTPException(404, f"coin '{req.gecko_id}' not found on CoinGecko (may be rate-limited)")
+        raise HTTPException(404, f"coin '{gid}' not found on CoinGecko (may be rate-limited)")
 
     from models.schemas import CandidateInfo
     md = detail.get("market_data") or {}
@@ -881,6 +887,8 @@ async def analyze_single_coin(req: AnalyzeRequest):
     # Persist to SQLite
     try:
         db.save_report(report.id, "manual", report.model_dump(mode="json"))
+    except asyncio.CancelledError:
+        raise
     except Exception as exc:  # noqa: BLE001
         log.warning("Failed to persist manual report %s: %s", report.id, exc)
     # Also track under a synthetic "manual" bucket so /scans doesn't break
