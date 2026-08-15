@@ -387,6 +387,7 @@ export interface CmcCategory {
 
 export interface CmcCategoriesResponse {
   cmc_pro_required?: boolean;
+  plan_not_supported?: boolean;
   categories: CmcCategory[];
   count: number;
   fetched_at?: string;

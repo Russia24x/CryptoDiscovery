@@ -233,12 +233,26 @@ function useMarketOverview() {
   const [refreshing, setRefreshing] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
 
+  // AbortController ref — stored so cleanup can abort in-flight requests
+  // on unmount or rapid-refresh. Without this, the old code created a
+  // local AbortController that was unreachable from the useEffect cleanup,
+  // causing unmount race + refresh race (MI-FE-1).
+  const abortRef = React.useRef<AbortController | null>(null);
+  // Request ID ref — guards against stale responses: if a newer request
+  // supersedes an older one, the older one's setData is skipped (MI-FE-2).
+  const reqIdRef = React.useRef(0);
+
   const load = React.useCallback(async (isRefresh: boolean) => {
+    // Abort any in-flight request before starting a new one (MI-FE-2 fix)
+    abortRef.current?.abort();
+    const ctrl = new AbortController();
+    abortRef.current = ctrl;
+    const myReqId = ++reqIdRef.current;
+
     if (isRefresh) setRefreshing(true);
     else setLoading(true);
     setError(null);
     try {
-      const ctrl = new AbortController();
       const t = setTimeout(() => ctrl.abort(), 60_000);
       const res = await fetch("/api/scanner/market/overview", {
         signal: ctrl.signal,
@@ -249,22 +263,33 @@ function useMarketOverview() {
         throw new Error(`HTTP ${res.status}`);
       }
       const json: MarketOverview = await res.json();
+      // Stale-response guard: skip if a newer request has superseded this one
+      if (myReqId !== reqIdRef.current) return;
       setData(json);
     } catch (err) {
+      // Stale-response guard: don't set error if superseded
+      if (myReqId !== reqIdRef.current) return;
       const msg = err instanceof Error ? err.message : String(err);
       if (err instanceof DOMException && err.name === "AbortError") {
-        setError("Request timed out after 60s.");
+        // Only set timeout error if this was the CURRENT request (not aborted by a newer one)
+        if (myReqId === reqIdRef.current) {
+          setError("Request timed out after 60s.");
+        }
       } else {
         setError(msg);
       }
     } finally {
-      setLoading(false);
-      setRefreshing(false);
+      if (myReqId === reqIdRef.current) {
+        setLoading(false);
+        setRefreshing(false);
+      }
     }
   }, []);
 
   React.useEffect(() => {
     load(false);
+    // Cleanup: abort in-flight request on unmount (MI-FE-1 fix)
+    return () => abortRef.current?.abort();
   }, [load]);
 
   return { data, loading, refreshing, error, refresh: () => load(true) };
@@ -1214,34 +1239,75 @@ export function MarketIntelligenceView({ onAnalyzeCoin }: MarketIntelligenceView
   const [airdropsData, setAirdropsData] = React.useState<CmcAirdropsResponse | null>(null);
   const [airdropsLoading, setAirdropsLoading] = React.useState(false);
   const [airdropsFetched, setAirdropsFetched] = React.useState(false);
+  const [airdropsError, setAirdropsError] = React.useState<string | null>(null);
   const [categoriesData, setCategoriesData] = React.useState<CmcCategoriesResponse | null>(null);
   const [categoriesLoading, setCategoriesLoading] = React.useState(false);
   const [categoriesFetched, setCategoriesFetched] = React.useState(false);
+  const [categoriesError, setCategoriesError] = React.useState<string | null>(null);
   const [activeTab, setActiveTab] = React.useState("top");
 
+  // AbortController refs for lazy fetches (MI-FE-4 fix: abort on rapid tab switch)
+  const airdropsAbortRef = React.useRef<AbortController | null>(null);
+  const categoriesAbortRef = React.useRef<AbortController | null>(null);
+
   const fetchAirdrops = React.useCallback(async () => {
+    // Abort any in-flight airdrops fetch (rapid tab switch — MI-FE-4 fix)
+    airdropsAbortRef.current?.abort();
+    const ctrl = new AbortController();
+    airdropsAbortRef.current = ctrl;
     setAirdropsLoading(true);
+    setAirdropsError(null);
     try {
-      const res = await fetch("/api/scanner/cmc/airdrops?limit=50&status=ONGOING");
-      if (res.ok) setAirdropsData(await res.json());
-    } catch {
-      /* non-critical */
+      const res = await fetch("/api/scanner/cmc/airdrops?limit=50&status=ONGOING", {
+        signal: ctrl.signal,
+      });
+      if (!res.ok) {
+        // MI-FE-5 fix: surface non-OK HTTP responses as error state
+        setAirdropsError(`HTTP ${res.status}`);
+      } else {
+        setAirdropsData(await res.json());
+      }
+    } catch (err) {
+      // MI-FE-3 fix: was empty catch {} — now sets error state
+      if (err instanceof DOMException && err.name === "AbortError") {
+        // Aborted by a newer request — don't set error, don't mark as fetched
+        return;
+      }
+      setAirdropsError(err instanceof Error ? err.message : String(err));
     } finally {
-      setAirdropsLoading(false);
-      setAirdropsFetched(true);
+      if (!ctrl.signal.aborted) {
+        setAirdropsLoading(false);
+        setAirdropsFetched(true);
+      }
     }
   }, []);
 
   const fetchCategories = React.useCallback(async () => {
+    // Abort any in-flight categories fetch (rapid tab switch — MI-FE-4 fix)
+    categoriesAbortRef.current?.abort();
+    const ctrl = new AbortController();
+    categoriesAbortRef.current = ctrl;
     setCategoriesLoading(true);
+    setCategoriesError(null);
     try {
-      const res = await fetch("/api/scanner/cmc/categories");
-      if (res.ok) setCategoriesData(await res.json());
-    } catch {
-      /* non-critical */
+      const res = await fetch("/api/scanner/cmc/categories", {
+        signal: ctrl.signal,
+      });
+      if (!res.ok) {
+        setCategoriesError(`HTTP ${res.status}`);
+      } else {
+        setCategoriesData(await res.json());
+      }
+    } catch (err) {
+      if (err instanceof DOMException && err.name === "AbortError") {
+        return;
+      }
+      setCategoriesError(err instanceof Error ? err.message : String(err));
     } finally {
-      setCategoriesLoading(false);
-      setCategoriesFetched(true);
+      if (!ctrl.signal.aborted) {
+        setCategoriesLoading(false);
+        setCategoriesFetched(true);
+      }
     }
   }, []);
 
@@ -1643,7 +1709,13 @@ export function MarketIntelligenceView({ onAnalyzeCoin }: MarketIntelligenceView
                         description={tt("market.categoriesRequireCmcProDesc", "CoinMarketCap's category taxonomy includes per-category market cap, 24h/7d changes, volume, and top 3 coins — data not available from free sources.")}
                       />
                     )}
-                    {!categoriesLoading && categoriesData && !categoriesData.cmc_pro_required && (
+                    {!categoriesLoading && categoriesData?.plan_not_supported && (
+                      <CmcProRequired
+                        title={tt("market.categoriesNotAvailablePlan", "Categories not available on your CMC plan")}
+                        description={tt("market.categoriesNotAvailablePlanDesc", "Your CoinMarketCap API key is active but its subscription plan doesn't include the categories endpoint. Upgrade to a higher tier to unlock category data.")}
+                      />
+                    )}
+                    {!categoriesLoading && categoriesData && !categoriesData.cmc_pro_required && !categoriesData.plan_not_supported && (
                       <>
                         <p className="mb-3 text-xs text-muted-foreground" dir="auto">
                           {tt("market.showingCategories", "Showing {count} categories", { count: categoriesData.count })}
