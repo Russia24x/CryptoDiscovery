@@ -2493,3 +2493,451 @@ Stage Summary:
 - End-to-end test proves it (would have caught the original gap)
 - #14 benefit extended beyond blockchain tokens to any project with real CoinGecko category
 - Lesson reinforced: unit tests that call functions in isolation can miss wiring bugs — always have at least one end-to-end test through the real pipeline
+
+---
+Task ID: audit-frontend-views
+Agent: code auditor (read-only)
+Task: Audit 4 frontend view components for bugs (hub-view, coin-explorer-view, market-intelligence-view, news-feed-view). READ-ONLY — no modifications, no commits.
+
+Scope: review the same bug categories the advisor flagged previously (logic errors, dead branches, hardcoded assumptions, empty catch blocks, race conditions, Promise.all vs allSettled, truthiness pitfalls, missing loading/error states, memory leaks, a11y, misleading labels, fetch error handling, useEffect deps). Also check null-handling, error UX, and hardcoded URLs.
+
+Findings (file-by-file):
+
+================================================================================
+FILE 1: src/components/views/hub-view.tsx (1521 lines)
+================================================================================
+
+FINDING 1.1 — medium
+File: src/components/views/hub-view.tsx:1201
+What's wrong: `const bothOk = (btcDiff ?? 1) <= 1.5 && (mcapDiff ?? 1) <= 5;`
+When CMC metrics are partially missing, `discrepancyPct()` returns null (line 1246). The `?? 1` fallback treats missing data as "1% discrepancy" — just under the OK thresholds (1.5% for BTC dom, 5% for mcap). The Cross-Verification card then renders a green "Verified" badge even though one source is missing.
+What it should be: when either diff is null, show "Awaiting data" / "Partial" state, not "Verified".
+Why it matters: Users are falsely assured the two sources agree when in fact one has not returned. The whole purpose of cross-verification is defeated by silently treating "we can't verify" as "verified".
+
+FINDING 1.2 — minor
+File: src/components/views/hub-view.tsx:1244-1248 (discrepancyPct)
+What's wrong: `if (a == null || b == null || a === 0) return null;` — when `a === 0` (CoinGecko returned 0), returns null regardless of `b`. If `a=0` but `b=50`, the real discrepancy is infinite; we report null.
+What it should be: if `a === 0` and `b != null`, return 100 (or Infinity), not null. Only return null when `a` or `b` is genuinely missing.
+Why it matters: Edge case where malformed CoinGecko data hides a real discrepancy from CMC.
+
+FINDING 1.3 — minor (misleading label)
+File: src/components/views/hub-view.tsx:729, 747-751
+What's wrong: `const rateLimited = market.data && trending.length === 0 && topDefi.length === 0;` — labels the snapshot strip "Some live feeds are temporarily rate-limited." whenever the trending + topDeFi arrays are both empty, with no actual evidence of rate limiting.
+What it should be: distinguish "rate-limited" (HTTP 429 / API error response) from "no data". The current condition is just "empty arrays".
+Why it matters: When CoinGecko legitimately returns empty trending lists (e.g., regional outage returning 200 + empty array), the user is told feeds are rate-limited, which is incorrect.
+
+FINDING 1.4 — minor (silent hide on error)
+File: src/components/views/hub-view.tsx:722 (SnapshotStrip), 1190 (CrossVerificationCard)
+What's wrong: `if (market.error) return null;` and `if (!cmcMetrics) return null;` — on fetch failure the entire section vanishes with no error message.
+What it should be: render a small muted "Section unavailable" note with retry, or surface the error string.
+Why it matters: User sees blank space with no clue why. The file's header comment claims "hidden / muted on error" — the "muted" alternative is never actually implemented.
+
+FINDING 1.5 — minor (truthiness)
+File: src/components/views/hub-view.tsx:804, 813
+What's wrong: `defiTvl != null && defiTvl > 0` and `activeCoins != null && activeCoins > 0`. 0 is treated as "hide". If DeFi TVL ever legitimately returns 0 (e.g., backend reset), the stat disappears instead of showing "$0.00".
+What it should be: `defiTvl != null` only (the formatter already handles 0 as "$0.00").
+Why it matters: Rare edge case but hides a valid value.
+
+FINDING 1.6 — minor (inconsistent URL construction)
+File: src/components/views/hub-view.tsx:935
+What's wrong: `href={`https://t.me/${m.channel}/${m.id.replace(/^.*\//, "")}`}` — hardcodes the `t.me` URL pattern instead of using the backend-provided `m.channel_url` (which news-feed-view.tsx:401-402 correctly uses as the base).
+What it should be: `const deepLink = m.channel_url ? `${m.channel_url}/${m.id.split("/").pop()}` : null;`
+Why it matters: Backend's channel_url is the source of truth; if the channel domain ever changes (t.me → telegram.me, or private channel), the hub will silently 404.
+
+FINDING 1.7 — minor (defensive check)
+File: src/components/views/hub-view.tsx:1065
+What's wrong: `const srcTotal = srcList.length || (sources.data?.total_count ?? 0);` — if `srcList` is empty (all sources failed to deserialize), falls back to `total_count`. If `total_count` is stale (e.g., backend bug returning 14 but actual list is empty), the user sees "0/14 sources active" with no explanation.
+What it should be: use `srcList.length` only and show an empty state when 0.
+Why it matters: Misleading active-source count under partial backend failure.
+
+================================================================================
+FILE 2: src/components/views/coin-explorer-view.tsx (1363 lines)
+================================================================================
+
+FINDING 2.1 — medium (race condition / silent failure)
+File: src/components/views/coin-explorer-view.tsx:263-321 (auto-select initialGeckoId effect)
+What's wrong: Effect deps are `[initialGeckoId, onClearInitial]`. The effect sets `initialConsumedRef.current = true` synchronously and starts a fetch. If `onClearInitial` is NOT memoized by the parent (a new function reference on each render), React re-runs the effect: it calls the previous cleanup (sets `cancelled = true`) and re-enters, where the `if (initialConsumedRef.current) return;` guard exits early. Result: the in-flight fetch's completion handler hits `if (cancelled) return;` and never calls `setSelected(...)` or `onClearInitial(...)`. The coin is silently never selected.
+What it should be: Either (a) memoize `onClearInitial` at the call site AND document this requirement, OR (b) drop `onClearInitial` from the dep array (it's only called in the finally block — the stable ref pattern via `onClearInitialRef` is the safer choice), OR (c) guard the cancelled check separately from the consumed-ref check.
+Why it matters: If parent passes an inline arrow `() => setInitialGeckoId(null)`, deep-linking into Coin Explorer from HubView or MarketIntelligenceView silently fails. User clicks "Analyze Bitcoin" elsewhere, lands on Coin Explorer with empty state, no error.
+
+FINDING 2.2 — medium (misleading display)
+File: src/components/views/coin-explorer-view.tsx:1012, 1014
+What's wrong: `const pqScore = report.project_quality_score ?? 0;` and `const confidence = report.confidence ?? 0;` — when the backend omits these fields (malformed report, partial backend failure), they default to 0 and are passed to `<ScoreRadial score={pqScore} />` and rendered as "Confidence: 0.0%". The radial then paints red (0 → rose color).
+What it should be: pass `null` through to ScoreRadial (or render "—" / "N/A"), and only render the confidence badge when `report.confidence != null`.
+Why it matters: A coin with a missing score looks identical to a coin with a genuine 0/100 score. The user is told the project is terrible when actually the backend just failed to score it.
+
+FINDING 2.3 — medium (uncaught crash on malformed report)
+File: src/components/views/coin-explorer-view.tsx:1016-1017, 1050, 1074, 1098, 1102, 1106, 1110, 1113, 1150
+What's wrong: `const decision = report.decision;` and `const candidate = report.candidate;` are then accessed as `decision.action_label` (line 1076) and `candidate.name` (line 1050) with no null guards. `report.axes.map(...)` (line 1150) has no `Array.isArray(report.axes)` check. If the backend returns a malformed FullReport (missing `decision`, `candidate`, or `axes`), the component throws and the whole ReportCard crashes — React error boundary catches it but the user loses the entire report view.
+What it should be: defensive defaults — `const decision = report.decision ?? { action_label: "—" };` etc., plus `Array.isArray(report.axes) ? report.axes.map(...) : null`.
+Why it matters: One missing field in a backend response takes down the entire report card, including all the sections that DID load successfully.
+
+FINDING 2.4 — medium (silent wrong-coin analysis)
+File: src/components/views/coin-explorer-view.tsx:284-285
+What's wrong: `const match = list.find((r) => r.id === geckoId) || list[0] || null;` — when the exact-match lookup fails, falls back to `list[0]` (the first search result) WITHOUT telling the user. The synthesized fallback at line 291 is even worse — it constructs a fake CoinSearchResult using the raw gecko_id string as name, symbol, and id, then the user clicks "Run 8-Phase Analysis" and the backend analyzes that string. The user thinks they're analyzing "Bitcoin"; the backend may analyze something completely different.
+What it should be: when no exact match, show an inline warning "Coin not found, did you mean X?" and let the user explicitly pick. The synthesizing fallback at line 291 should never silently succeed.
+Why it matters: Deep-link / initial-coin auto-selection may analyze the wrong project. The user has no indication the analysis is on the wrong coin.
+
+FINDING 2.5 — minor (missing effect dep)
+File: src/components/views/coin-explorer-view.tsx:210-246
+What's wrong: Search effect deps are `[debouncedQuery]` but the effect body uses `tf` (line 236) for the error message. ESLint exhaustive-deps would warn. After a language switch, the effect's stale `tf` closure persists until the next debouncedQuery change.
+What it should be: add `tf` to deps, or use a ref to read the latest `tf` inside the async closure.
+Why it matters: Stale translated error message in one search-after-language-change. Cosmetic.
+
+FINDING 2.6 — minor (silent JSON parse swallow)
+File: src/components/views/coin-explorer-view.tsx:404-410
+What's wrong: `try { const data = await res.json(); if (data?.error) detail = data.error; ... } catch { /* ignore JSON parse failure */ }` — when the upstream returns a non-JSON error body (HTML, plain text), the catch silently swallows and falls back to `HTTP ${res.status}`. The comment notes intent, but the user sees "HTTP 500" with no upstream-provided detail.
+What it should be: also attempt `res.text()` as fallback, or include a hint like "HTTP 500 (response not JSON)".
+Why it matters: Harder to debug upstream errors from the UI.
+
+FINDING 2.7 — minor (negative axis score rendering)
+File: src/components/views/coin-explorer-view.tsx:1333
+What's wrong: `const scoreText = score >= 0 ? (score >= 10 ? score.toFixed(0) : score.toFixed(1)) : "—";` — if `score` is negative (shouldn't happen but backend bug could produce it), shows "—" with no explanation. The progress bar still renders at width=0% (Math.max(0, ...)).
+What it should be: render the actual negative number with a warning color, or guard at the source.
+Why it matters: Hides data-quality issues in the backend scoring.
+
+FINDING 2.8 — minor (URL scheme not blocked)
+File: src/components/views/coin-explorer-view.tsx:1268-1273 (KeyLinkIcon)
+What's wrong: `if (!/^https?:\/\//i.test(href)) safeHref = `https://${href}`;` — wraps any non-http(s) URL in `https://`. If `href` is `javascript:alert(1)`, the result `https://javascript:alert(1)` is interpreted by browsers as a malformed HTTPS URL (won't execute JS), so no XSS. But protocol-relative URLs like `//evil.com` become `https:///evil.com` (triple slash) — interpreted as host = "" with path "/evil.com", which the browser tries to load relative to the current origin.
+What it should be: also reject `javascript:`, `data:`, `vbscript:` schemes explicitly, or use the URL constructor to validate.
+Why it matters: Defense in depth. Currently relies on browsers to mis-parse malicious URLs.
+
+================================================================================
+FILE 3: src/components/views/market-intelligence-view.tsx (1666 lines)
+================================================================================
+
+FINDING 3.1 — medium (empty catch swallows fetch errors)
+File: src/components/views/market-intelligence-view.tsx:1227-1232, 1240-1245
+What's wrong: Both `fetchAirdrops` and `fetchCategories` have `try { ... } catch { /* non-critical */ }` with empty catch bodies. If fetch fails (network error, JSON parse error), no error state is set. `airdropsFetched` is set true in finally, so the loading skeleton disappears, but `airdropsData` stays null. Then none of the conditional renders match (`airdropsData?.cmc_pro_required` is falsy, `airdropsData?.plan_not_supported` is falsy, `airdropsData && !...` is falsy). User sees a completely empty tab with no message.
+What it should be: add an `airdropsError` / `categoriesError` state, set it in the catch, render a small "Failed to load airdrops — [Retry]" message when set.
+Why it matters: User clicks Airdrops tab, sees empty space, has no idea whether they lack CMC Pro, the network failed, or there are simply no airdrops. The whole CMC Pro value-add looks broken.
+
+FINDING 3.2 — medium (silent HTTP error swallow)
+File: src/components/views/market-intelligence-view.tsx:1225-1226, 1238-1239
+What's wrong: `const res = await fetch(...); if (res.ok) setAirdropsData(await res.json());` — when `res.ok` is false (HTTP 4xx/5xx), the response body is discarded silently. No error state, no logging.
+What it should be: capture the status code and surface it to the user.
+Why it matters: Same UX impact as 3.1 — user sees empty tab, no diagnostic info. Combined with 3.1, the silent failure is total.
+
+FINDING 3.3 — medium (race condition on Refresh)
+File: src/components/views/market-intelligence-view.tsx:236-264 (useMarketOverview.load)
+What's wrong: Each call to `load(true)` creates a new local AbortController — there is no module-level ref to the previous controller, so when the user clicks Refresh twice in quick succession, the previous in-flight fetch is NOT aborted. Both fetches complete asynchronously, and the later-resolving one's `setData(json)` wins — which may be the OLDER response. No `cancelled` flag, unlike hub-view's `useApi` hook (lines 276-307) which correctly guards against this.
+What it should be: store the AbortController in a ref, abort the previous one before starting a new fetch, and use a `cancelled` flag pattern (mirror hub-view's useApi).
+Why it matters: User clicks Refresh, sees data flicker between two snapshots. In the worst case the displayed data is older than what was just fetched.
+
+FINDING 3.4 — minor (NaN in tooltip when total = 0)
+File: src/components/views/market-intelligence-view.tsx:800
+What's wrong: `{((v / total) * 100).toFixed(1)}%` in the SectorsChart tooltip — if `total === 0` (all sectors have `total_market_cap = 0` or null, possible if backend returns fresh empty data), `v / 0` is NaN or Infinity. `NaN.toFixed(1)` returns "NaN", `Infinity.toFixed(1)` returns "Infinity". The tooltip renders "— · NaN%". Note that the sibling code on line 781 correctly guards `total > 0 ? (v / total) * 100 : 0` for the bar width — only the tooltip is unguarded.
+What it should be: `total > 0 ? ((v / total) * 100).toFixed(1) : "0.0"` (or hide the %).
+Why it matters: Rare edge case but produces ugly "NaN%" in the UI when it does happen.
+
+FINDING 3.5 — minor (misleading market cap format)
+File: src/components/views/market-intelligence-view.tsx:1181
+What's wrong: `c.market_cap != null ? `$${(c.market_cap / 1e9).toFixed(2)}B` : "—"` — for categories with sub-$1B market cap (e.g., $500M), renders "$0.50B". For sub-$10M, "$0.01B". For sub-$5M, "$0.00B" (shows zero).
+What it should be: branch on magnitude (use M/K suffix for smaller values) like the `fmtUsd` helper at the top of the file.
+Why it matters: Category cards for small-cap sectors appear to have $0 market cap when they actually have millions.
+
+FINDING 3.6 — minor (hardcoded ONGOING filter)
+File: src/components/views/market-intelligence-view.tsx:1225
+What's wrong: `/api/scanner/cmc/airdrops?limit=50&status=ONGOING` — hardcodes the ONGOING status filter. The tab is labeled "Airdrops" (not "Ongoing Airdrops"), so the user expects to see all airdrops (ongoing + upcoming + ended). UPCOMING and ENDED are silently filtered out.
+What it should be: either rename the tab to "Ongoing Airdrops", or add a status filter chip like the news tab's SourceChip.
+Why it matters: Misleading tab label vs actual data shown.
+
+FINDING 3.7 — minor (missing onError on images)
+File: src/components/views/market-intelligence-view.tsx:491-496 (CoinRow), 586-591 (TrendingRow), 1110 (AirdropsTable logo)
+What's wrong: `<img src={coin.image} ... />` and similar — no onError handler. If the image 404s, the browser shows the broken-image icon (a torn paper icon). DefiRow (line 642-651) DOES have onError handling; CoinRow and TrendingRow do not.
+What it should be: use a shared <ImgWithFallback> component (like hub-view.tsx:424) across all coin/protocol images.
+Why it matters: Visual inconsistency, broken-image icons degrade the polished look.
+
+================================================================================
+FILE 4: src/components/views/news-feed-view.tsx (1415 lines)
+================================================================================
+
+FINDING 4.1 — medium (hardcoded Persian source URL mapping)
+File: src/components/views/news-feed-view.tsx:779-782
+What's wrong: `{article.source === "ArzDigital" ? "arzdigital.com" : "mihanblockchain.com"}` — hardcodes the source-to-domain mapping for Persian news. If the backend adds a third Persian source (e.g., "Coiniran"), it will display "mihanblockchain.com" — a wrong domain — with no warning. Also does not derive from `article.url`.
+What it should be: derive the hostname from `article.url` via `new URL(article.url).hostname.replace(/^www\./, "")` (the same logic already used at line 493-498 for Telegram link chips).
+Why it matters: Misleading domain label for any new Persian source. User may think a CoinIran article is from MihanBlockchain.
+
+FINDING 4.2 — medium (1-second full-tree re-render)
+File: src/components/views/news-feed-view.tsx:1115-1119
+What's wrong: `const [, setTick] = React.useState(0); React.useEffect(() => { const id = setInterval(() => setTick((x) => x + 1), 1000); ...}, []);` — forces a re-render of the entire NewsFeedView every 1 second. Every article card, every Telegram bubble, every source chip re-renders 60 times per minute even when the user is idle and no timestamps are visible (e.g., user is on the Telegram tab with cached data). Note: hub-view uses 30s intervals (line 461), market-intelligence-view uses 10s (line 277) — news-feed-view is 10x more aggressive than necessary.
+What it should be: 30s tick like hub-view (relative time labels only need minute-resolution freshness), and only re-render the timestamp spans (extract time-ago labels into a child component that subscribes to the tick).
+Why it matters: Wasted CPU/render cycles, especially noticeable on low-end devices. Battery drain on mobile. May cause jank when many Telegram bubbles with media are loaded.
+
+FINDING 4.3 — minor (dead code / voided function)
+File: src/components/views/news-feed-view.tsx:1254-1255
+What's wrong: `// secondsSince recomputes on every render (tick state forces re-render every 1s).` followed by `void secondsSince(activeFetchedAt ?? null);` — the return value of `secondsSince` is discarded via `void`. `secondsSince` is a pure function with no side effects (line 233-238). Calling it does nothing observable. The re-render is already triggered by `setTick` from the interval in line 1116. So this line is functionally useless.
+What it should be: remove the line entirely, OR (if the intent was to actually display the cache age) wire the return value into a state and render it.
+Why it matters: Dead code clutters intent. The comment is misleading (suggests the call does something).
+
+FINDING 4.4 — minor (empty catch swallows sources fetch)
+File: src/components/views/news-feed-view.tsx:1185-1194
+What's wrong: `try { const res = await fetch("/api/scanner/sources"); if (!res.ok) return; ... } catch { // Non-critical — silently ignore. }` — silently swallows all errors. When the fetch fails, `sources` stays as `[]`, `SourcesBadgeRow` returns null (line 542: `if (relevant.length === 0) return null;`), and the badge row simply doesn't render. The user has no indication that the data-source availability info is missing.
+What it should be: at minimum, log to console in development. Or render a muted "Source status unavailable" note in place of the badge row.
+Why it matters: Silent failure of an informational section. May mask backend issues (e.g., /sources endpoint down).
+
+FINDING 4.5 — minor (race condition in auto-refresh)
+File: src/components/views/news-feed-view.tsx:1208-1212
+What's wrong: `const id = setInterval(() => fetchTelegram(true), 60_000);` — if a previous fetch is still in flight when the interval fires, a new fetch starts concurrently. Both will eventually call `setTelegram(data)` and `setTgRefreshing(false)`. The later-resolving one wins, which may be the older fetch. No abort of the previous fetch.
+What it should be: track the AbortController in a ref, abort the previous before starting a new fetch. Or guard with `if (tgRefreshing) return;` to skip the tick.
+Why it matters: Telegram feed may briefly show stale messages after auto-refresh. Minor flicker on the "refreshing" spinner.
+
+FINDING 4.6 — minor (Telegram message ID splitting)
+File: src/components/views/news-feed-view.tsx:400
+What's wrong: `const msgNum = msg.id.split("/")[1] ?? "";` — assumes the id format is `"<channel>/<numeric_id>"`. If the backend ever returns ids with multiple slashes (e.g., `"<channel>/<date>/<id>"`), this picks the middle segment (the date), not the message id. The deep link `https://t.me/<channel>/<date>` will 404.
+What it should be: `const msgNum = msg.id.split("/").pop() ?? msg.id;` — always take the last segment, fall back to the full id.
+Why it matters: Robustness — backend format changes silently break deep links.
+
+FINDING 4.7 — minor (clear-search buttons missing type="button")
+File: src/components/views/news-feed-view.tsx:657-664, 854-860
+What's wrong: The clear-search `<button>` elements lack `type="button"`. Inside a form (if one is ever added around them), default `type="submit"` would cause unwanted form submission. There's no form currently, but it's a footgun.
+What it should be: add `type="button"`.
+Why it matters: Future-proofing. If a form is added later, these buttons would accidentally submit.
+
+================================================================================
+SUMMARY
+================================================================================
+
+Total findings: 22 (across 4 files)
+- hub-view.tsx:        7 findings (1 medium, 6 minor)
+- coin-explorer-view:  8 findings (4 medium, 4 minor)
+- market-intelligence-view: 7 findings (3 medium, 4 minor)
+- news-feed-view:      7 findings (2 medium, 5 minor)
+
+Critical-severity findings: 0
+Medium-severity findings: 10 (real bugs with user-visible impact)
+Minor-severity findings: 12 (edge cases, robustness, UX polish)
+
+Top 5 highest-priority findings:
+1. 1.1 — Cross-Verification card shows "Verified" when one source is missing (medium, misleading green badge)
+2. 2.1 — Coin auto-selection silently fails when parent doesn't memoize onClearInitial (medium, deep-linking broken)
+3. 2.2 + 2.3 — Coin Explorer ReportCard crashes on malformed FullReport; shows 0 score when score is missing (medium, full-card crash + misleading display)
+4. 2.4 — Coin auto-select falls back to first search result without warning user (medium, analyzes wrong coin)
+5. 3.1 + 3.2 — Airdrops/Categories tabs silently fail on HTTP error, render empty with no message (medium, CMC Pro value-add looks broken)
+
+Patterns observed:
+- Truthiness pitfalls: 1.5 (defiTvl > 0 hides 0), 1.7 (srcList.length || total_count)
+- Empty catch blocks: 3.1, 3.2, 4.4 (3 instances of silent error swallowing)
+- Race conditions: 3.3 (useMarketOverview no abort on refresh), 4.5 (auto-refresh overlap), 2.1 (effect cancellation)
+- Misleading labels: 1.1 (Verified when partial), 1.3 (rate-limited when empty), 3.6 (Airdrops tab filtered to ONGOING), 4.1 (hardcoded Persian source URL)
+- Missing defensive checks: 2.3 (report.decision/candidate/axes accessed without guards)
+- Dead/unreachable code: 4.3 (void secondsSince)
+- useEffect dep issues: 2.1 (onClearInitial not memoized → silent failure), 2.5 (tf missing from search effect deps)
+
+No hardcoded API URLs found — all 4 views use relative paths (`/api/scanner/*`). Good.
+No Promise.all misuse — hub-view uses 7 independent useApi hooks (correct Promise.allSettled-style pattern); other views use independent state machines.
+
+No code was modified. No commits were made. This report is read-only.
+
+---
+Task ID: audit-main-py-endpoints
+Agent: code auditor (read-only)
+Task: Audit 4 endpoint groups in mini-services/crypto-scanner/main.py (/alerts, /score-history, /dune/*, /system/health-check) + audit models/schemas.py. READ-ONLY — no modifications, no commits.
+
+Scope: review the same bug categories the advisor flagged previously (logic errors, dead branches, hardcoded placeholders, `except Exception` without `asyncio.CancelledError` guard, truthiness pitfalls, copy-paste errors, missing input validation, misleading return values, race conditions). Also check schema type mismatches, Optional/required mismatches, default values that mask bugs, and enum mismatches.
+
+Confirmed prior fixes already applied (NOT re-reported):
+- Finding #4 (CancelledError guard): analysis.py / discovery.py / evidence.py / data/sources.py:fetch_dune_query_results — all have `except asyncio.CancelledError: raise` BEFORE `except Exception`. Good.
+- Finding #7 (truthy checks on fdv_fees/mc_tvl): analysis.py:442-446 uses `if x is not None else None` pattern. Good.
+- Finding #9 (hardcoded placeholders staking_pct etc): schemas.py keeps them Optional[float]=None. Good.
+- Finding #13 (CoinGecko categories): wired through collect() per worklog commit 8346123. Good.
+
+Findings (file-by-file):
+
+================================================================================
+FILE 1: mini-services/crypto-scanner/main.py — /alerts endpoint (lines 472-518)
+================================================================================
+
+FINDING A1 — medium (missing input validation)
+File: main.py:473, 501
+What's wrong: `async def get_alerts(threshold: float = 10.0)` accepts any float with no lower bound. The comparison `if abs(delta) >= threshold:` with a negative threshold (e.g. -5) is always True because `abs(delta) >= 0` and `0 >= -5` is True. So a client calling `/alerts?threshold=-1` would generate an alert for EVERY symbol with ≥2 history entries, including ones whose score didn't change at all (delta=0). The "type" then becomes "score_decrease" with delta=0.0 and the message reads "decreased by 0.0 points".
+What it should be: validate `threshold > 0` (return 422 if not), or short-circuit `if threshold > 0 and abs(delta) >= threshold:`.
+Why it matters: Polling client with a typo'd threshold spams false alerts. Frontend polls this every 60s, so the noise compounds.
+
+FINDING A2 — medium (schema mismatch / misleading field name)
+File: main.py:508 + db.py:173 + schemas.py:258
+What's wrong: `"action": latest.get("action")` — the alert's `action` field is read from `score_history.action` column, which is populated by `decision.get("action_label")` (db.py:173). So the alert's `action` field actually contains the action LABEL (a string like "Watch", "High Conviction", "Ignore (Hard Veto)"). But the schema's `Decision.action` is `ActionLevel` (an int Enum: IGNORE=0, WATCH=1, ..., HIGH_CONVICTION=5). Same field name `action`, two different types across the codebase.
+What it should be: rename the alert field to `action_label` to match what it actually contains (per schemas.py Decision.action_label: str), OR store the int ActionLevel in the DB instead of the label.
+Why it matters: A client reading `alert.action` after reading `report.decision.action` will assume they're the same type. They aren't. Code that does `if (alert.action >= 3)` would compare a string to an int and silently return False for every alert.
+
+FINDING A3 — minor (uses private db function)
+File: main.py:481
+What's wrong: `conn = db._get_conn()` — reaches into a private (underscore-prefixed) function. The endpoint should call a public db function like `db.list_symbols_with_multiple_scores(limit=20)`.
+What it should be: add a public db function and call that.
+Why it matters: Encapsulation breach. If db.py refactors its connection strategy (e.g. read replica, async pool), this endpoint silently breaks.
+
+FINDING A4 — minor (off-by-epsilon between docstring and code)
+File: main.py:476-477 vs 501
+What's wrong: Docstring says "changed by more than `threshold` points". Code uses `if abs(delta) >= threshold:`. "More than" is strict `>`; `>=` means "threshold or more". A delta of exactly 10.0 with default threshold=10.0 fires an alert, but the docstring promises it shouldn't.
+What it should be: either change to `> threshold`, or change the docstring to "changed by `threshold` points or more".
+Why it matters: Tiny, but the docstring is the API contract. Frontend may show "filter ≥10" assuming strict `>`.
+
+================================================================================
+FILE 2: main.py — /score-history/{symbol} endpoint (lines 340-350)
+================================================================================
+
+FINDING S1 — medium (missing input validation — DoS)
+File: main.py:341 + db.py:234-238
+What's wrong: `async def get_score_history(symbol: str, limit: int = 20)` — no validation on `limit`. SQLite `LIMIT ?` with `limit=-1` returns ALL matching rows (SQLite's documented behavior for negative LIMIT). A client calling `/score-history/BTC?limit=-1` would receive every score_history row for BTC. If the scanner has run for months and accumulated thousands of rows per symbol, this is a memory + bandwidth DoS vector. `limit=0` is benign (returns empty).
+What it should be: `limit: int = Query(20, ge=1, le=500)` or clamp inside db.get_score_history.
+Why it matters: Unauthenticated endpoint (CORS allows any allowlisted origin), no auth, no rate limit. Any script can fetch the full history table.
+
+FINDING S2 — minor (docstring omits returned fields)
+File: main.py:342-345
+What's wrong: Docstring says "Returns a list of {project_quality, token_quality, confidence, action, timestamp} entries". But the SQL in db.py:235 selects `symbol, scan_id, project_quality, token_quality, confidence, action, timestamp` — the dict actually has 7 keys, not 5. `symbol` and `scan_id` are missing from the docstring.
+What it should be: update docstring to list all 7 fields.
+Why it matters: API contract drift. Client developers reading the docstring will be surprised by extra fields.
+
+================================================================================
+FILE 3: main.py — /dune/* endpoints (lines 1123-1181)
+================================================================================
+
+FINDING D1 — medium (docstring lies about request body shape)
+File: main.py:1140-1144
+What's wrong: Endpoint signature is `async def execute_dune_query(query_id: str, params: dict | None = None)`. Docstring says `Body: {"params": {"token_symbol": "ETH", ...}}`. But in FastAPI, a `dict`-typed parameter is interpreted as the request body ITSELF (not a wrapper around it). So FastAPI expects the request body to be `{"token_symbol": "ETH"}` directly. If a client follows the docstring and sends `{"params": {"token_symbol": "ETH"}}`, then `params` becomes `{"params": {"token_symbol": "ETH"}}` — a dict with one key `"params"`. The endpoint then calls `sources.fetch_dune_execute(query_id, params={"params": {"token_symbol": "ETH"}})`, which sends `{"query_parameters": {"params": {"token_symbol": "ETH"}}}` to Dune's API. Dune won't recognize the nested `params` key and will either ignore the parameter or error out.
+What it should be: either (a) change docstring to `Body: {"token_symbol": "ETH", ...}` and keep current signature, OR (b) define a Pydantic model `class ExecuteBody(BaseModel): params: dict | None = None` and use it as the body parameter so the wrapper shape actually works.
+Why it matters: The endpoint's primary documented contract is wrong. Any client following the docstring gets silently-broken parameter passing — Dune queries return results for default parameter values, not the requested ones.
+
+FINDING D2 — medium (missing limit validation)
+File: main.py:1124 + data/sources.py:837
+What's wrong: `async def get_dune_query(query_id: str, limit: int = 100)` — no validation. The downstream code at sources.py:837 does `rows[:limit]`. Python slicing semantics for negative `limit` are surprising: `rows[:-1]` returns all but the last row, `rows[:-5]` returns all but the last 5, `rows[:0]` returns empty. So `/dune/query/123?limit=-5` silently returns "all rows except the last 5" — a result that looks valid but isn't what the client asked for. SQLite LIMIT case from S1 also applies if the underlying fetch ever switches to a SQL-backed cache.
+What it should be: `limit: int = Query(100, ge=1, le=1000)`.
+Why it matters: Subtle data-shape bug. Client receives truncated-but-not-empty data and assumes it's correct.
+
+FINDING D3 — medium (response shape inconsistency between available and unavailable)
+File: main.py:1131-1132, 1147-1148, 1164-1165
+What's wrong: When `sources.is_dune_available()` returns False, the three Dune endpoints return three different "unavailable" shapes:
+  - /dune/query: `{"dune_pro_required": True, "rows": [], "row_count": 0, "message": ...}`
+  - /dune/execute: `{"dune_pro_required": True, "rows": [], "row_count": 0, "message": ...}`
+  - /dune/insights/{symbol}: `{"dune_pro_required": True, "message": ...}` (NO `rows`, NO `row_count`, NO `symbol`, NO `fetched_at`)
+When available, the shapes are completely different (insights returns `{symbol, token_concentration, real_revenue, active_users, config, fetched_at}`). A client can't write a single type-safe parser for /dune/insights — it has to first check for `dune_pro_required` to know which shape to expect.
+What it should be: return the same top-level shape in both cases — e.g. always include `symbol`, `token_concentration: None`, `real_revenue: None`, `active_users: None`, `dune_pro_required: True/False`, `message`, `fetched_at`. Frontend can then null-check fields instead of shape-checking.
+Why it matters: Frontend (or any client) needs a tree of `if (data.dune_pro_required) ... else if (data.token_concentration) ...` instead of a single optional chain. Type generators produce union types that are painful to consume.
+
+FINDING D4 — minor (redundant local import)
+File: main.py:1166
+What's wrong: `import asyncio as _aio` at the function body, but `asyncio` is already imported at module level (main.py:14). The local alias `_aio` is then used for `_aio.gather(...)`.
+What it should be: use `asyncio.gather(...)` directly. Remove the local import.
+Why it matters: Code smell. Suggests the developer didn't realize asyncio was already imported, which often signals copy-pasted code that wasn't fully integrated.
+
+================================================================================
+FILE 4: main.py — /system/health-check endpoint (lines 1229-1355)
+================================================================================
+
+FINDING H1 — critical (UnboundLocalError — health check 500s when source is down)
+File: main.py:1260-1293
+What's wrong: The try/except at lines 1260-1264 swallows ANY exception from `sources.fetch_top_markets_extended`. If CoinGecko is unreachable (network error, timeout, malformed JSON), the assignment `markets = await ...` never executes. The `except Exception: pass` swallows the error. Then at line 1293, `if markets and protos:` references the unbound `markets` local — Python raises `UnboundLocalError` (because `markets` appeared in an assignment earlier in the function, Python treats it as a local variable, so lookup fails rather than falling back to globals). The endpoint returns HTTP 500. Same bug applies to `protos` at line 1268 → 1293.
+What it should be: initialize `markets: list = []` and `protos: list = []` BEFORE the try blocks. Then `if markets and protos:` correctly evaluates to False when the fetch failed, and the data-gap loop is skipped gracefully.
+Why it matters: This is a HEALTH-CHECK endpoint — its entire purpose is to report on the state of unhealthy sources. A 500 from /system/health-check when a source is down is the worst possible failure mode: the monitor that's supposed to detect outages itself crashes on outage. The endpoint is documented as "designed to be called by a background scheduler every 30 minutes" (line 1227) — a scheduler getting 500s will alert ops instead of returning the actual diagnostic report.
+
+FINDING H2 — critical (wrong formula for coins_checked)
+File: main.py:1349
+What's wrong: `"coins_checked": len(report["data_gaps"]) + 20,  # approx`. The formula ADDS the number of data gaps found to 20. If 5 coins have gaps, `coins_checked` reports 25. If 0 gaps, reports 20. If `markets` was empty (sources failed), the data-gap loop at 1301 doesn't run, but `coins_checked` still reports 20. The number of coins checked should NEVER depend on how many gaps were found — that's a category error. The comment `# approx` doesn't excuse it; "approx" implies an estimate of the checked count, but `gaps + 20` isn't an estimate of checked count, it's a different quantity entirely.
+What it should be: track the actual checked count in a variable, e.g. `coins_checked = 0; for m in markets[:20]: if mc >= 1e9: coins_checked += 1; ...`. Or `min(20, len(markets or []))` if we just want the candidate count.
+Why it matters: Misleading metric in a diagnostic endpoint. If ops pages on `coins_checked > 25`, the alert fires when there are MANY gaps — opposite of intent.
+
+FINDING H3 — medium (hardcoded gap threshold makes "healthy" status inconsistent)
+File: main.py:1352
+What's wrong: `"status": "healthy" if len(report["data_gaps"]) <= 3 else "needs_attention"`. The threshold is a hardcoded absolute count of 3, regardless of how many coins were checked. If only 3 coins were checked (small market list) and ALL 3 have gaps, status is "healthy". If 20 coins were checked and 4 have gaps (80% healthy), status is "needs_attention". The threshold doesn't scale with coins_checked.
+What it should be: use a ratio — `gap_ratio = len(data_gaps) / max(1, coins_checked); status = "healthy" if gap_ratio <= 0.15 else "needs_attention"` (or similar).
+Why it matters: The status field is the single bit ops cares about. With the current logic, a degraded scanner with most coins failing still reports "healthy" as long as the failing count stays ≤3.
+
+FINDING H4 — medium (4x `except Exception: pass` without CancelledError guard)
+File: main.py:1263, 1270, 1277, 1334
+What's wrong: Four `try/except Exception: pass` blocks swallow ALL exceptions including `asyncio.CancelledError` (since Python 3.8, `CancelledError` inherits from `BaseException`, not `Exception`, so this is actually OK in modern Python — BUT the codebase elsewhere uses the explicit `except asyncio.CancelledError: raise` guard before `except Exception` per finding #4 fix in worklog commit b40730b). The pattern here is INCONSISTENT with the rest of the codebase and risky if Python ever downgrades CancelledError back to Exception (it was Exception in Python 3.6 and earlier).
+What it should be: add `except asyncio.CancelledError: raise` before each `except Exception` for consistency with the rest of the codebase (and to be safe across Python versions).
+Why it matters: Inconsistency with the codebase's own convention (per finding #4 fix). If a future Python upgrade or library patch subclasses CancelledError under Exception again, this endpoint would swallow task cancellations — the scan that called /system/health-check in a background task would be unable to be cancelled cleanly.
+
+FINDING H5 — medium (sequential awaits in a loop — 40+ HTTP calls)
+File: main.py:1301-1335
+What's wrong: Inside the `for m in markets[:20]:` loop, the code does:
+  - `chain_data = await sources.fetch_defillama_chain_tvl(chain, protos)` (line 1313)
+  - `kl = await sources.fetch_cmc_keyless_by_symbol(sym)` (line 1331)
+Both are sequential `await`s inside a 20-iteration loop. With ~500ms per HTTP call, the endpoint takes ~20 seconds to respond (40 calls × 500ms). FastAPI/uvicorn default request timeout is often 30s — close to the limit.
+What it should be: build a list of coroutines per coin, then `await asyncio.gather(*coros, return_exceptions=True)`. Cuts response time from 20s to ~1s.
+Why it matters: A 20s health-check endpoint will trip most monitoring timeouts. The scheduler that calls it every 30 minutes (per docstring) would back up if the endpoint takes 20s + retry budget.
+
+FINDING H6 — minor (misleading label)
+File: main.py:1351
+What's wrong: `"blockchain_tokens_detectable": chain_sym_count` — `chain_sym_count` is `len(sources._CHAIN_SYMBOL_CACHE or {})` (line 1284), which is the count of symbol→chain mappings in the runtime cache. The label says "tokens detectable" which a reader would interpret as "how many tokens can the framework identify as blockchain tokens" — a much broader concept (the universe of all known blockchain tokens, not the cache size).
+What it should be: rename to `blockchain_symbol_cache_size` or `cached_chain_mappings`.
+Why it matters: Misleading metric. A reader seeing `blockchain_tokens_detectable: 47` thinks the framework can detect 47 blockchain tokens total; actually it means 47 mappings are cached right now.
+
+FINDING H7 — minor (redundant local import + uses private sources internals)
+File: main.py:1241, 1283-1289
+What's wrong: `import asyncio as _aio` at function body (same as D4). Also accesses `sources._sync_chain_mapping()`, `sources._CHAIN_SYMBOL_CACHE`, `sources._CHAIN_NAME_CACHE`, `sources._BLOCKCHAIN_TO_CHAIN` — all private (underscore-prefixed) internals of the sources module.
+What it should be: use module-level `asyncio`. Add public accessor functions to sources.py for the chain cache state.
+Why it matters: Encapsulation breach. If sources.py refactors its cache strategy (e.g., moves to a class), this endpoint silently breaks.
+
+================================================================================
+FILE 5: mini-services/crypto-scanner/models/schemas.py
+================================================================================
+
+FINDING SC1 — medium (default masks missing data as "Phase 1")
+File: schemas.py:181
+What's wrong: `cycle_phase: CyclePhase = CyclePhase.HIDDEN_DEV`. If the framework ever fails to compute cycle_phase (e.g., exception in `_infer_cycle_phase`, future refactor forgets to set it), the schema defaults to "Phase 1 - Hidden Development". This is a SPECIFIC, named phase — not "unknown". The default silently misclassifies missing-data projects as early-stage.
+What it should be: `cycle_phase: Optional[CyclePhase] = None` and require the framework to set it explicitly. Frontend can render "—" for None.
+Why it matters: A mature project (Solana, Ethereum) with a partial-data bug that skips cycle_phase computation would be reported as "Phase 1 - Hidden Development" — actively misleading, not just missing.
+
+FINDING SC2 — medium (default masks missing data as "NEUTRAL")
+File: schemas.py:214
+What's wrong: `regime: MarketRegime = MarketRegime.NEUTRAL` — same issue as SC1. If the macro engine fails to compute regime, the schema defaults to "NEUTRAL" instead of None. Frontend renders "Market regime: Neutral" instead of "Market regime: unknown".
+What it should be: `regime: Optional[MarketRegime] = None`.
+Why it matters: Same as SC1 — a specific value is used as the default, masking missing data as a real determination.
+
+FINDING SC3 — medium (default confidence 50.0 masks "not computed" as "50% confident")
+File: schemas.py:202, 215
+What's wrong: `MarketMetric.confidence: float = 50.0` and `MarketTemperature.regime_confidence: float = 50.0`. If the framework fails to compute confidence, the schema defaults to 50.0 — rendered as "50% confident". 50% is the threshold zone for "uncertain" — exactly the wrong sentinel because it LOOKS like a real determination.
+What it should be: `confidence: Optional[float] = None`. Frontend can show "—" or "not computed".
+Why it matters: A user seeing "Confidence: 50%" thinks the framework computed low confidence. Actually the framework didn't run. Wrong mental model of the data quality.
+
+FINDING SC4 — minor (free-form string fields should be Enums)
+File: schemas.py:239, 315
+What's wrong:
+  - `CrossVerification.status: str = "unverified"` — comment says "verified / discrepancy / unverified" but it's a free-form string.
+  - `ProjectReport.fee_stability: Optional[str] = None` — comment says `"stable" / "volatile" / "unknown"` but free-form.
+Both fields have a documented closed set of values but use `str` instead of an Enum. Typos like "verifed" or "Stable" would silently pass schema validation.
+What it should be: `class CrossVerificationStatus(str, Enum): VERIFIED="verified"; DISCREPANCY="discrepancy"; UNVERIFIED="unverified"` and similar for FeeStability.
+Why it matters: Type safety. A future bug that writes `status = "verifed"` (typo) is silently accepted by Pydantic and surfaces as a frontend rendering bug ("unknown status" instead of green "Verified" badge).
+
+FINDING SC5 — minor (default direction "—" not in documented value set)
+File: schemas.py:200
+What's wrong: `direction: str = "—"` — comment says "up/down/flat". The default is "—" (em-dash), which isn't one of the three documented values. If the framework forgets to set direction, frontend code expecting "up"|"down"|"flat" gets "—" and may render incorrectly (e.g., a switch statement without a default case).
+What it should be: either add "unknown" / "none" as a documented value, or use Optional[str] = None.
+Why it matters: API contract drift. Frontend type generators produce `direction: "up" | "down" | "flat"` but the runtime can emit "—".
+
+================================================================================
+SUMMARY
+================================================================================
+
+Total findings: 18 (across 2 files)
+- main.py /alerts:           4 findings (2 medium, 2 minor)
+- main.py /score-history:     2 findings (1 medium, 1 minor)
+- main.py /dune/*:            4 findings (3 medium, 1 minor)
+- main.py /system/health-check: 7 findings (2 critical, 4 medium, 1 minor)
+- schemas.py:                 5 findings (3 medium, 2 minor)
+
+Critical-severity findings: 2 (both in /system/health-check)
+Medium-severity findings: 11
+Minor-severity findings: 5
+
+Top 5 highest-priority findings:
+1. H1 — /system/health-check UnboundLocalError when CoinGecko or DeFiLlama fetch raises (critical, defeats the purpose of the endpoint)
+2. H2 — /system/health-check `coins_checked = data_gaps + 20` wrong formula (critical, misleading diagnostic metric)
+3. D1 — /dune/execute docstring says body is `{"params": {...}}` but FastAPI expects the dict directly (medium, every client following docs gets broken params)
+4. S1 + D2 — /score-history and /dune/query no limit validation; SQLite `LIMIT -1` returns all rows (medium, DoS vector)
+5. A1 — /alerts no threshold > 0 validation; negative threshold generates false alerts (medium, frontend polling spam)
+
+Patterns observed:
+- UnboundLocalError from try/except + later reference (H1): same family as finding #4 in prior audit — try/except that swallows errors but leaves variables unassigned
+- Hardcoded thresholds (H3, A1): magic numbers without scaling or validation
+- Schema mismatches (A2, SC1, SC2, SC3): field names or defaults that lie about what they contain
+- Missing input validation (S1, D2, A1): no bounds on user-supplied integers/floats
+- Sequential awaits in loops (H5): missed `asyncio.gather` parallelization opportunity
+- Response shape inconsistency (D3): available vs unavailable cases have different keys
+- Default values that mask missing data as specific values (SC1, SC2, SC3): cycle_phase=HIDDEN_DEV, regime=NEUTRAL, confidence=50.0 — all use a "real-looking" sentinel instead of None
+
+No bugs found in: /score-history/{symbol} beyond S1 (S2 is docstring-only). The endpoint's core logic is correct.
+No bugs found in: the parallel-gather pattern in /dune/insights/{symbol} (line 1168-1173) — `return_exceptions=True` + `isinstance(x, dict)` check correctly handles None returns and Exceptions.
+
+No code was modified. No commits were made. This report is read-only.
