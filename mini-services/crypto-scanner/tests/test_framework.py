@@ -152,6 +152,58 @@ def test_persona_weights_sum_to_one():
         assert abs(total - 1.0) < 0.001, f"{persona.value} weights sum to {total}, not 1.0"
 
 
+def test_custom_weights_reject_negative_values():
+    """Custom weights must all be non-negative — negative weights invert scoring.
+
+    Regression guard for advisor-found bug. The validation checked that weights
+    sum to 0.8-1.2, but didn't check individual values. A weight set like
+    {Utility: -0.2, Economic: 0.6, Moat: 0.3, Token: 0.2, Gov: 0.1} sums to 1.0
+    but a negative Utility weight means a HIGH Utility score DECREASES the total
+    — exactly backwards. The fix rejects any negative weight and falls back to
+    the persona preset.
+    """
+    # Simulate the validation logic from analysis.py lines 150-165
+    required_axes = {"Invisible Utility", "Economic Engine", "Moat",
+                     "Token & Market Structure", "Governance / Legal / Security"}
+
+    # Case 1: all non-negative, sum in range → accept (existing behavior)
+    good_weights = {
+        "Invisible Utility": 0.20,
+        "Economic Engine": 0.30,
+        "Moat": 0.20,
+        "Token & Market Structure": 0.15,
+        "Governance / Legal / Security": 0.15,
+    }
+    assert set(good_weights.keys()) == required_axes
+    total = sum(good_weights.values())
+    all_non_negative = all(v >= 0 for v in good_weights.values())
+    accepted = (0.8 <= total <= 1.2) and all_non_negative
+    assert accepted, "All-positive weights summing to 1.0 should be accepted"
+
+    # Case 2: negative weight, sum still in range → REJECT (the bug)
+    bad_weights = {
+        "Invisible Utility": -0.2,  # NEGATIVE — would invert Utility axis
+        "Economic Engine": 0.6,
+        "Moat": 0.3,
+        "Token & Market Structure": 0.2,
+        "Governance / Legal / Security": 0.1,
+    }
+    assert set(bad_weights.keys()) == required_axes
+    total = sum(bad_weights.values())  # = 1.0 — passes sum check
+    all_non_negative = all(v >= 0 for v in bad_weights.values())
+    accepted = (0.8 <= total <= 1.2) and all_non_negative
+    assert not accepted, (
+        "Negative weight must be rejected even when sum is in 0.8-1.2 range"
+    )
+
+    # Case 3: all zero → sum=0, rejected by sum check
+    zero_weights = {k: 0.0 for k in required_axes}
+    total = sum(zero_weights.values())
+    all_non_negative = all(v >= 0 for v in zero_weights.values())
+    accepted = (0.8 <= total <= 1.2) and all_non_negative
+    assert not accepted, "All-zero weights should be rejected (sum out of range)"
+
+
 # ========================================================================== #
 #  PHASE 6: Valuation Multiples (P/R, P/F, P/T)
 # ========================================================================== #

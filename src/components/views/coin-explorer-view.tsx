@@ -194,6 +194,7 @@ export function CoinExplorerView({
   const [error, setError] = React.useState<string | null>(null);
 
   const initialConsumedRef = React.useRef(false);
+  const onClearInitialRef = React.useRef(onClearInitial);
   const analyzeAbortRef = React.useRef<AbortController | null>(null);
 
   // ----------------------------------------------------------------------- //
@@ -260,6 +261,14 @@ export function CoinExplorerView({
   // ----------------------------------------------------------------------- //
   //  Auto-select a coin when initialGeckoId is provided
   // ----------------------------------------------------------------------- //
+  // Reset the consumed flag whenever initialGeckoId changes, so deep-linking
+  // works repeatedly (e.g. user clicks coin A in Market Intelligence, goes
+  // back, clicks coin B). The old code set initialConsumedRef=true and never
+  // reset it, so only the FIRST coin ever auto-selected.
+  React.useEffect(() => {
+    initialConsumedRef.current = false;
+  }, [initialGeckoId]);
+
   React.useEffect(() => {
     if (initialConsumedRef.current) return;
     if (!initialGeckoId) return;
@@ -267,6 +276,11 @@ export function CoinExplorerView({
 
     let cancelled = false;
     const geckoId = initialGeckoId;
+    // Capture onClearInitial in a ref so it doesn't cause effect re-runs.
+    // The old code had onClearInitial in the dep array, which meant any
+    // parent passing an inline arrow (new function ref each render) would
+    // tear down and restart the effect, killing the in-flight fetch.
+    onClearInitialRef.current = onClearInitial;
 
     (async () => {
       try {
@@ -311,14 +325,14 @@ export function CoinExplorerView({
           api_symbol: geckoId,
         });
       } finally {
-        if (!cancelled && onClearInitial) onClearInitial();
+        if (!cancelled && onClearInitialRef.current) onClearInitialRef.current();
       }
     })();
 
     return () => {
       cancelled = true;
     };
-  }, [initialGeckoId, onClearInitial]);
+  }, [initialGeckoId]);
 
   // ----------------------------------------------------------------------- //
   //  Close search results dropdown on outside click / Escape

@@ -153,7 +153,12 @@ def build_report(
                          "Token & Market Structure", "Governance / Legal / Security"}
         if set(custom_w.keys()) == required_axes:
             total = sum(custom_w.values())
-            if 0.8 <= total <= 1.2:  # Allow slight deviation
+            # Validate: all weights must be non-negative. A negative weight
+            # would invert the axis contribution (high axis score → lower
+            # total), which is nonsensical for a weighted-average scoring.
+            # Even if the sum is in 0.8-1.2, a negative weight is rejected.
+            all_non_negative = all(v >= 0 for v in custom_w.values())
+            if 0.8 <= total <= 1.2 and all_non_negative:
                 # Normalize to 1.0
                 weights = {k: v / total for k, v in custom_w.items()}
             else:
