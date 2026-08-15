@@ -1118,7 +1118,7 @@ def test_collect_preserves_gecko_categories_end_to_end():
     mock_sources.is_dune_available.return_value = False
 
     with patch("framework.evidence.sources", mock_sources):
-        b = asyncio.get_event_loop().run_until_complete(collect(candidate))
+        b = asyncio.run(collect(candidate))
 
     # The real CoinGecko category must survive — not be overwritten by "other"
     assert b.category == "Smart Contract Platform", (
