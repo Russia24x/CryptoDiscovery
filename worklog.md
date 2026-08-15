@@ -2998,3 +2998,28 @@ Session stats:
 - Tests: 37 → 44 (7 regression tests added)
 - All pushed + verified (RULES.md §4)
 - All followed RULES.md §2 (sync), §5 (incremental), §6 (no auto-commit trust)
+
+---
+Task ID: root-cause-scan-analysis
+Agent: main
+Task: Advisor proposed empirical scan to test if audit fixes changed score distribution (the long-standing "why 10-30?" question).
+
+Work Log:
+- Ran 3 scans on same 12 projects (persona=investor, mc 100-50000M):
+  Scan 1 (pre-fix baseline from earlier session): avg=20.0, range 8.5-33.0, 92% under 30
+  Scan 2 (after #13 wiring fix, category propagation): avg=20.0 — category 'other' went 8/12 → 0/12, but scores unchanged
+  Scan 3 (after three-state None fix): avg=21.2 (+1.2)
+
+- Root cause found: _apply_gecko_detail set has_api=has_sdk=has_docs=True ONLY when GitHub repo present, False otherwise. This penalized all projects without GitHub (stablecoins, exchange tokens, RWA). Invisible Utility axis scored ~1.5-3/10 for them.
+
+- Advisor's insight: replacing "GitHub → True" with "website → True" would just swap bias (pessimistic → optimistic), not fix it. Correct fix: three-state (True/False/None) where None=neutral (2.5), per "Never guess missing data" principle.
+
+- Applied three-state: has_sdk (GitHub repo = strong signal), has_docs (homepage = weak signal), has_api (genuinely unknown, stays None). score_invisible_utility: True=4.0, False=1.0, None=2.5.
+
+- Result: marginal +1.2 improvement. Deeper root cause may remain — other axes (Economic Engine, Moat, Token Market) may have similar two-state patterns, or the scoring formula is structurally conservative (e.g. weakest-link penalty, sub-factor averaging).
+
+Stage Summary:
+- 2 commits: 348a456 (category propagation to report.candidate) + 7019f7b (three-state scoring)
+- Tests: 44 → 45 (+1 regression for three-state)
+- The "why 10-30?" question is partially answered: category + GitHub-coupling were 2 contributors, but not the whole story. The remaining ~21.2 average suggests the scoring formula itself (or other axes' two-state patterns) contributes more.
+- Lesson: empirical scans are the only way to verify behavioral fixes actually move scores — unit tests alone can't catch this (they test logic, not aggregate impact)
