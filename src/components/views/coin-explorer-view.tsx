@@ -1023,19 +1023,25 @@ function ReportCard({
   onReportProvided: boolean;
   tf: (key: string, fallback: string, vars?: Record<string, string | number>) => string;
 }) {
-  const pqScore = report.project_quality_score ?? 0;
+  // Keep pqScore/confidence as null when the backend omits them (malformed
+  // report, partial backend failure). The old `?? 0` defaults painted a
+  // red "0/100" radial — visually identical to a genuine 0/100 score —
+  // misleading the user into thinking the project scored terribly when
+  // actually the backend just failed to score it.
+  const pqScore = report.project_quality_score ?? null;
   const tqScore = report.token_quality_score;
-  const confidence = report.confidence ?? 0;
+  const confidence = report.confidence ?? null;
   const veto = report.veto;
-  const decision = report.decision;
-  const candidate = report.candidate;
+  const decision = report.decision ?? { action_label: "—" };
+  const candidate = report.candidate ?? { name: report.candidate?.name ?? "—", symbol: "—" };
 
   return (
     <Card className="border-border/60 bg-card/40 backdrop-blur-sm shadow-xl shadow-black/30 overflow-hidden">
-      {/* Top accent bar */}
+      {/* Top accent bar — neutral (slate) when score is missing */}
       <div className={cn(
         "h-1 w-full",
-        pqScore >= 70 ? "bg-emerald-500/60"
+        pqScore == null ? "bg-slate-500/60"
+        : pqScore >= 70 ? "bg-emerald-500/60"
         : pqScore >= 50 ? "bg-amber-500/60"
         : "bg-rose-500/60",
       )} />
@@ -1072,14 +1078,20 @@ function ReportCard({
         <div className="flex flex-col sm:flex-row gap-5 sm:items-center">
           {/* Score radial */}
           <div className="flex flex-col items-center gap-1.5 shrink-0 mx-auto sm:mx-0">
-            <ScoreRadial
-              score={pqScore}
-              max={100}
-              size={132}
-              strokeWidth={10}
-              label={tf("explorer.projectQuality", "Project Quality")}
-              sublabel={tf("explorer.outOf100", "out of 100")}
-            />
+            {pqScore == null ? (
+              <div className="flex h-[132px] w-[132px] items-center justify-center rounded-full border-8 border-slate-500/30 bg-slate-500/10">
+                <span className="text-2xl font-bold text-slate-500">—</span>
+              </div>
+            ) : (
+              <ScoreRadial
+                score={pqScore}
+                max={100}
+                size={132}
+                strokeWidth={10}
+                label={tf("explorer.projectQuality", "Project Quality")}
+                sublabel={tf("explorer.outOf100", "out of 100")}
+              />
+            )}
           </div>
 
           {/* Action + confidence + token quality */}
@@ -1089,10 +1101,12 @@ function ReportCard({
                 <TrendingUp className="size-3" />
                 {decision.action_label}
               </Badge>
-              <Badge variant="outline" className="gap-1">
-                <Target className="size-3" />
-                {tf("explorer.confidence", "Confidence")}: {fmtPct(confidence)}
-              </Badge>
+              {confidence != null && (
+                <Badge variant="outline" className="gap-1">
+                  <Target className="size-3" />
+                  {tf("explorer.confidence", "Confidence")}: {fmtPct(confidence)}
+                </Badge>
+              )}
               {tqScore != null && (
                 <Badge variant="outline" className="gap-1">
                   <Zap className="size-3" />
@@ -1161,7 +1175,7 @@ function ReportCard({
             {tf("explorer.fiveAxes", "5 Fundamental Axes")}
           </h4>
           <div className="space-y-2.5">
-            {report.axes.map((ax, i) => (
+            {(Array.isArray(report.axes) ? report.axes : []).map((ax, i) => (
               <AxisRow key={`${ax.name}-${i}`} name={ax.name} score={ax.score} reason={ax.key_reason} />
             ))}
           </div>

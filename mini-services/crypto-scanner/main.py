@@ -634,7 +634,10 @@ async def backtest():
         results.append({
             "symbol": symbol,
             "score": score,
-            "action": entry.get("action"),
+            # score_history.action column stores the action LABEL (string),
+            # not the int ActionLevel. Renamed from 'action' to 'action_label'
+            # for consistency with /alerts (same column, same type mismatch).
+            "action_label": entry.get("action"),
             "timestamp": timestamp,
             "gecko_id": gecko_id,
             "price_then": price_then,

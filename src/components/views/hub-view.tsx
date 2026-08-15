@@ -1198,7 +1198,17 @@ function CrossVerificationCard({
   const btcDiff = discrepancyPct(cgBtcDom, cmcBtcDom);
   const mcapDiff = discrepancyPct(cgMcap, cmcMcap);
 
-  const bothOk = (btcDiff ?? 1) <= 1.5 && (mcapDiff ?? 1) <= 5;
+  // When either source is missing (discrepancyPct returns null), we cannot
+  // claim "Verified" — that would falsely assure the user. The old code used
+  // `?? 1` fallback which treated missing data as "1% discrepancy" (just under
+  // the OK thresholds of 1.5%/5%), rendering a green "Verified" badge even
+  // though one source had not returned.
+  // Now: if either diff is null → "Awaiting data" (partial) state.
+  const isPartial = btcDiff == null || mcapDiff == null;
+  const bothOk =
+    !isPartial &&
+    (btcDiff as number) <= 1.5 &&
+    (mcapDiff as number) <= 5;
 
   return (
     <Card className="border-border/60 bg-card/40 backdrop-blur-sm">
@@ -1213,10 +1223,16 @@ function CrossVerificationCard({
             className={cn(
               bothOk
                 ? "border-emerald-500/30 bg-emerald-500/15 text-emerald-600 dark:text-emerald-400"
-                : "border-amber-500/30 bg-amber-500/15 text-amber-600 dark:text-amber-400",
+                : isPartial
+                  ? "border-slate-500/30 bg-slate-500/15 text-slate-600 dark:text-slate-400"
+                  : "border-amber-500/30 bg-amber-500/15 text-amber-600 dark:text-amber-400",
             )}
           >
-            {bothOk ? tt("hub.status.verified", "Verified") : tt("hub.status.discrepancy", "Discrepancy")}
+            {bothOk
+              ? tt("hub.status.verified", "Verified")
+              : isPartial
+                ? tt("hub.status.awaiting", "Awaiting data")
+                : tt("hub.status.discrepancy", "Discrepancy")}
           </Badge>
         </div>
         <CardDescription className="text-xs">

@@ -178,7 +178,7 @@ class InvestmentAnalysis(BaseModel):
     valuation_attractiveness: Optional[float] = None
     timing: Optional[float] = None
     investment_attractiveness: Optional[float] = None
-    cycle_phase: CyclePhase = CyclePhase.HIDDEN_DEV
+    cycle_phase: Optional[CyclePhase] = None  # None = not computed (don't mask as HIDDEN_DEV)
     catalysts: list[Catalyst] = Field(default_factory=list)
     thesis: str = ""
     kill_conditions: list[str] = Field(default_factory=list)
@@ -199,7 +199,7 @@ class MarketMetric(BaseModel):
     value: str
     direction: str = "—"  # up/down/flat
     source: str = ""
-    confidence: float = 50.0
+    confidence: Optional[float] = None  # None = not computed (don't mask as 50.0)
 
 
 class MarketTemperature(BaseModel):
@@ -211,8 +211,8 @@ class MarketTemperature(BaseModel):
     dxy: Optional[float] = None
     etf_flow_7d: Optional[float] = None
     dev_activity: Optional[str] = None
-    regime: MarketRegime = MarketRegime.NEUTRAL
-    regime_confidence: float = 50.0
+    regime: Optional[MarketRegime] = None  # None = not computed (don't mask as NEUTRAL)
+    regime_confidence: Optional[float] = None  # None = not computed (don't mask as 50.0)
     metrics: list[MarketMetric] = Field(default_factory=list)
     timestamp: Optional[datetime] = None
 
