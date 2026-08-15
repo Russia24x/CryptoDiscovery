@@ -191,7 +191,16 @@ def score_economic_engine(
 
     # Recurrence / retention
     subs["Recurrence"] = 6.0 if (econ.recurrence and "recur" in econ.recurrence.lower()) else 3.0
-    subs["Retention"] = (econ.retention_pct or 0.0) / 10.0  # 0-100 → 0-10
+    # Retention: three-state (same "Never guess missing data" pattern as
+    # Invisible Utility). retention_pct is None for all projects — no public
+    # API provides retention data (only Dune when configured, and even then
+    # it's retention_7d not a percentage). The old code did
+    # (retention_pct or 0.0)/10 = 0.0, treating unknown as "zero retention"
+    # (worst). Now: None → neutral (5.0), confirmed value → actual/10.
+    if econ.retention_pct is None:
+        subs["Retention"] = 5.0  # neutral — we don't know
+    else:
+        subs["Retention"] = econ.retention_pct / 10.0  # 0-100 → 0-10
 
     # Customer concentration (lower is better)
     cc = (econ.customer_concentration or "").lower()

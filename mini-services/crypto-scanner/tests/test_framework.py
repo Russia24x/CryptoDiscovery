@@ -1260,6 +1260,66 @@ def test_collect_preserves_gecko_categories_end_to_end():
     )
 
 
+# ========================================================================== #
+#  Retention sub-factor: None must be neutral, not worst (0.0)
+#
+#  Same "Never guess missing data" pattern as has_api/has_sdk/has_docs.
+#  retention_pct is None for ALL projects (no public API provides it).
+#  Old code: (retention_pct or 0.0)/10 = 0.0 → Retention sub-factor = 0.0
+#  → triggered weakest-link penalty on every project.
+# ========================================================================== #
+
+def test_retention_none_is_neutral_not_zero():
+    """retention_pct=None (unknown) must score neutral (5.0), not worst (0.0).
+
+    retention_pct is None for all projects — no public API provides it.
+    The old code did (retention_pct or 0.0)/10 = 0.0, treating unknown
+    as 'zero retention' (worst possible). This was one of the 2 sub-factors
+    (along with Token Utility) that scored 0.0 across all 12 projects in
+    the empirical scan, triggering the weakest-link +10 penalty on every
+    single project.
+
+    Fix: None → neutral (5.0), confirmed value → actual/10.
+    """
+    from framework.evaluation import score_economic_engine
+    from models.schemas import EconomicEngine, EvidenceGrade
+
+    # Case A: retention_pct=None (unknown) → should be 5.0 (neutral)
+    econ_none = EconomicEngine()
+    econ_none.retention_pct = None
+    econ_none.recurrence = "recurring"
+    econ_none.tvl = 1_000_000_000
+    result_none = score_economic_engine(econ_none, evidence_grade=EvidenceGrade.B, sources=2)
+    assert result_none.sub_factors["Retention"] == 5.0, (
+        f"retention_pct=None should be neutral 5.0, got {result_none.sub_factors['Retention']}"
+    )
+
+    # Case B: retention_pct=80 (confirmed high) → should be 8.0
+    econ_high = EconomicEngine()
+    econ_high.retention_pct = 80.0
+    econ_high.recurrence = "recurring"
+    econ_high.tvl = 1_000_000_000
+    result_high = score_economic_engine(econ_high, evidence_grade=EvidenceGrade.B, sources=2)
+    assert result_high.sub_factors["Retention"] == 8.0, (
+        f"retention_pct=80 should be 8.0, got {result_high.sub_factors['Retention']}"
+    )
+
+    # Case C: retention_pct=0 (confirmed zero) → should be 0.0 (genuinely worst)
+    econ_zero = EconomicEngine()
+    econ_zero.retention_pct = 0.0
+    econ_zero.recurrence = "recurring"
+    econ_zero.tvl = 1_000_000_000
+    result_zero = score_economic_engine(econ_zero, evidence_grade=EvidenceGrade.B, sources=2)
+    assert result_zero.sub_factors["Retention"] == 0.0, (
+        f"retention_pct=0 (confirmed) should be 0.0, got {result_zero.sub_factors['Retention']}"
+    )
+
+    # KEY: None must score higher than 0 (proves unknown != confirmed worst)
+    assert result_none.sub_factors["Retention"] > result_zero.sub_factors["Retention"], (
+        "None (unknown) must score higher than 0.0 (confirmed zero)"
+    )
+
+
 if __name__ == "__main__":
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     passed = 0
