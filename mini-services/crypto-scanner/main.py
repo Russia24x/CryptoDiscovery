@@ -341,9 +341,19 @@ async def list_scans():
 async def get_score_history(symbol: str, limit: int = 20):
     """Get historical scores for a symbol — for trend analysis.
 
-    Returns a list of {project_quality, token_quality, confidence, action, timestamp}
-    entries, newest first. Data persists across restarts via SQLite.
+    Returns a list of {symbol, scan_id, project_quality, token_quality,
+    confidence, action, timestamp} entries, newest first. Data persists
+    across restarts via SQLite.
+
+    `limit` must be between 1 and 500. Negative limits in SQLite return
+    ALL rows (DoS vector); 0 returns empty; clamped here to prevent abuse.
     """
+    # Validate limit — SQLite LIMIT -1 returns ALL rows (DoS), and
+    # Python slicing rows[:0] returns empty (surprising). Clamp to 1-500.
+    if limit < 1:
+        limit = 1
+    elif limit > 500:
+        limit = 500
     history = db.get_score_history(symbol, limit=limit)
     if not history:
         return {"symbol": symbol.upper(), "history": [], "count": 0}
@@ -473,11 +483,21 @@ async def search_coins(q: str = ""):
 async def get_alerts(threshold: float = 10.0):
     """Check for significant score changes in score_history.
 
-    Returns alerts for symbols whose project_quality changed by more than
-    `threshold` points between consecutive scans.
+    Returns alerts for symbols whose project_quality changed by `threshold`
+    points or more between consecutive scans.
 
     Designed to be polled by the frontend every 60s for in-app notifications.
+
+    Note: `threshold` must be positive. A non-positive threshold is rejected
+    with 422 because `abs(delta) >= negative` is always True, which would
+    spam false alerts for every symbol with >=2 history entries.
     """
+    if threshold <= 0:
+        from fastapi import HTTPException
+        raise HTTPException(
+            status_code=422,
+            detail=f"threshold must be positive (got {threshold})",
+        )
     conn = db._get_conn()
     # Find symbols with multiple score entries
     rows = conn.execute("""
@@ -505,7 +525,12 @@ async def get_alerts(threshold: float = 10.0):
                 "delta": round(delta, 1),
                 "current_score": latest["project_quality"],
                 "previous_score": previous["project_quality"],
-                "action": latest.get("action"),
+                # NOTE: score_history.action column stores the action LABEL
+                # (string like 'Watch', 'High Conviction'), not the int
+                # ActionLevel. Renamed from 'action' to 'action_label' to
+                # match what it actually contains and avoid type confusion
+                # with Decision.action (int Enum).
+                "action_label": latest.get("action"),
                 "timestamp": latest["timestamp"],
                 "message": f"{symbol} score {'increased' if delta > 0 else 'decreased'} by {abs(delta):.1f} points ({previous['project_quality']:.0f} → {latest['project_quality']:.0f})",
             })
@@ -1126,10 +1151,19 @@ async def get_dune_query(query_id: str, limit: int = 100):
 
     Browse https://dune.com/browse to find query IDs.
     Returns dune_pro_required=True when no API key is set.
+
+    `limit` must be between 1 and 1000. Negative limits cause Python slicing
+    to return unexpected slices (e.g. rows[:-5] = 'all but last 5');
+    clamped here to prevent silent data truncation.
     """
     if not sources.is_dune_available():
         return {"dune_pro_required": True, "rows": [], "row_count": 0,
                 "message": "Set DUNE_API_KEY env var (free at dune.com/api-keys) to unlock on-chain data"}
+    # Validate limit — rows[:limit] with negative limit returns unexpected slices
+    if limit < 1:
+        limit = 1
+    elif limit > 1000:
+        limit = 1000
     data = await sources.fetch_dune_query_results(query_id, limit=limit)
     if data is None:
         return {"rows": [], "row_count": 0, "message": "Query returned no data or failed"}
@@ -1140,7 +1174,8 @@ async def get_dune_query(query_id: str, limit: int = 100):
 async def execute_dune_query(query_id: str, params: dict | None = None):
     """Execute a Dune query with parameters and fetch fresh results.
 
-    Body: {"params": {"token_symbol": "ETH", ...}}
+    Body: {"token_symbol": "ETH", ...}  (params passed directly, NOT wrapped)
+
     Returns dune_pro_required=True when no API key is set.
     """
     if not sources.is_dune_available():
@@ -1257,16 +1292,22 @@ async def system_health_check():
     }
 
     # Test CoinGecko
+    markets: list[dict] = []  # initialize BEFORE try so UnboundLocalError is impossible
     try:
         markets = await sources.fetch_top_markets_extended(per_page=20)
         sources_status["coingecko"] = len(markets) > 0
+    except asyncio.CancelledError:
+        raise
     except Exception:  # noqa: BLE001
         pass
 
     # Test DeFiLlama
+    protos: list[dict] = []  # initialize BEFORE try so UnboundLocalError is impossible
     try:
         protos = await sources.fetch_defillama_protocols()
         sources_status["defillama"] = len(protos) > 0
+    except asyncio.CancelledError:
+        raise
     except Exception:  # noqa: BLE001
         pass
 
@@ -1274,6 +1315,8 @@ async def system_health_check():
     try:
         kl = await sources.fetch_cmc_keyless_by_symbol("BTC")
         sources_status["cmc_keyless"] = kl is not None and kl.get("name") is not None
+    except asyncio.CancelledError:
+        raise
     except Exception:  # noqa: BLE001
         pass
 
@@ -1343,10 +1386,11 @@ async def system_health_check():
                 })
 
     # 4) Summary
+    coins_checked_count = min(len(markets), 20) if markets else 0
     report["summary"] = {
         "sources_online": sum(1 for v in sources_status.values() if v),
         "sources_total": len(sources_status),
-        "coins_checked": len(report["data_gaps"]) + 20,  # approx
+        "coins_checked": coins_checked_count,  # actual count, not gaps+20
         "data_gaps_found": len(report["data_gaps"]),
         "blockchain_tokens_detectable": chain_sym_count,
         "status": "healthy" if len(report["data_gaps"]) <= 3 else "needs_attention",
