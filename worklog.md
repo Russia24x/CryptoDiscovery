@@ -3079,3 +3079,834 @@ Stage Summary:
 - 4 commits: 348a456 (category prop), 7019f7b (3-state), 41ca147 (retention), df4645f (radius formula)
 - Tests: 44 → 47 (+3 regression)
 - The "why 10-30?" mystery from early worklog is now fully explained and fixed
+
+================================================================================
+AUDIT: audit-phase-2-market-intelligence
+================================================================================
+Agent: code auditor (read-only)
+Scope: backend /market/overview, /cmc/airdrops, /cmc/categories, /cmc/exchanges,
+       /cmc/global-metrics, /coingecko/chart, /coingecko/ohlc,
+       /coingecko/new-coins, /coingecko/categories (main.py 905-1262)
+       + frontend src/components/views/market-intelligence-view.tsx (1665 lines)
+Mode: READ-ONLY audit. No files modified. No commits made.
+
+================================================================================
+FILE 1: mini-services/crypto-scanner/main.py — market-intelligence endpoints
+================================================================================
+
+FINDING MI-1 — critical (silent full failure mode)
+File: main.py:905-1000  (`/market/overview`)
+What's wrong: The endpoint uses `asyncio.gather(..., return_exceptions=True)` (good —
+   one source failing doesn't take down the whole endpoint). Each upstream result is
+   checked via `isinstance(results[X], <type>)` and falls back to None / [] when the
+   upstream raised (lines 927-932). HOWEVER: when ALL six upstream sources fail
+   simultaneously (e.g., CoinGecko is rate-limited and DeFiLlama is unreachable —
+   exactly the scenario this dashboard exists to monitor), the endpoint still returns
+   HTTP 200 with a fully-empty body:
+     {"global": null, "fear_greed": null, "trending": [], "top_coins": [],
+      "gainers": [], "losers": [], "top_defi": [], "top_fees": [],
+      "sectors": [], "defi_tvl_total": 0, "coin_count": 0,
+      "defi_protocol_count": 0, "cached_at": "<now>"}
+   The frontend's `useMarketOverview` hook sees `res.ok=true`, parses valid JSON,
+   sets `data=<empty>`, `loading=false`, `error=null`. The dashboard renders the
+   "main content" branch (line 1331: `!loading && !error && data && (...)`).
+   All six StatCards render with "—", FearGreedGauge shows "No data", every tab
+   shows "No coins / No trending coins / No DeFi protocols / No fee data / No
+   sector data". There is NO error message anywhere — the user sees a "successful"
+   but completely empty dashboard and has no way to tell whether (a) the market
+   is genuinely empty (impossible) or (b) upstream fetch failed.
+What it should be: Detect the "all sources failed" case explicitly:
+     sources_ok = any(isinstance(r, (dict, list)) and r for r in results)
+     if not sources_ok:
+         return JSONResponse(status_code=503, content={
+             "error": "all_upstreams_unavailable",
+             "message": "CoinGecko + DeFiLlama + Fear&Greed all failed",
+             "partial": {...},
+         })
+   OR: include a top-level `health` field (e.g., "healthy" / "degraded" /
+   "all_failed") plus per-source sub-health so the frontend can render a banner.
+Why it matters: This dashboard is the user's primary "is the market data
+   pipeline alive?" surface. When it silently shows an empty-but-200 state, the
+   user has no way to know whether they should retry, wait, or report a bug. The
+   whole point of unifying CMC + DeFiLlama was to give a single pane of glass —
+   but a single pane that goes blank on outage is worse than separate panes that
+   each show their own error.
+
+FINDING MI-2 — medium (truthiness filter excludes market_cap=0)
+File: main.py:938-942
+What's wrong: `with_change = [m for m in markets
+                              if m.get("price_change_percentage_24h_in_currency") is not None
+                              and m.get("market_cap")]`
+   The first condition correctly uses `is not None` (handles 0.0% correctly).
+   The second uses `m.get("market_cap")` as a truthy check — this excludes
+   coins whose `market_cap` is 0 (legitimately valid for new listings without
+   circulating supply). Same anti-pattern as bug category #5 in the audit
+   brief. In practice CoinGecko returns `null` rather than 0 for unknown
+   market caps, so the impact is minor — but the inconsistent check style
+   (one `is not None`, one truthy) signals copy-paste oversight.
+What it should be: `and m.get("market_cap") is not None`
+Why it matters: If CoinGecko ever starts returning 0 (or if a future
+   upstream change cascades), gainers/losers silently drop coins. Bug
+   category #5.
+
+FINDING MI-3 — medium (uses private discovery internals)
+File: main.py:974-975
+What's wrong: `cat = discovery._guess_category(m, sym)` and
+   `sector = discovery._sector_for(cat)` — calls two underscore-prefixed private
+   functions of the `discovery` module from outside it. Same encapsulation
+   breach flagged as H7 (worklog line 2866-2870) and D4. The codebase
+   already established the convention that main.py should not reach into
+   sources._ or discovery._ internals.
+What it should be: promote `_guess_category` and `_sector_for` to public
+   (`guess_category`, `sector_for`) in discovery.py, OR add public wrappers
+   in discovery.py that main.py calls.
+Why it matters: Refactoring risk — if discovery.py renames or removes these
+   helpers, this endpoint silently breaks at runtime (no import error since
+   they're accessed via attribute, not import).
+
+FINDING MI-4 — minor (redundant local `import asyncio as _aio`)
+File: main.py:917
+What's wrong: `import asyncio as _aio` inside the function body, but
+   `import asyncio` already appears at module level (main.py:14). Same
+   anti-pattern flagged as H7/D4 in prior audits. The `_aio.gather(...)`
+   call (line 918) could simply be `asyncio.gather(...)`.
+What it should be: remove the local import, use the module-level `asyncio`.
+Why it matters: Inconsistency + minor perf hit (cached import, but still
+   useless). Signals copy-paste origin from another endpoint that did the
+   same thing.
+
+FINDING MI-5 — medium (top_coins/gainers/losers/top_defi/top_fees use hardcoded
+   slice lengths)
+File: main.py:935, 943-944, 948, 966
+What's wrong: Hardcoded magic numbers `[:50]`, `[:10]`, `[:50]`, `[:30]` with
+   no query-parameter override. The user cannot ask for top 100 coins, top 20
+   gainers, or top 50 fee generators. The endpoint description says "Top coins
+   by mcap" without specifying count.
+What it should be: add `top_n: int = 50`, `gainers_n: int = 10`, etc. as
+   query params with bounds `1 ≤ n ≤ 250`. (Pattern already used at
+   /news `limit`.)
+Why it matters: API rigidity. The frontend always renders 50/10/30 — no
+   way to request more without changing backend code.
+
+FINDING MI-6 — medium (docstring lies about scope of gainers/losers)
+File: main.py:911 docstring
+What's wrong: Docstring says "biggest gainers & losers (24h)" — but gainers
+   and losers are computed ONLY across the 250 markets fetched
+   (`fetch_top_markets_extended(per_page=250)`). A coin outside the top-250
+   by market cap that had a huge 24h pump will NOT appear in gainers.
+What it should be: docstring should say "biggest gainers & losers (24h)
+   among the top 250 coins by market cap".
+Why it matters: Misleading API contract. A consumer reading the docstring
+   thinks gainers/losers are global; they're not.
+
+--------------------------------------------------------------------------------
+FINDING MC-1 — medium (no limit validation in /cmc/airdrops)
+File: main.py:1075-1092
+What's wrong: `async def get_cmc_airdrops(limit: int = 50, status: str = "ONGOING")`
+   accepts ANY integer for `limit` and ANY string for `status`. There is:
+     - No lower bound (limit=-1, limit=0)
+     - No upper bound (limit=100000)
+     - No `status` validation against the documented closed set
+       {ONGOING, UPCOMING, ENDED} — a typo like "ongoing" (lowercase) or
+       "ACTIVE" is silently forwarded to CMC and either errors upstream or
+       returns an empty list.
+   Compare with /dune/query/{query_id} at line 1173-1177, which DOES validate
+   `limit` against a 1..1000 range. The CMC endpoints don't follow the same
+   pattern.
+What it should be:
+     if limit < 1: limit = 1
+     elif limit > 5000: limit = 5000  # CMC's max per page
+     if status not in {"ONGOING", "UPCOMING", "ENDED"}:
+         raise HTTPException(400, "status must be ONGOING | UPCOMING | ENDED")
+Why it matters: (1) Garbage `status` strings cause silent empty responses
+   that look like "no airdrops exist". (2) Malicious/accidental `limit=999999`
+   passes a huge number to CMC, which will either reject it or return a
+   non-trivial amount of data. Compare with the D1/S1 limit-validation
+   fixes already applied to other endpoints.
+
+FINDING MC-2 — medium (no pagination / `start` parameter)
+File: main.py:1075
+What's wrong: The endpoint has only `limit`, no `start`/`offset`. CMC's API
+   supports `start` for pagination — the user cannot fetch page 2 of airdrops.
+   If a user wants all upcoming airdrops and there are 200+, they can only
+   get the first 50 (default) or whatever limit they set.
+What it should be: add `start: int = 1` query param with `start >= 1`,
+   forward to sources.fetch_cmc_airdrops.
+Why it matters: API completeness — limits the endpoint to a single page.
+
+FINDING MC-3 — medium (fetch failures masked as "no data exists")
+File: main.py:1086-1092
+What's wrong: When `sources.fetch_cmc_airdrops()` returns None (because
+   sources.py:695 caught an `httpx.HTTPError` or `ValueError`), the endpoint
+   returns `{"airdrops": [], "count": 0, "status_filter": status,
+   "fetched_at": "<now>"}`. This is INDISTINGUISHABLE from "CMC API returned
+   successfully but there are genuinely 0 airdrops matching the filter"
+   (which is impossible for ONGOING — there are always dozens). The frontend
+   can't tell whether to show "No airdrops right now" or "Connection error,
+   please retry".
+What it should be: distinguish the two cases:
+     if airdrops is None:
+         return {"fetch_failed": True, "airdrops": [], "count": 0,
+                 "message": "CMC request failed (network or rate-limit)"}
+   OR set HTTP 503 with the same body.
+Why it matters: Misleading return values (bug category #8). Same pattern in
+   /cmc/categories (MC-5), /cmc/exchanges (MC-7), /cmc/global-metrics
+   (MC-8), /coingecko/new-coins (CG-6), /coingecko/categories (CG-8).
+
+FINDING MC-4 — medium (no defensive catch for unexpected Exception)
+File: main.py:1086-1090
+What's wrong: The try/except catches ONLY `sources.CmcPlanNotSupported`.
+   If `sources.fetch_cmc_airdrops()` raises any other exception (e.g., a
+   future bug in sources.py introduces an `AttributeError` or `KeyError`),
+   the endpoint will return HTTP 500. Per bug category #4, missing the
+   defensive `except Exception` that returns a structured error.
+   Compare with /market/overview at line 925 which uses `return_exceptions=True`
+   for graceful degradation.
+What it should be:
+     try:
+         airdrops = await sources.fetch_cmc_airdrops(limit=limit, status=status)
+     except sources.CmcPlanNotSupported:
+         return {"plan_not_supported": True, ...}
+     except asyncio.CancelledError:
+         raise
+     except Exception as exc:
+         log.warning("CMC airdrops endpoint failed: %s", exc)
+         return {"fetch_failed": True, "airdrops": [], "count": 0,
+                 "message": "Internal error fetching airdrops"}
+Why it matters: Unhandled 500s on transient issues (network blip, JSON
+   parse error from a malformed CMC response). Same applies to MC-5/MC-7/MC-8.
+
+--------------------------------------------------------------------------------
+FINDING MC-5 — medium (same fetch-failure-as-empty-data pattern in /cmc/categories)
+File: main.py:1095-1111
+What's wrong: Same as MC-3. When `cats` is None (network error inside
+   sources.py:650), returns `{"categories": [], "count": 0, ...}` —
+   indistinguishable from "CMC has 0 categories" (impossible; CMC has
+   hundreds).
+What it should be: return a `fetch_failed: True` flag, OR HTTP 503.
+Why it matters: Frontend can't distinguish "CMC Pro plan lacks categories"
+   from "transient network error". User sees empty list either way.
+
+FINDING MC-6 — medium (/cmc/categories response includes no `plan_not_supported`
+   handling on the frontend type)
+File: main.py:1107-1109  (backend) + scanner-types.ts:388-394 (frontend type)
+What's wrong: Backend can return `{"plan_not_supported": True, "categories": [],
+   "count": 0, "message": "..."}` (main.py:1108), but the frontend's
+   `CmcCategoriesResponse` type at scanner-types.ts:388-394 does NOT declare
+   `plan_not_supported?: boolean`. Type-system drift: TypeScript thinks the
+   field doesn't exist, so the frontend's check
+   `!categoriesData.cmc_pro_required` (market-intelligence-view.tsx:1646)
+   never accounts for `plan_not_supported`. See MI-FE-7 below.
+What it should be: add `plan_not_supported?: boolean` to the
+   `CmcCategoriesResponse` interface.
+Why it matters: Compiles fine, runs wrong. Type-system masks a real runtime
+   case the backend explicitly handles.
+
+--------------------------------------------------------------------------------
+FINDING MC-7 — medium (no limit validation in /cmc/exchanges)
+File: main.py:1114-1130
+What's wrong: `async def get_cmc_exchanges(limit: int = 50)` — same as MC-1,
+   no min/max bounds on `limit`. Negative or huge values pass through to CMC.
+What it should be: clamp to 1 ≤ limit ≤ 5000 (or whatever CMC's per-page max
+   is for /v1/exchange/map).
+Why it matters: Same as MC-1 — silent garbage-in / potential DoS surface.
+
+FINDING MC-8 — medium (same fetch-failure-as-empty pattern in /cmc/exchanges)
+File: main.py:1124-1130
+What's wrong: Same as MC-3/MC-5 — when fetch returns None, returns
+   `{"exchanges": [], "count": 0, ...}` indistinguishable from "no exchanges"
+   (impossible; CMC has hundreds).
+What it should be: add `fetch_failed` flag or 503.
+Why it matters: Misleading return value (bug category #8).
+
+--------------------------------------------------------------------------------
+FINDING MC-9 — medium (misleading "metrics: null" on fetch failure)
+File: main.py:1145-1150
+What's wrong: When `sources.fetch_cmc_global_metrics()` returns None (network
+   error inside sources.py:776), the endpoint returns
+   `{"metrics": None, "fetched_at": "<now>"}`. No `error`, `fetch_failed`, or
+   `message` field. The frontend cannot distinguish "CMC has no global
+   metrics" (impossible) from "fetch failed".
+   Also, the docstring (line 1135-1141) says "Provides CMC's own BTC dominance,
+   total mcap, and 24h volume — used to cross-verify CoinGecko's global data"
+   — but the endpoint does NO cross-verification. It just returns the raw
+   metrics. Misleading description.
+What it should be:
+     if metrics is None:
+         return {"fetch_failed": True, "metrics": None,
+                 "message": "CMC global metrics fetch failed"}
+Why it matters: Misleading return value (bug #8). Plus misleading docstring
+   implies the endpoint does work it doesn't.
+
+================================================================================
+FILE 2: /coingecko/* endpoints (main.py:1233-1262)
+================================================================================
+
+FINDING CG-1 — medium (no gecko_id validation in /coingecko/chart)
+File: main.py:1233-1239
+What's wrong: `async def get_price_chart(gecko_id: str, days: int = 7)` —
+   no validation of `gecko_id` format. CoinGecko IDs are lowercase alphanumeric
+   + hyphens (`^[a-z0-9-]+$`), but this endpoint accepts ANY string and
+   forwards it directly to sources.fetch_price_chart, which builds the URL
+   `f"{COINGECKO_BASE}/coins/{gecko_id}/market_chart"` (sources.py:1309).
+   A `gecko_id` containing `/`, `?`, `#`, or `..` segments is path-injected
+   into the upstream URL. httpx normalizes `../` sequences in URLs, so a
+   request like `/coingecko/chart/foo%2F..%2Fbar` resolves to
+   `https://api.coingecko.com/api/v3/coins/bar/market_chart` — not SSRF per se
+   (still hits CoinGecko) but lets the user hit unintended upstream endpoints.
+   A `gecko_id` of e.g. `bitcoin?include=tickers` would inject a query param.
+What it should be:
+     import re
+     if not re.fullmatch(r"[a-z0-9_-]+", gecko_id):
+         raise HTTPException(400, "invalid gecko_id format")
+Why it matters: Defense-in-depth. The audit brief explicitly calls out
+   "Missing input validation (limit, symbol, gecko_id format)" as bug #7.
+   Even though the practical exploitation is limited, the endpoint accepts
+   unvalidated user input that flows into a URL.
+
+FINDING CG-2 — medium (no `days` validation in /coingecko/chart)
+File: main.py:1233-1239
+What's wrong: `days: int = 7` accepts any integer including 0, negative,
+   and huge values. CoinGecko's /market_chart endpoint supports specific
+   values: 1, 7, 14, 30, 90, 365, max. Other integer values cause CoinGecko
+   to return 400 (or silently behave unexpectedly — e.g., `days=2` returns
+   hourly granularity, `days=91` returns daily).
+   Sources.py:1308-1310 forwards `days=str(days)` directly. No bounds check.
+What it should be:
+     ALLOWED_DAYS = {1, 7, 14, 30, 90, 365, "max"}
+     # but days is typed as int, so just clamp:
+     if days not in {1, 7, 14, 30, 90, 365}:
+         raise HTTPException(400, "days must be one of: 1, 7, 14, 30, 90, 365")
+Why it matters: Garbage-in-garbage-out. A `days=0` request returns an error
+   from CoinGecko, then sources.py returns None, then the endpoint returns
+   `{"error": "Chart data unavailable (may be rate-limited)"}` — which
+   MISLEADINGLY suggests rate-limiting when the actual cause was invalid input.
+
+FINDING CG-3 — medium (misleading "may be rate-limited" error message)
+File: main.py:1237-1238
+What's wrong: When `sources.fetch_price_chart()` returns None, the endpoint
+   returns `{"error": "Chart data unavailable (may be rate-limited)"}`. But
+   sources.py:1294-1322 returns None for ANY failure — network error, JSON
+   parse error, CoinGecko 404 (invalid gecko_id), CoinGecko 400 (invalid
+   days), CoinGecko 500, AND rate-limit 429. The error message overpromises
+   a specific cause that's only one of many possibilities.
+What it should be: either (a) distinguish failure modes in sources.py and
+   propagate them, or (b) make the message generic:
+     return {"error": "Chart data unavailable", "reason": "upstream_failure"}
+Why it matters: Misleading error message (bug category #8). User sees
+   "rate-limited" and thinks they should wait; actual cause might be a
+   typo in gecko_id that needs fixing.
+
+FINDING CG-4 — medium (response-shape inconsistency: error vs success)
+File: main.py:1237-1239
+What's wrong: On success, returns the raw dict from sources.fetch_price_chart
+   (which has shape `{gecko_id, days, prices, market_caps, total_volumes}`).
+   On failure, returns `{"error": "..."}` — a completely different shape.
+   The frontend has to check for `error` field before accessing `prices`.
+   Compare with /coingecko/ohlc below which at least returns a structured
+   success body — but its error case is still a different shape.
+What it should be: consistent envelope:
+     if data is None:
+         return {"gecko_id": gecko_id, "days": days, "prices": [],
+                 "error": "unavailable"}
+Why it matters: API contract drift — frontend must special-case the error
+   shape.
+
+--------------------------------------------------------------------------------
+FINDING CG-5 — medium (no gecko_id validation in /coingecko/ohlc)
+File: main.py:1242-1248
+What's wrong: Same as CG-1. `gecko_id: str` with no format validation.
+What it should be: same regex check `^[a-z0-9_-]+$`.
+Why it matters: Same as CG-1.
+
+FINDING CG-6 — medium (no `days` validation in /coingecko/ohlc)
+File: main.py:1242-1248
+What's wrong: CoinGecko's /ohlc endpoint is even stricter than /market_chart:
+   it accepts ONLY days ∈ {1, 7, 14, 30, 90, 120, 240, 365}. Other values
+   return 400. Yet the endpoint accepts any int and forwards to sources.
+What it should be:
+     if days not in {1, 7, 14, 30, 90, 120, 240, 365}:
+         raise HTTPException(400, "days must be one of: 1,7,14,30,90,120,240,365")
+Why it matters: Same as CG-2 — invalid input silently produces misleading
+   "data unavailable" error.
+
+FINDING CG-7 — medium (misleading "OHLC data unavailable" error)
+File: main.py:1246-1247
+What's wrong: Same as CG-3. Sources returns None for ANY failure (network,
+   rate-limit, 404, 400, 500). The error message is generic enough here, but
+   the response shape is inconsistent with the success case (`{gecko_id,
+   days, candles, count}` vs `{"error": "..."}`).
+What it should be: consistent envelope, distinguish failure modes.
+Why it matters: Same as CG-4.
+
+--------------------------------------------------------------------------------
+FINDING CG-8 — medium (fetch failure masked as empty data in /coingecko/new-coins)
+File: main.py:1251-1255
+What's wrong: When `sources.fetch_new_coins()` returns None (network error
+   in sources.py:1357), endpoint returns `{"coins": [], "count": 0}` —
+   indistinguishable from "CoinGecko has no new coins" (impossible).
+What it should be: add `fetch_failed: True` flag or HTTP 503.
+Why it matters: Misleading return value (bug #8).
+
+FINDING CG-9 — minor (no `fetched_at` field in /coingecko/new-coins and
+   /coingecko/categories)
+File: main.py:1251-1262
+What's wrong: Both endpoints omit `fetched_at` in their response, while
+   /market/overview, /cmc/*, /news all include it. Frontend has no way to
+   tell how stale the data is.
+What it should be: add `"fetched_at": datetime.now(timezone.utc).isoformat()`
+   to both responses.
+Why it matters: Inconsistency. Compare with /market/overview line 999.
+
+FINDING CG-10 — medium (fetch failure masked as empty data in /coingecko/categories)
+File: main.py:1258-1262
+What's wrong: Same as CG-8. When fetch returns None, returns
+   `{"categories": [], "count": 0}` — indistinguishable from "CoinGecko has
+   0 categories" (impossible; CoinGecko has hundreds).
+What it should be: add `fetch_failed` flag or 503.
+Why it matters: Misleading return value (bug #8).
+
+================================================================================
+FILE 3: src/components/views/market-intelligence-view.tsx (1665 lines)
+================================================================================
+
+FINDING MI-FE-1 — critical (no AbortController cleanup in useMarketOverview —
+   unmount race + rapid-refresh race)
+File: market-intelligence-view.tsx:230-271
+What's wrong: The `load` function creates an AbortController inside its body
+   (line 241-242) but the controller is local — it's never stored in a ref,
+   so the `useEffect` at line 266-268 has no way to call `ctrl.abort()` on
+   cleanup. Two race conditions result:
+   (a) Unmount race: if the component unmounts while a fetch is in flight,
+       the fetch eventually resolves and calls `setData` on an unmounted
+       component → React warning + state-update-on-unmounted-component.
+   (b) Refresh race: if the user clicks Refresh while the initial load is
+       still in flight, two fetches run concurrently. Whichever resolves
+       LAST wins — if the initial (stale) request resolves after the
+       refresh (e.g., due to a cache miss on refresh), the dashboard shows
+       stale data even though the user just clicked Refresh.
+   This was previously documented as backlog item 3.3 (worklog line 2980)
+   but NOT yet fixed — still present in current code.
+What it should be:
+     const abortRef = React.useRef<AbortController | null>(null);
+     const reqIdRef = React.useRef(0);
+     const load = React.useCallback(async (isRefresh: boolean) => {
+       abortRef.current?.abort();
+       const ctrl = new AbortController();
+       abortRef.current = ctrl;
+       const myReqId = ++reqIdRef.current;
+       // ... fetch ...
+       if (myReqId !== reqIdRef.current) return;  // stale
+       setData(json);
+     }, []);
+     React.useEffect(() => {
+       load(false);
+       return () => abortRef.current?.abort();
+     }, [load]);
+Why it matters: Real-world reproduction: user clicks Market Intelligence tab,
+   immediately clicks Coin Explorer, then back to Market Intelligence —
+   twice. Three fetches in flight, last-resolving wins. User sees stale
+   cache_age + old prices despite multiple refreshes. Also reproduces on
+   slow networks when user clicks Refresh impatiently.
+
+FINDING MI-FE-2 — medium (no concurrent-load protection for refresh button)
+File: market-intelligence-view.tsx:236-264, 1311-1317
+What's wrong: The Refresh button is disabled while `refreshing` is true
+   (line 1312: `disabled={refreshing}`), but `refreshing` only flips to true
+   AFTER `load(true)` is called. There's a tiny window between click and the
+   synchronous `setRefreshing(true)` where a double-click could trigger two
+   `load(true)` calls. Combined with MI-FE-1, this guarantees the race.
+What it should be: track in-flight requests via the AbortController ref
+   (see MI-FE-1 fix).
+Why it matters: Race conditions (bug #10).
+
+FINDING MI-FE-3 — medium (empty catch {} in fetchAirdrops + fetchCategories)
+File: market-intelligence-view.tsx:1227, 1240
+What's wrong: Both lazy-fetch helpers wrap their fetch in
+     `try { ... } catch { /* non-critical */ }`
+   The empty catch swallows ALL errors — network failure, JSON parse error,
+   AbortError, etc. The `finally` block sets `airdropsFetched=true` /
+   `categoriesFetched=true` and `loading=false`, so the UI transitions from
+   loading to "empty data shown" with no indication that anything went wrong.
+   User can't tell whether (a) the API key isn't configured (would have been
+   caught by `cmc_pro_required` check), (b) the network is down, or (c)
+   there genuinely are 0 airdrops.
+   Previously documented as backlog items 3.1-3.2 (worklog line 2979) — still
+   present.
+What it should be:
+     try {
+       const res = await fetch(...);
+       if (!res.ok) {
+         setAirdropsError(`HTTP ${res.status}`);
+       } else {
+         setAirdropsData(await res.json());
+       }
+     } catch (err) {
+       setAirdropsError(err instanceof Error ? err.message : String(err));
+     } finally { ... }
+Why it matters: Empty catch (bug #9). User-visible: "I clicked Airdrops tab,
+   it just showed a loading spinner that disappeared, and now I see an empty
+   space with no message." No retry button, no error explanation.
+
+FINDING MI-FE-4 — medium (no AbortController in fetchAirdrops / fetchCategories)
+File: market-intelligence-view.tsx:1222-1246
+What's wrong: Neither lazy-fetch helper uses an AbortController. If the user
+   clicks Airdrops tab, then quickly switches to Top Coins, then back to
+   Airdrops (before the first fetch resolves), two concurrent fetches fire.
+   The `airdropsFetched` guard in the effect (line 1250) prevents the SECOND
+   one only AFTER `finally` runs, but `finally` runs only after the first
+   fetch completes. So the rapid switch triggers duplicate fetches.
+What it should be: pass an AbortController signal to fetch, abort on re-entry.
+Why it matters: Race conditions (bug #10) + wasted requests to a rate-limited
+   CMC endpoint.
+
+FINDING MI-FE-5 — medium (silently ignores non-OK HTTP responses)
+File: market-intelligence-view.tsx:1225-1226, 1238-1239
+What's wrong: `if (res.ok) setAirdropsData(await res.json());` — when the
+   backend returns 4xx/5xx (e.g., 503 from a backend crash, 429 from
+   rate-limit, 500 from a bug), the response is silently dropped. No error
+   state is set. The user sees the same "empty space" as MI-FE-3.
+What it should be: at minimum log the status; ideally set an error state.
+Why it matters: Bug #9 + #12 (missing loading/error states).
+
+FINDING MI-FE-6 — medium (Airdrops hardcoded to ONGOING status, no UI to
+   change filter)
+File: market-intelligence-view.tsx:1225
+What's wrong: `fetch("/api/scanner/cmc/airdrops?limit=50&status=ONGOING")` —
+   the `status` query param is hardcoded. The backend supports ONGOING,
+   UPCOMING, and ENDED (main.py:1079), but the frontend has no UI to switch
+   between them. The user can only ever see ongoing airdrops. The text on
+   line 1614 says "Showing {count} ongoing airdrops" — accurate, but the
+   user might expect to see upcoming ones too.
+   Previously documented as backlog 3.6 (worklog line 2981) — still present.
+What it should be: add a SegmentedControl / Tabs above the AirdropsTable
+   with options {Ongoing, Upcoming, Ended} that re-fetch on change.
+Why it matters: Feature limitation masquerading as a bug — the backend
+   exposes the data but the frontend gates it.
+
+FINDING MI-FE-7 — critical (Categories tab doesn't handle `plan_not_supported`)
+File: market-intelligence-view.tsx:1646
+What's wrong: The Categories tab's conditional chain is:
+     {categoriesLoading && <Skeleton />}
+     {!categoriesLoading && categoriesData?.cmc_pro_required && <CmcProRequired ... />}
+     {!categoriesLoading && categoriesData && !categoriesData.cmc_pro_required && (
+       <> ... CategoriesTable ... </>
+     )}
+   It checks `cmc_pro_required` but NOT `plan_not_supported`. The backend's
+   /cmc/categories endpoint (main.py:1107-1109) explicitly returns
+   `{"plan_not_supported": True, "categories": [], "count": 0, ...}` when the
+   user's CMC API key is active but its plan doesn't include the categories
+   endpoint. When this happens, the frontend:
+     1. `categoriesData.cmc_pro_required` is undefined (falsy) → skip
+     2. `categoriesData && !categoriesData.cmc_pro_required` is true → render
+        CategoriesTable with `categories: []`
+   The user sees "Showing 0 categories" + an empty table with column
+   headers (CategoriesTable at line 1160-1202 has NO empty-state UI —
+   unlike CoinTable/TrendingTable/DefiTable/FeesTable which all do).
+   The Airdrops tab at line 1605 DOES correctly check `plan_not_supported`
+   and shows an upgrade card. Asymmetric handling.
+   Also: the `CmcCategoriesResponse` TypeScript type (scanner-types.ts:388-394)
+   doesn't even declare `plan_not_supported?: boolean` — type-system drift
+   (see MC-6).
+What it should be:
+     - Add `plan_not_supported?: boolean` to CmcCategoriesResponse type.
+     - Mirror the Airdrops-tab pattern at line 1605-1610:
+         {!categoriesLoading && categoriesData?.plan_not_supported && (
+           <CmcProRequired title="Categories not available on your CMC plan" ... />
+         )}
+     - Add empty-state UI to CategoriesTable (mirror CoinTable line 864).
+Why it matters: User with a Basic CMC plan (which has airdrops but not
+   categories) sees a broken-looking empty Categories tab. No upgrade prompt,
+   no error, no explanation. Worst-case UX.
+
+FINDING MI-FE-8 — medium (Airdrops tab also fails to render anything when
+   fetch silently fails)
+File: market-intelligence-view.tsx:1583-1620
+What's wrong: When `airdropsData` is null (the silent-catch case from
+   MI-FE-3/MI-FE-5), the three-way conditional at lines 1599/1605/1611 fails
+   all three branches:
+     - `airdropsLoading` is false (finally ran)
+     - `airdropsData?.cmc_pro_required` is undefined (no data) → skip
+     - `airdropsData?.plan_not_supported` is undefined → skip
+     - `airdropsData && !airdropsData.cmc_pro_required` is false (data is null) → skip
+   Result: NOTHING renders in the CardContent. The user sees a card with a
+   header "Crypto Airdrops" and an empty body. Same applies to Categories tab
+   at lines 1640/1646.
+What it should be: add a fallback branch:
+     {!airdropsLoading && !airdropsData && (
+       <p className="text-sm text-muted-foreground">
+         {tt("market.failedToLoad", "Failed to load — click another tab and back to retry.")}
+       </p>
+     )}
+Why it matters: Missing error state (bug #12). User sees blank panel.
+
+FINDING MI-FE-9 — medium (AirdropsTable formats total_value_usd as "$XK"
+   instead of using fmtUsd)
+File: market-intelligence-view.tsx:1133
+What's wrong: `{a.total_value_usd != null ? \`$${(a.total_value_usd / 1000).toFixed(1)}K\` : "—"}`
+   For a $5,000,000 airdrop: `5000000/1000 = 5000`, renders as "$5000.0K".
+   For a $50,000 airdrop: renders as "$50.0K".
+   For a $500 airdrop: renders as "$0.5K" (looks like $500, not $0.5K).
+   The component already has a `fmtUsd` helper (line 113-124) that formats
+   to T/B/M/K with auto-scaling — `$5.00M`, `$50.0K`, `$500`. Inconsistent
+   use of formatting.
+What it should be: `{a.total_value_usd != null ? fmtUsd(a.total_value_usd) : "—"}`
+Why it matters: Bug #8 (misleading values). User reading "$5000.0K" has to
+   do mental math to convert to $5M. Inconsistent with how StatCards display.
+
+FINDING MI-FE-10 — medium (CategoriesTable formats market_cap as B and
+   volume_24h as M — inconsistent with fmtUsd)
+File: market-intelligence-view.tsx:1181, 1191
+What's wrong: Line 1181: `{c.market_cap != null ? \`$${(c.market_cap / 1e9).toFixed(2)}B\` : "—"}`
+   For a $50M category: `50000000/1e9 = 0.05`, renders as "$0.05B" (ugly).
+   For a $500K category: renders as "$0.00B" (useless — looks like $0).
+   Line 1191: `{c.volume_24h != null ? \`$${(c.volume_24h / 1e6).toFixed(1)}M\` : "—"}`
+   Same issue — small categories show "$0.0M".
+   Should use `fmtUsd` for auto-scaling.
+What it should be: `{c.market_cap != null ? fmtUsd(c.market_cap) : "—"}`
+Why it matters: Same as MI-FE-9. Misleading values for small categories.
+
+FINDING MI-FE-11 — minor (TrendingRow shows ugly "0.000e+0 ₿" for price_btc=0)
+File: market-intelligence-view.tsx:605
+What's wrong: `{coin.price_btc != null ? \`${coin.price_btc.toExponential(3)} ₿\` : "—"}`
+   For `price_btc=0`: `0..toExponential(3) === "0.000e+0"`, renders as
+   "0.000e+0 ₿" — technically correct but visually broken.
+What it should be:
+     {coin.price_btc != null
+       ? (coin.price_btc === 0 ? "0 ₿" : `${coin.price_btc.toExponential(3)} ₿`)
+       : "—"}
+Why it matters: Minor display bug — bad UX for the edge case.
+
+FINDING MI-FE-12 — medium (CategoriesTable + AirdropsTable lack empty-state UI)
+File: market-intelligence-view.tsx:1088-1157 (AirdropsTable), 1160-1202 (CategoriesTable)
+What's wrong: When `airdrops` or `categories` is an empty array, the
+   component renders the table header row with an empty `<TableBody>`.
+   The user sees just the column headers with no rows and no explanation.
+   Compare with CoinTable (line 864-870), TrendingTable (line 909-915),
+   DefiTable (line 944-950), FeesTable (line 975-981) — all four have
+   explicit empty-state UI ("No coins", "No trending coins", etc.).
+What it should be: add an `if (airdrops.length === 0) return <NoData/>` block
+   mirroring CoinTable.
+Why it matters: Bug #12 (missing loading/error states). When combined with
+   MI-FE-7 (plan_not_supported not handled), the user sees an empty table
+   with no explanation.
+
+FINDING MI-FE-13 — medium (silent graceful-degradation when all sources return
+   empty)
+File: market-intelligence-view.tsx:1331-1659 (main content branch)
+What's wrong: When `data` is present but all subfields are empty (the
+   MI-1 backend bug — all upstream sources failed), the frontend renders
+   the main content with:
+     - 6 StatCards all showing "—"
+     - FearGreedGauge showing "No data"
+     - DefiTvlPanel showing "—"
+     - All 7 tab counts showing "0"
+     - Each tab body shows its empty-state message
+   There is NO top-level error banner, NO "data unavailable" indicator.
+   The error Alert at line 1325 only fires when `error` is truthy — and
+   `error` is only set on HTTP failure or AbortError, NOT on a 200-with-
+   empty-body response.
+What it should be: detect the "all empty" case:
+     const allEmpty = data && !data.global && !data.fear_greed &&
+       (data.top_coins?.length ?? 0) === 0 &&
+       (data.trending?.length ?? 0) === 0 &&
+       (data.top_defi?.length ?? 0) === 0;
+     {allEmpty && (
+       <Alert variant="default" className="border-amber-500/40 bg-amber-500/5">
+         <AlertCircle />
+         <AlertTitle>Data sources unavailable</AlertTitle>
+         <AlertDescription>All upstream APIs (CoinGecko, DeFiLlama) returned empty. Please retry.</AlertDescription>
+       </Alert>
+     )}
+Why it matters: Critical silent failure (bug #12). The dashboard looks
+   "alive" (cards rendered, tabs visible) but is showing nothing. Worst UX.
+
+FINDING MI-FE-14 — medium (CmcCategoriesResponse type missing plan_not_supported)
+File: scanner-types.ts:388-394 (referenced from market-intelligence-view.tsx)
+What's wrong: The `CmcCategoriesResponse` interface declares:
+     interface CmcCategoriesResponse {
+       cmc_pro_required?: boolean;
+       categories: CmcCategory[];
+       count: number;
+       fetched_at?: string;
+       message?: string;
+     }
+   But the backend's /cmc/categories endpoint (main.py:1107-1109) can return
+   `{plan_not_supported: True, ...}`. The type doesn't declare
+   `plan_not_supported?: boolean`. TypeScript can't catch the missing-check
+   at market-intelligence-view.tsx:1646.
+What it should be: add `plan_not_supported?: boolean` to the interface.
+Why it matters: Type drift (bug #8). The backend explicitly handles a case
+   the frontend type system says can't happen.
+
+FINDING MI-FE-15 — minor (useCacheAge doesn't recompute when cachedAt changes
+   until the next 10s tick)
+File: market-intelligence-view.tsx:274-284
+What's wrong: `useCacheAge` uses a `setInterval(10000)` to update `now`, and
+   recomputes `now - cachedAt` on every render. But when `cachedAt` changes
+   (e.g., user clicks Refresh → new `cached_at` from backend), `now` is
+   still the old value (last tick). The displayed age shows the OLD age for
+   up to 10 seconds after refresh, then catches up.
+What it should be: also `setNow(Date.now())` whenever `cachedAt` changes:
+     React.useEffect(() => {
+       setNow(Date.now());
+     }, [cachedAt]);
+Why it matters: Cosmetic. User clicks Refresh, expects "Updated 0s ago", but
+   sees "Updated 45s ago" for up to 10s. Confusing.
+
+FINDING MI-FE-16 — minor (CategoriesTable renders c.num_tokens without
+   null-check)
+File: market-intelligence-view.tsx:1179
+What's wrong: `{c.num_tokens}` is rendered directly. The TS type
+   (scanner-types.ts:378) says `num_tokens: number` (non-null), but CMC's
+   API can return `null` for new categories without token counts yet. If
+   that happens, the cell renders nothing (React skips rendering of null
+   for primitives... actually no, React would render "null" or nothing
+   depending on the path). Behavior is implementation-defined.
+What it should be: `{c.num_tokens ?? "—"}`
+Why it matters: Defensive against backend drift.
+
+FINDING MI-FE-17 — minor (CategoriesTable c.top_coins.join could throw if
+   top_coins is undefined)
+File: market-intelligence-view.tsx:1194
+What's wrong: `{c.top_coins.join(", ") || "—"}` — calls `.join` directly on
+   `c.top_coins`. The TS type says `top_coins: string[]` (non-null), but
+   sources.py:641 builds it as `[c.get("name") for c in (cat.get("top_3_coins") or []) if isinstance(c, dict)]`
+   — if `cat.get("top_3_coins")` is None (CMC sometimes omits), the list
+   comprehension produces `[]`, so backend always returns an array. So this
+   is safe in practice. But defensive code would be `(c.top_coins || []).join(", ")`.
+What it should be: defensive `((c.top_coins as string[]) || []).join(", ")`
+Why it matters: Defensive against future backend changes.
+
+FINDING MI-FE-18 — minor (CoinRow 7d and 30d columns lack arrow icons that
+   24h column has)
+File: market-intelligence-view.tsx:527-532
+What's wrong: The 24h column (lines 514-525) shows `ArrowUpRight` /
+   `ArrowDownRight` icons based on sign. The 7d (line 527-529) and 30d
+   (line 530-532) columns just use `fmtPct(change7d)` / `fmtPct(change30d)`
+   with no icons. Inconsistent presentation across columns that show the
+   same kind of data (percentage change).
+What it should be: extract a `<PctCell value={change} showIcon />` component,
+   use for all three columns.
+Why it matters: Inconsistency, not a bug per se.
+
+FINDING MI-FE-19 — minor (DefiRow image onError hides via visibility instead
+   of replacing with placeholder)
+File: market-intelligence-view.tsx:648-651
+What's wrong: `(e.currentTarget as HTMLImageElement).style.visibility = "hidden";`
+   sets visibility:hidden, which keeps the layout space (the `<img>` still
+   occupies size-5x5). The fallback initial-state check at line 652-656
+   only fires on initial render, not on image-load error. So when an image
+   URL is set but the image fails to load (broken URL, 404), the user sees
+   an empty 20×20px box where the logo should be.
+What it should be: swap the broken image for a placeholder div:
+     onError={(e) => {
+       const img = e.currentTarget as HTMLImageElement;
+       img.style.display = "none";
+       // show sibling placeholder
+     }}
+   Or use a state-driven approach.
+Why it matters: Minor cosmetic bug. Broken logos leave visual gaps.
+
+FINDING MI-FE-20 — minor (no API URL hardcoded — good)
+File: market-intelligence-view.tsx (all fetches)
+What's GOOD: All `fetch()` calls use relative paths:
+     /api/scanner/market/overview
+     /api/scanner/cmc/airdrops?limit=50&status=ONGOING
+     /api/scanner/cmc/categories
+   No hardcoded backend URLs. This is the correct pattern.
+   No finding here — noting for completeness per the audit brief's "Are
+   there any hardcoded API URLs instead of relative paths?" question.
+
+================================================================================
+ANSWERS TO SPECIFIC AUDIT QUESTIONS
+================================================================================
+
+Q1: Does `/market/overview` use `Promise.all` or `asyncio.gather`? If one source
+    fails, does the whole endpoint fail or degrade gracefully?
+A1: Uses `asyncio.gather(..., return_exceptions=True)` (main.py:918-926).
+    Per-source degradation is GOOD — each result is type-checked
+    (`isinstance(results[X], dict|list)`) and falls back to None/[].
+    HOWEVER: when ALL six sources fail, the endpoint returns 200 with
+    fully-empty body (MI-1, critical) — no error path. The graceful
+    degradation goes too far.
+
+Q2: Do `/coingecko/chart` and `/coingecko/ohlc` validate `gecko_id` and `days`
+    parameters?
+A2: NO. Neither parameter is validated (CG-1, CG-2, CG-5, CG-6). `gecko_id`
+    accepts any string (forwarded directly into upstream URL — path-injection
+    risk). `days` accepts any int (CoinGecko's /market_chart supports only
+    specific values; /ohlc is even stricter — 1,7,14,30,90,120,240,365).
+
+Q3: Does `/cmc/airdrops` have pagination/limit validation?
+A3: NO limit validation (MC-1). NO status validation (MC-1). NO pagination
+    via `start` parameter (MC-2). Only `limit` (any int) and `status` (any
+    string) — both forwarded to upstream without bounds checking.
+
+Q4: Does market-intelligence-view handle the case where individual data sources
+    return null/empty?
+A4: PARTIALLY. `useMarketOverview` correctly handles `data === null` (error
+    state) and `data` with full content (success state). BUT it does NOT
+    handle the case where `data` is present but all subfields are empty
+    (MI-FE-13, medium). Also the lazy-fetchers for Airdrops/Categories
+    don't handle null data (MI-FE-3, MI-FE-8). And the Categories tab doesn't
+    handle `plan_not_supported` (MI-FE-7, critical).
+
+Q5: Are there any hardcoded API URLs instead of relative paths?
+A5: NO. All fetches use relative paths (`/api/scanner/...`). Good.
+
+================================================================================
+SUMMARY
+================================================================================
+
+Total findings: 32 (across 2 files + scanner-types.ts)
+- main.py /market/overview:        6 findings (1 critical, 4 medium, 1 minor)
+- main.py /cmc/airdrops:           4 findings (4 medium)
+- main.py /cmc/categories:         2 findings (2 medium)
+- main.py /cmc/exchanges:         2 findings (2 medium)
+- main.py /cmc/global-metrics:    1 finding  (1 medium)
+- main.py /coingecko/* (4 endpoints): 10 findings (10 medium)
+- market-intelligence-view.tsx:   20 findings (2 critical, 9 medium, 6 minor, 1 good-note, 2 already-in-backlog)
+- scanner-types.ts:                1 finding (1 medium, type drift)
+
+Critical-severity findings: 3
+  1. MI-1   — /market/overview returns 200 with empty body when all upstreams fail; frontend renders empty dashboard with no error message
+  2. MI-FE-1 — useMarketOverview no AbortController cleanup → unmount race + rapid-refresh race (already in backlog as 3.3, still present)
+  3. MI-FE-7 — Categories tab silently shows empty table when CMC plan doesn't support categories; backend returns plan_not_supported but frontend doesn't check it
+
+Medium-severity findings: 19 (see breakdown above)
+
+Minor-severity findings: 7
+
+Previously documented as backlog (still present, re-reported here for
+visibility under this task):
+- 3.1-3.2: empty catch {} in Airdrops + Categories fetchers → MI-FE-3
+- 3.3:    no AbortController in useMarketOverview → MI-FE-1
+- 3.6:    Airdrops hardcoded to ONGOING → MI-FE-6
+
+Top 5 highest-priority findings to fix:
+1. MI-FE-7 — Categories tab plan_not_supported silent empty table (critical,
+   user-facing, easy fix — add the same conditional that Airdrops tab already has)
+2. MI-1   — /market/overview silent full-failure mode (critical, needs 503 + health flag)
+3. MI-FE-1 — useMarketOverview race condition (critical, needs AbortController + reqId ref)
+4. CG-1/CG-5 — gecko_id validation (medium, but trivial regex check, easy fix)
+5. CG-2/CG-6 — days validation (medium, easy fix; CoinGecko /ohlc is strictest)
+
+Patterns observed (recurring across this audit):
+- Silent failure mode: 200-with-empty-body when fetch fails (MI-1, MC-3,
+  MC-5, MC-8, CG-8, CG-10) — same family as the "fetch_failed vs no-data"
+  pattern; backend returns success-looking responses on internal failures
+- Missing input validation: no gecko_id format check (CG-1, CG-5), no days
+  bounds (CG-2, CG-6), no limit/status bounds (MC-1, MC-7) — same as
+  S1/D2/A1 from prior audits
+- Empty catch swallowing errors silently (MI-FE-3) — same family as A4
+  in prior audits
+- Missing AbortController (MI-FE-1, MI-FE-4) — same family as 3.3 / 4.5
+  in prior audits
+- Type-system drift (MC-6 / MI-FE-14): TS interface missing fields the
+  backend explicitly returns
+- Hardcoded unit formatting ($XB, $XM, $XK) instead of using the
+  existing fmtUsd auto-scaler (MI-FE-9, MI-FE-10) — copy-paste from
+  somewhere that hard-coded units
+
+No code was modified. No commits were made. This report is read-only.
