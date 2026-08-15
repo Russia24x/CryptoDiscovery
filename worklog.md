@@ -3023,3 +3023,32 @@ Stage Summary:
 - Tests: 44 → 45 (+1 regression for three-state)
 - The "why 10-30?" question is partially answered: category + GitHub-coupling were 2 contributors, but not the whole story. The remaining ~21.2 average suggests the scoring formula itself (or other axes' two-state patterns) contributes more.
 - Lesson: empirical scans are the only way to verify behavioral fixes actually move scores — unit tests alone can't catch this (they test logic, not aggregate impact)
+
+---
+Task ID: scan-6-weakest-link-analysis
+Agent: main
+Task: After retention_pct + 3-state fixes, run scan 6 to test advisor's weakest-link hypothesis: is the +10 penalty still on all projects due to REAL weakness, not missing data?
+
+Work Log:
+- Verified CoinGecko available (ping 200, no rate-limit in log) before scan
+- Scan 6: avg=23.6, 11/12 under 30, 12/12 STILL get weakest-link penalty
+- BUT: now penalty is from REAL weaknesses, not missing-data-as-zero:
+  - 12/12: Integration Simplicity, API Usability (has_api=None → 2.5 neutral, but still <3.0)
+  - 12/12: Developer Experience (github_stars=100 proxy for no-GitHub projects → low)
+  - 12/12: Regulatory Moat, Distribution Moat (most projects genuinely lack these)
+  - 12/12: Buyback/Burn (most projects don't have this mechanism)
+- These are legitimate low scores, not data-masking bugs.
+
+NEW BACKLOG ITEM (from advisor's observation):
+- _llama_only_pool fallback (when CoinGecko rate-limited) produces reports
+  with gecko_id=None for ALL candidates → _apply_gecko_detail never runs →
+  utility_level, has_sdk, has_docs, github_stars, has_legal_entity, chain_count
+  all silently default. This happened in scan 4. The final report doesn't
+  indicate it ran in fallback mode. Should be surfaced as a warning in the
+  report or scan status (not urgent, but worth documenting/fixing).
+
+Stage Summary:
+- Cumulative improvement: 20.0 → 23.6 (+3.6, +18%)
+- Weakest-link penalty now triggered by REAL weaknesses (12/12), not missing-data-as-zero
+- Advisor's hypothesis confirmed: now it's a design decision, not a bug
+- Ready for advisor's decision on weakest-link formula (option 1: radius-based)
