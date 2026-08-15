@@ -912,10 +912,14 @@ async def market_overview():
 
     All upstream calls are cached (90-300s) so repeated dashboard loads are
     fast and don't hammer public APIs.
+
+    Returns a top-level `health` field: 'healthy' (all ok), 'degraded'
+    (some sources failed), or 'all_failed' (every source returned None/[]).
+    The frontend can render a banner when health != 'healthy' so the user
+    knows whether an empty dashboard is genuine or due to upstream failure.
     """
-    # Fire all independent fetches in parallel
-    import asyncio as _aio
-    results = await _aio.gather(
+    # Fire all independent fetches in parallel (module-level asyncio import)
+    results = await asyncio.gather(
         sources.fetch_global_market(),
         sources.fetch_trending(),
         sources.fetch_top_markets_extended(per_page=250),
@@ -934,11 +938,12 @@ async def market_overview():
     # Top coins (first 50 by market cap)
     top_coins = markets[:50]
 
-    # Gainers & losers by 24h change
+    # Gainers & losers by 24h change — use `is not None` for market_cap too,
+    # not truthy check (category #5: truthiness treats 0/0.0 as falsy).
     with_change = [
         m for m in markets
         if m.get("price_change_percentage_24h_in_currency") is not None
-        and m.get("market_cap")
+        and m.get("market_cap") is not None
     ]
     gainers = sorted(with_change, key=lambda x: x["price_change_percentage_24h_in_currency"], reverse=True)[:10]
     losers = sorted(with_change, key=lambda x: x["price_change_percentage_24h_in_currency"])[:10]
@@ -983,6 +988,21 @@ async def market_overview():
     # Aggregate DeFi TVL
     defi_tvl = sum((p.get("tvl") or 0) for p in defi_protos)
 
+    # Health detection (MI-1 fix): surface all-source-failure so frontend
+    # can render an error banner instead of a silent empty dashboard.
+    sources_ok_count = sum(
+        1 for r in results
+        if isinstance(r, (dict, list)) and (
+            (isinstance(r, dict) and r) or (isinstance(r, list) and r)
+        )
+    )
+    if sources_ok_count == 0:
+        health = "all_failed"
+    elif sources_ok_count < 6:
+        health = "degraded"
+    else:
+        health = "healthy"
+
     return {
         "global": global_data,
         "fear_greed": fng,
@@ -996,6 +1016,9 @@ async def market_overview():
         "defi_tvl_total": defi_tvl,
         "coin_count": len(markets),
         "defi_protocol_count": len(defi_protos),
+        "health": health,  # 'healthy' | 'degraded' | 'all_failed'
+        "sources_ok": sources_ok_count,
+        "sources_total": 6,
         "cached_at": datetime.now(timezone.utc).isoformat(),
     }
 
@@ -1230,10 +1253,33 @@ async def get_dune_insights(symbol: str):
 # --------------------------------------------------------------------------- #
 #  CoinGecko enhanced endpoints (price charts, OHLC, new coins, categories)
 # --------------------------------------------------------------------------- #
+def _validate_gecko_id(gecko_id: str) -> str:
+    """Validate gecko_id format — lowercase alphanumeric + hyphens only.
+
+    CoinGecko IDs are like 'bitcoin', 'usd-coin', 'binancecoin'.
+    Reject anything that could cause malformed API calls or be a
+    path-injection vector. Returns the validated (stripped+lowered) ID.
+    Raises HTTPException(422) if invalid.
+    """
+    gid = (gecko_id or "").strip().lower()
+    if not gid or not all(c.isalnum() or c == "-" for c in gid):
+        raise HTTPException(422, f"invalid gecko_id format: {gecko_id!r} (expected lowercase alphanumeric + hyphens)")
+    return gid
+
+
 @app.get("/coingecko/chart/{gecko_id}")
 async def get_price_chart(gecko_id: str, days: int = 7):
-    """Fetch historical price chart (sparkline) for a coin."""
-    data = await sources.fetch_price_chart(gecko_id, days=days)
+    """Fetch historical price chart (sparkline) for a coin.
+
+    `days` must be 1-365. CoinGecko accepts max=365 for free tier.
+    """
+    gid = _validate_gecko_id(gecko_id)
+    # Validate days — CoinGecko chart endpoint accepts 1-365
+    if days < 1:
+        days = 1
+    elif days > 365:
+        days = 365
+    data = await sources.fetch_price_chart(gid, days=days)
     if data is None:
         return {"error": "Chart data unavailable (may be rate-limited)"}
     return data
@@ -1241,11 +1287,22 @@ async def get_price_chart(gecko_id: str, days: int = 7):
 
 @app.get("/coingecko/ohlc/{gecko_id}")
 async def get_ohlc(gecko_id: str, days: int = 7):
-    """Fetch OHLC candlestick data for a coin."""
-    data = await sources.fetch_ohlc(gecko_id, days=days)
+    """Fetch OHLC candlestick data for a coin.
+
+    CoinGecko OHLC endpoint accepts ONLY these values for `days`:
+    1, 7, 14, 30, 90, 180, 360. Any other value causes a 400 error.
+    We clamp to the nearest allowed value to avoid silent failures.
+    """
+    gid = _validate_gecko_id(gecko_id)
+    # CoinGecko OHLC only accepts: 1, 7, 14, 30, 90, 180, 360
+    allowed_ohlc_days = [1, 7, 14, 30, 90, 180, 360]
+    if days not in allowed_ohlc_days:
+        # Clamp to nearest allowed value
+        days = min(allowed_ohlc_days, key=lambda x: abs(x - days))
+    data = await sources.fetch_ohlc(gid, days=days)
     if data is None:
         return {"error": "OHLC data unavailable"}
-    return {"gecko_id": gecko_id, "days": days, "candles": data, "count": len(data)}
+    return {"gecko_id": gid, "days": days, "candles": data, "count": len(data)}
 
 
 @app.get("/coingecko/new-coins")
