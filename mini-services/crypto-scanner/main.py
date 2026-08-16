@@ -446,8 +446,12 @@ async def _run_scan(scan_id: str):
                 # Persist to SQLite
                 try:
                     db.save_report(report.id, scan_id, report.model_dump(mode="json"))
+                except asyncio.CancelledError:
+                    raise
                 except Exception as exc:  # noqa: BLE001
                     log.warning("Failed to persist report %s: %s", report.id, exc)
+            except asyncio.CancelledError:
+                raise
             except Exception as exc:  # noqa: BLE001
                 log.exception("Failed processing %s: %s", cand.symbol, exc)
                 progress.phase_log.append(f"  ! {cand.symbol} failed: {exc}")
@@ -472,6 +476,8 @@ async def _run_scan(scan_id: str):
             phase_log=progress.phase_log,
         )
 
+    except asyncio.CancelledError:
+        raise
     except Exception as exc:  # noqa: BLE001
         log.exception("Scan %s failed: %s", scan_id, exc)
         progress.status = ScanStatus.FAILED
@@ -609,6 +615,8 @@ async def backtest():
             try:
                 report_data = json.loads(report_row["report_json"])
                 gecko_id = report_data.get("candidate", {}).get("gecko_id")
+            except asyncio.CancelledError:
+                raise
             except Exception:  # noqa: BLE001
                 pass
 
@@ -647,6 +655,8 @@ async def backtest():
                         prices = chart["prices"]
                         if len(prices) >= 2:
                             price_then = prices[0][1]  # oldest = ~score time
+            except asyncio.CancelledError:
+                raise
             except Exception:  # noqa: BLE001
                 pass
 
@@ -735,6 +745,8 @@ async def correlation_analysis():
         if report_row:
             try:
                 gecko_id = json.loads(report_row["report_json"]).get("candidate", {}).get("gecko_id")
+            except asyncio.CancelledError:
+                raise
             except Exception:  # noqa: BLE001
                 pass
 
@@ -767,6 +779,8 @@ async def correlation_analysis():
                 if price_then > 0:
                     change_pct = (price_now - price_then) / price_then * 100
                     pairs.append((score, change_pct, symbol))
+        except asyncio.CancelledError:
+            raise
         except Exception:  # noqa: BLE001
             pass
 
@@ -1068,6 +1082,8 @@ def _get_user_news_sources() -> list[tuple[str, str]]:
                 if name and url:
                     result.append((name, url))
         return result
+    except asyncio.CancelledError:
+        raise
     except Exception:
         return []
 
