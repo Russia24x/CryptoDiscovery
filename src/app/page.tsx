@@ -336,6 +336,12 @@ export default function Home() {
   const watchlistDB = useIndexedDBSet("watchlist");
   const watchlist = watchlistDB.items;
   const [showWatchlist, setShowWatchlist] = useState(false);
+  // watchlist reports — fetched independently of activeScan so the watchlist
+  // shows ALL saved projects, not just the ones in the current scan.
+  // The old code passed activeScan?.reports which only contained the current
+  // scan's reports — so a watchlisted project from a previous scan would
+  // never appear in the watchlist sheet.
+  const [watchlistReports, setWatchlistReports] = useState<ScanSummaryItem[]>([]);
   // recently viewed projects (persisted to IndexedDB with localStorage fallback)
   const recentlyViewedDB = useIndexedDBList("recentlyViewed", 5);
   const recentlyViewed = recentlyViewedDB.items;
@@ -390,6 +396,32 @@ export default function Home() {
         .catch(() => {});
     }
   }, [refreshScans]);
+
+  // Fetch watchlisted reports independently of activeScan.
+  // When the watchlist opens or changes, load each watchlisted report's
+  // summary data so the WatchlistView can display them — even if they're
+  // from a previous scan, not the current one.
+  useEffect(() => {
+    if (!showWatchlist || watchlist.size === 0) {
+      setWatchlistReports([]);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      try {
+        // Fetch all projects, then filter to watchlisted ones
+        const res = await fetch("/api/scanner/projects?limit=200");
+        if (!res.ok) return;
+        const all: ScanSummaryItem[] = await res.json();
+        if (cancelled) return;
+        const watched = all.filter((r) => watchlist.has(r.id));
+        if (!cancelled) setWatchlistReports(watched);
+      } catch {
+        // non-critical — watchlist just shows empty
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [showWatchlist, watchlist]);
 
   // Alert system — poll for score changes every 60s and show browser notifications
   const lastAlertKey = useRef<string>("");
@@ -2001,7 +2033,7 @@ export default function Home() {
               setShowWatchlist(false);
               await loadReport(id);
             }}
-            reports={activeScan?.reports || []}
+            reports={watchlistReports}
           />
         </SheetContent>
       </Sheet>

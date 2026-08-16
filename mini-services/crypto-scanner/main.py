@@ -298,6 +298,23 @@ async def get_project(report_id: str):
 
 @app.get("/projects")
 async def all_projects(limit: int = 50):
+    """List all analyzed projects (summary fields).
+
+    Reads from SQLite (persistent) so reports survive restarts. Falls back
+    to in-memory REPORTS if DB is empty (e.g. first run).
+    """
+    # Validate limit (same pattern as /score-history)
+    if limit < 1:
+        limit = 1
+    elif limit > 500:
+        limit = 500
+
+    # Try DB first (persistent across restarts)
+    db_rows = db.list_all_reports(limit=limit)
+    if db_rows:
+        return db_rows
+
+    # Fallback to in-memory (first run or DB issue)
     items = sorted(REPORTS.values(), key=lambda r: r.created_at, reverse=True)[:limit]
     return [
         {
