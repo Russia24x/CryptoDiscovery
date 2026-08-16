@@ -4230,3 +4230,24 @@ Issues / caveats:
    UI will render the correct text.
 
 No code was committed or pushed. Awaiting verification + commit by the human operator.
+
+---
+Task ID: feature-coin-portal-settings-summary
+Agent: main
+Task: User requested 3 major features: Coin Portal (left drawer with full coin details), Settings page (API + news source management), Binance live price, watchlist fix.
+
+Stage Summary:
+- 4 commits: a8332a6 (watchlist fix), de8ae66 (Binance API), 74647f6 (Coin Portal), 80cd62c (Settings page)
+- All pushed + verified
+
+Features delivered:
+1. Watchlist fix: now shows all saved reports from DB (not just activeScan)
+2. Binance live price: /binance/price/{symbol} (free, no key, 15s cache)
+3. Coin Portal: left drawer with CoinGecko + Binance + chart + DeFiLlama + external links
+4. Settings page: API key management (add/edit/delete/test) + news source management
+
+Architecture:
+- All features follow existing patterns (proxy routes, shadcn/ui, i18n, AbortController)
+- Binance API is free (no key needed) — integrated as a new data source
+- Settings stored in settings.json (gitignored, chmod 600), applies to os.environ on startup
+- Coin Portal uses Promise.allSettled for parallel fetches with graceful degradation
