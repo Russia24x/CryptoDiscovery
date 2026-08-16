@@ -924,6 +924,7 @@ export interface CoinDefaultSort {
 
 interface CoinTableProps {
   coins: TopCoin[];
+  loading?: boolean;
   onAnalyze?: (geckoId: string, name: string) => void;
   onOpenPortal?: (geckoId: string, symbol: string, name: string) => void;
   emptyHint?: string;
@@ -1008,6 +1009,7 @@ function SortableCoinHeader({
 
 function CoinTable({
   coins,
+  loading,
   onAnalyze,
   onOpenPortal,
   emptyHint,
@@ -1015,17 +1017,23 @@ function CoinTable({
 }: CoinTableProps) {
   const tt = useTt();
 
-  // Initial sort = parent-provided default, else market_cap_rank asc (the
-  // historical order of the Top Coins feed — preserves prior behavior).
-  // The parent remounts this component (via `key={presetId}`) when the
-  // active preset changes, so this initial value is re-evaluated on each
-  // preset switch — no useEffect / derived-state needed.
+  // Initial sort = parent-provided default, else market_cap_rank asc.
   const initial: CoinDefaultSort = defaultSort ?? {
     key: "market_cap_rank",
     dir: "asc",
   };
   const [sortKey, setSortKey] = React.useState<CoinSortKey>(initial.key);
   const [sortDir, setSortDir] = React.useState<CoinSortDir>(initial.dir);
+
+  // #5 fix: update sort when defaultSort changes (was using key={coinPreset}
+  // to force remount — now we reactively update sort state instead, avoiding
+  // 50 DOM node destroy + recreate on every preset switch).
+  React.useEffect(() => {
+    if (defaultSort) {
+      setSortKey(defaultSort.key);
+      setSortDir(defaultSort.dir);
+    }
+  }, [defaultSort]);
 
   /** Click handler: same column → toggle dir; different column → switch +
    *  reset to asc. Matches the contract "click to sort, click again to toggle". */
@@ -1068,6 +1076,18 @@ function CoinTable({
     });
     return arr;
   }, [coins, sortKey, sortDir]);
+
+  // #1 fix: show loading skeleton when preset is loading (was showing
+  // "No coins" because presetCoins was null during fetch)
+  if (loading) {
+    return (
+      <div className="space-y-1">
+        {Array.from({ length: 5 }).map((_, i) => (
+          <Skeleton key={i} className="h-10 w-full" />
+        ))}
+      </div>
+    );
+  }
 
   if (coins.length === 0) {
     return (
@@ -1547,6 +1567,18 @@ const COIN_PRESETS: CoinPreset[] = [
 
 const DEFAULT_COIN_PRESET_ID = "mktcap";
 
+/* Map preset IDs to backend sort_by values. Module-level (was inside
+   component body, recreated every render — #7 fix). */
+const PRESET_TO_SORT_BY: Record<string, string> = {
+  mktcap: "market_cap",
+  gainers24h: "gainers_24h",
+  losers24h: "losers_24h",
+  volume: "volume",
+  "near-ath": "near_ath",
+  "near-atl": "near_atl",
+  supply: "circulating_supply",
+};
+
 /* Fixed default sorts for the Gainers / Losers tabs. These tabs do NOT use
    presets, but CoinTable now applies client-side sorting, so we pass a
    defaultSort that matches the API ordering to preserve prior behavior. */
@@ -1715,23 +1747,15 @@ export function MarketIntelligenceView({ onAnalyzeCoin }: MarketIntelligenceView
      preset searches the ENTIRE market, not just the top 50 by mkt cap. */
   const [presetCoins, setPresetCoins] = React.useState<TopCoin[] | null>(null);
   const [presetLoading, setPresetLoading] = React.useState(false);
+  const [presetError, setPresetError] = React.useState<string | null>(null);
   const presetAbortRef = React.useRef<AbortController | null>(null);
-
-  // Map preset IDs to backend sort_by values
-  const PRESET_TO_SORT_BY: Record<string, string> = {
-    mktcap: "market_cap",
-    gainers24h: "gainers_24h",
-    losers24h: "losers_24h",
-    volume: "volume",
-    "near-ath": "near_ath",
-    "near-atl": "near_atl",
-    supply: "circulating_supply",
-  };
 
   React.useEffect(() => {
     // Default preset uses the already-fetched top_coins — no extra fetch
     if (coinPreset === DEFAULT_COIN_PRESET_ID) {
       setPresetCoins(null);
+      setPresetError(null);
+      setPresetLoading(false);
       return;
     }
     const sortBy = PRESET_TO_SORT_BY[coinPreset] || "market_cap";
@@ -1741,6 +1765,7 @@ export function MarketIntelligenceView({ onAnalyzeCoin }: MarketIntelligenceView
     const ctrl = new AbortController();
     presetAbortRef.current = ctrl;
     setPresetLoading(true);
+    setPresetError(null);
 
     (async () => {
       try {
@@ -1749,16 +1774,16 @@ export function MarketIntelligenceView({ onAnalyzeCoin }: MarketIntelligenceView
           { signal: ctrl.signal },
         );
         if (!res.ok) {
-          console.warn("[MarketIntel] preset fetch HTTP", res.status);
+          setPresetError(`HTTP ${res.status}`);
           return;
         }
-        const data = await res.json();
-        if (!ctrl.signal.aborted && Array.isArray(data.coins)) {
-          setPresetCoins(data.coins as TopCoin[]);
+        const fetched = await res.json();
+        if (!ctrl.signal.aborted && Array.isArray(fetched.coins)) {
+          setPresetCoins(fetched.coins as TopCoin[]);
         }
       } catch (e) {
         if (e instanceof DOMException && e.name === "AbortError") return;
-        console.warn("[MarketIntel] preset fetch failed:", e);
+        setPresetError(e instanceof Error ? e.message : "Failed to load");
       } finally {
         if (!ctrl.signal.aborted) {
           setPresetLoading(false);
@@ -1770,9 +1795,11 @@ export function MarketIntelligenceView({ onAnalyzeCoin }: MarketIntelligenceView
   // The coins to display in the Top Coins table:
   // - Default preset: use data.top_coins from market overview (no extra fetch)
   // - Other presets: use presetCoins from /market/top-coins endpoint
+  // - If preset fetch failed AND presetCoins is null, fall back to
+  //   data.top_coins (so user sees something, not empty) — #8 fix
   const topCoinsToDisplay = coinPreset === DEFAULT_COIN_PRESET_ID
     ? (data?.top_coins ?? [])
-    : (presetCoins ?? []);
+    : (presetCoins ?? (presetError ? (data?.top_coins ?? []) : []));
 
   return (
     <TooltipProvider>
@@ -1992,8 +2019,8 @@ export function MarketIntelligenceView({ onAnalyzeCoin }: MarketIntelligenceView
                       })}
                     </div>
                     <CoinTable
-                      key={coinPreset}
                       coins={topCoinsToDisplay}
+                      loading={presetLoading && topCoinsToDisplay.length === 0}
                       onAnalyze={onAnalyzeCoin}
                       onOpenPortal={handleOpenPortal}
                       defaultSort={activePresetSort}
