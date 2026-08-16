@@ -264,7 +264,10 @@ function ArticleImage({ src, alt }: { src: string | null; alt: string }) {
 }
 
 /** A single news article card. The whole card is a link. */
-function ArticleCard({ article }: { article: NewsArticle }) {
+// NF-5 fix: React.memo prevents re-render of all 40+ article cards every
+// 1s when the top-level tick state changes. Only cards whose article prop
+// actually changed will re-render.
+const ArticleCard = React.memo(function ArticleCard({ article }: { article: NewsArticle }) {
   const tt = useTt();
   const st = sourceStyle(article.source);
   return (
@@ -316,7 +319,7 @@ function ArticleCard({ article }: { article: NewsArticle }) {
       </Card>
     </a>
   );
-}
+});
 
 /** Skeleton card for the loading state. */
 function ArticleCardSkeleton() {
@@ -518,7 +521,9 @@ function MessageBubble({ msg }: { msg: TelegramMessage }) {
           <Clock className="size-3" />
           {timeClock(msg.published_at)}
         </span>
-        {msg.views != null && (
+        {/* NF-7 fix: use truthy check (not != null) to also reject empty
+            string — old code rendered empty "views" badge when views="" */}
+        {!!msg.views && (
           <span className="flex items-center gap-1" dir="auto">
             <Eye className="size-3" />
             {msg.views} {tt("telegram.views", "views")}
@@ -1111,8 +1116,16 @@ export function NewsFeedView({ initialTab = "news" }: NewsFeedViewProps) {
   // ----- Sources state -----
   const [sources, setSources] = React.useState<DataSourceInfo[]>([]);
 
+  // ----- AbortController refs (NF-4 fix: prevent stale-response races) -----
+  const newsAbortRef = React.useRef<AbortController | null>(null);
+  const newsFaAbortRef = React.useRef<AbortController | null>(null);
+  const tgAbortRef = React.useRef<AbortController | null>(null);
+  const sourcesAbortRef = React.useRef<AbortController | null>(null);
+
   // ----- Cache age display tick (re-render every 1s for smooth "Xs ago") -----
-  const [, setTick] = React.useState(0);
+  // NF-5 fix: expose tick value (not just discard) so a small TimeAgo
+  // component can consume it without re-rendering all 40+ article cards.
+  const [tick, setTick] = React.useState(0);
   React.useEffect(() => {
     const id = setInterval(() => setTick((x) => x + 1), 1000);
     return () => clearInterval(id);
@@ -1120,11 +1133,14 @@ export function NewsFeedView({ initialTab = "news" }: NewsFeedViewProps) {
 
   // ----- Fetchers -----
   const fetchNews = React.useCallback(async (refresh: boolean) => {
+    newsAbortRef.current?.abort();
+    const ctrl = new AbortController();
+    newsAbortRef.current = ctrl;
     if (refresh) setNewsRefreshing(true);
     else setNewsLoading(true);
     setNewsError(null);
     try {
-      const res = await fetch("/api/scanner/news?limit=40");
+      const res = await fetch("/api/scanner/news?limit=40", { signal: ctrl.signal });
       if (!res.ok) throw new Error(`HTTP ${res.status} ${res.statusText}`);
       const data = (await res.json()) as NewsResponse;
       if (!data || !Array.isArray(data.articles)) {
@@ -1132,19 +1148,25 @@ export function NewsFeedView({ initialTab = "news" }: NewsFeedViewProps) {
       }
       setNews(data);
     } catch (e) {
+      if (e instanceof DOMException && e.name === "AbortError") return;
       setNewsError(e instanceof Error ? e.message : "Failed to load news");
     } finally {
-      setNewsLoading(false);
-      setNewsRefreshing(false);
+      if (!ctrl.signal.aborted) {
+        setNewsLoading(false);
+        setNewsRefreshing(false);
+      }
     }
   }, []);
 
   const fetchNewsFa = React.useCallback(async (refresh: boolean) => {
+    newsFaAbortRef.current?.abort();
+    const ctrl = new AbortController();
+    newsFaAbortRef.current = ctrl;
     if (refresh) setNewsFaRefreshing(true);
     else setNewsFaLoading(true);
     setNewsFaError(null);
     try {
-      const res = await fetch("/api/scanner/news/fa?limit=40");
+      const res = await fetch("/api/scanner/news/fa?limit=40", { signal: ctrl.signal });
       if (!res.ok) throw new Error(`HTTP ${res.status} ${res.statusText}`);
       const data = (await res.json()) as PersianNewsResponse;
       if (!data || !Array.isArray(data.articles)) {
@@ -1152,20 +1174,27 @@ export function NewsFeedView({ initialTab = "news" }: NewsFeedViewProps) {
       }
       setNewsFa(data);
     } catch (e) {
+      if (e instanceof DOMException && e.name === "AbortError") return;
       setNewsFaError(e instanceof Error ? e.message : "Failed to load Persian news");
     } finally {
-      setNewsFaLoading(false);
-      setNewsFaRefreshing(false);
+      if (!ctrl.signal.aborted) {
+        setNewsFaLoading(false);
+        setNewsFaRefreshing(false);
+      }
     }
   }, []);
 
   const fetchTelegram = React.useCallback(async (refresh: boolean) => {
+    tgAbortRef.current?.abort();
+    const ctrl = new AbortController();
+    tgAbortRef.current = ctrl;
     if (refresh) setTgRefreshing(true);
     else setTgLoading(true);
     setTgError(null);
     try {
       const res = await fetch(
         "/api/scanner/telegram?channel=Mastersharkcrypto&limit=20",
+        { signal: ctrl.signal },
       );
       if (!res.ok) throw new Error(`HTTP ${res.status} ${res.statusText}`);
       const data = (await res.json()) as TelegramResponse;
@@ -1175,21 +1204,32 @@ export function NewsFeedView({ initialTab = "news" }: NewsFeedViewProps) {
       }
       setTelegram(data);
     } catch (e) {
+      if (e instanceof DOMException && e.name === "AbortError") return;
       setTgError(e instanceof Error ? e.message : "Failed to load telegram feed");
     } finally {
-      setTgLoading(false);
-      setTgRefreshing(false);
+      if (!ctrl.signal.aborted) {
+        setTgLoading(false);
+        setTgRefreshing(false);
+      }
     }
   }, []);
 
+  // NF-3 fix: was empty catch {} — now logs errors (non-critical, doesn't crash)
   const fetchSources = React.useCallback(async () => {
+    sourcesAbortRef.current?.abort();
+    const ctrl = new AbortController();
+    sourcesAbortRef.current = ctrl;
     try {
-      const res = await fetch("/api/scanner/sources");
-      if (!res.ok) return;
+      const res = await fetch("/api/scanner/sources", { signal: ctrl.signal });
+      if (!res.ok) {
+        console.warn("[NewsFeed] sources HTTP", res.status);
+        return;
+      }
       const data = (await res.json()) as SourcesStatus;
       if (data?.sources) setSources(data.sources);
-    } catch {
-      // Non-critical — silently ignore.
+    } catch (e) {
+      if (e instanceof DOMException && e.name === "AbortError") return;
+      console.warn("[NewsFeed] sources fetch failed:", e);
     }
   }, []);
 
