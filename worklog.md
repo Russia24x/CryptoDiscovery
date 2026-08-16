@@ -5112,3 +5112,93 @@ Stage Summary:
 - 5 of 15 findings fixed (1 critical + 4 medium)
 - 10 minor findings remain (low-impact polish)
 - NF-2 (XSS) deferred — needs frontend URL sanitization helper
+
+---
+Task ID: sortable-coin-table-presets
+Agent: main
+Task: Add column sorting to CoinTable + preset filter buttons for Top Coins.
+
+Files Modified:
+- src/components/views/market-intelligence-view.tsx
+- src/lib/i18n/en.json
+- src/lib/i18n/fa.json
+
+Work Log:
+
+1. Column sorting in CoinTable (src/components/views/market-intelligence-view.tsx)
+   - Added exported types `CoinSortKey` (10 keys: market_cap_rank,
+     current_price, market_cap, total_volume,
+     price_change_percentage_{24h,7d,30d}_in_currency, ath_change_percentage,
+     atl_change_percentage, circulating_supply) and `CoinSortDir = "asc"|"desc"`.
+   - Added `CoinDefaultSort` interface and optional `defaultSort` prop on
+     `CoinTableProps`. Defaults to `{ key: "market_cap_rank", dir: "asc" }`
+     when omitted (preserves prior Top Coins behavior).
+   - Added `getCoinSortValue(coin, key)` helper to read the correct numeric
+     field per SortKey.
+   - Added `SortableCoinHeader` sub-component: clickable `<th>` with
+     cursor-pointer + hover:text-foreground, shows ChevronUp (asc) or
+     ChevronDown (desc) on the active column and a faded ChevronDown on
+     inactive columns so the affordance is discoverable. Includes
+     `aria-sort="ascending|descending|none"` for screen readers.
+   - Added `useMemo`-backed `sortedCoins` array with proper null handling:
+     null/NaN values sort as -Infinity (asc) or +Infinity (desc) so missing
+     data sinks to the bottom regardless of direction.
+   - Click contract: same column → toggle dir; different column → switch
+     and reset to asc.
+   - Initial sort state derived from `defaultSort` prop. The parent remounts
+     the CoinTable via `key={presetId}` so a preset switch cleanly resets
+     any manual column-header sorting. (An earlier "derived-state with ref"
+     pattern was removed because the `react-hooks/refs` lint rule forbids
+     ref reads during render; `key` is the idiomatic equivalent.)
+
+2. Preset filter buttons (Top Coins tab only)
+   - Added module-level `COIN_PRESETS` array of 7 presets:
+     mktcap (default), gainers24h, losers24h, volume, near-ath, near-atl,
+     supply — each with id, i18n labelKey, English fallback label,
+     lucide-react icon, and a `{key, dir}` sort.
+   - Added `GAINERS_DEFAULT_SORT` and `LOSERS_DEFAULT_SORT` module-level
+     constants so the Gainers/Losers tabs (which don't use presets) pass an
+     explicit defaultSort that matches the API ordering — preserves the
+     pre-existing "already sorted by 24h %" behavior on those tabs.
+   - Added `coinPreset` state in MarketIntelligenceView (default "mktcap")
+     near activeTab.
+   - Added `activePresetSort` memo that resolves the active preset's
+     CoinDefaultSort from `COIN_PRESETS` (stable reference per preset ID).
+   - Rendered a row of pill-shaped `<button>` elements above the CoinTable
+     inside the Top Coins CardContent. Active preset is highlighted in
+     emerald (`bg-emerald-500/15 text-emerald-400 border-emerald-500/40`).
+     Each button includes `aria-pressed={isActive}` and the pill group has
+     `role="group"` + `aria-label`. Buttons are responsive (flex-wrap on
+     small screens).
+   - Top Coins CoinTable receives `key={coinPreset}` (forces remount on
+     preset switch) and `defaultSort={activePresetSort}`.
+
+3. Icons
+   - Imported `ChevronUp` and `ChevronDown` from lucide-react (added to the
+     existing import block). All preset icons reuse already-imported icons
+     (BarChart3, TrendingUp, TrendingDown, Activity, ArrowUpRight,
+     ArrowDownRight, Coins).
+
+4. i18n
+   - Added 8 new translation keys to en.json and fa.json:
+     market.presetGroupAria, market.presetTopMktCap,
+     market.presetTopGainers24h, market.presetTopLosers24h,
+     market.presetHighestVolume, market.presetNearAth, market.presetNearAtl,
+     market.presetLargestSupply.
+   - All new tt() calls also include an inline English fallback per the
+     existing pattern, so the UI works even before translations load.
+
+5. CoinRow NOT touched (per task constraint #3).
+6. Backend NOT touched (per task constraint — sorting is 100% client-side
+   on the already-fetched top_coins array).
+
+Verified:
+- `bun run lint` — clean (0 errors, 0 warnings).
+- `cd mini-services/crypto-scanner && python tests/test_framework.py` —
+  47 passed, 0 failed, 47 total.
+- `curl -s http://localhost:3000/ | grep -c "market.intelligence"` returns 2 (>0).
+- Dev server log: `✓ Compiled in 244ms` after edit, GET / returns 200.
+- API /api/scanner/market/overview returns 50 top_coins with all required
+  fields (ath_change_percentage, atl_change_percentage, circulating_supply).
+
+No issues encountered.

@@ -36,6 +36,8 @@ import {
   BarChart3,
   Boxes,
   Building2,
+  ChevronDown,
+  ChevronUp,
   Coins,
   DollarSign,
   ExternalLink,
@@ -888,17 +890,185 @@ function SectorsChart({ sectors }: { sectors: SectorBreakdown[] }) {
 
 /* -------------------------------------------------------------------------- */
 /*  Sub-component — Coin table wrapper                                        */
-/* -------------------------------------------------------------------------- */
+/* ------------------------------------------------------------------------- *
+ *  Client-side column sorting + preset-driven default sort.
+ *  - Sortable columns: market_cap_rank, current_price, market_cap,
+ *    total_volume, price_change_percentage_{24h,7d,30d}_in_currency.
+ *  - The parent (MarketIntelligenceView) passes a `defaultSort` prop
+ *    derived from the active preset button. The parent also remounts this
+ *    component via `key={presetId}` so a preset switch cleanly resets any
+ *    manual column-header sorting the user had applied.
+ *  - Null values sort as -Infinity (asc) or +Infinity (desc) so missing
+ *    data sinks to the bottom regardless of direction.
+ * ------------------------------------------------------------------------- */
+
+/** All keys on TopCoin that we are allowed to sort by. */
+export type CoinSortKey =
+  | "market_cap_rank"
+  | "current_price"
+  | "market_cap"
+  | "total_volume"
+  | "price_change_percentage_24h_in_currency"
+  | "price_change_percentage_7d_in_currency"
+  | "price_change_percentage_30d_in_currency"
+  | "ath_change_percentage"
+  | "atl_change_percentage"
+  | "circulating_supply";
+
+export type CoinSortDir = "asc" | "desc";
+
+export interface CoinDefaultSort {
+  key: CoinSortKey;
+  dir: CoinSortDir;
+}
 
 interface CoinTableProps {
   coins: TopCoin[];
   onAnalyze?: (geckoId: string, name: string) => void;
   onOpenPortal?: (geckoId: string, symbol: string, name: string) => void;
   emptyHint?: string;
+  /**
+   * Initial sort + sort applied when the parent signals a preset change.
+   * Defaults to `{ key: "market_cap_rank", dir: "asc" }` (unchanged behavior).
+   */
+  defaultSort?: CoinDefaultSort;
 }
 
-function CoinTable({ coins, onAnalyze, onOpenPortal, emptyHint }: CoinTableProps) {
+/** Returns the numeric value of `key` on a coin, or null if missing. */
+function getCoinSortValue(coin: TopCoin, key: CoinSortKey): number | null {
+  switch (key) {
+    case "market_cap_rank":
+      return coin.market_cap_rank;
+    case "current_price":
+      return coin.current_price;
+    case "market_cap":
+      return coin.market_cap;
+    case "total_volume":
+      return coin.total_volume;
+    case "price_change_percentage_24h_in_currency":
+      return coin.price_change_percentage_24h_in_currency;
+    case "price_change_percentage_7d_in_currency":
+      return coin.price_change_percentage_7d_in_currency;
+    case "price_change_percentage_30d_in_currency":
+      return coin.price_change_percentage_30d_in_currency;
+    case "ath_change_percentage":
+      return coin.ath_change_percentage;
+    case "atl_change_percentage":
+      return coin.atl_change_percentage;
+    case "circulating_supply":
+      return coin.circulating_supply;
+    default:
+      return null;
+  }
+}
+
+/** Clickable, sortable column header. Renders the label + a ChevronUp/Down
+ *  indicator on the active column. Inactive columns show a faded chevron
+ *  so the clickable affordance is discoverable. */
+function SortableCoinHeader({
+  label,
+  columnKey,
+  sortKey,
+  sortDir,
+  onSort,
+  className,
+}: {
+  label: string;
+  columnKey: CoinSortKey;
+  sortKey: CoinSortKey;
+  sortDir: CoinSortDir;
+  onSort: (k: CoinSortKey) => void;
+  className?: string;
+}) {
+  const isActive = columnKey === sortKey;
+  return (
+    <TableHead
+      dir="auto"
+      aria-sort={isActive ? (sortDir === "asc" ? "ascending" : "descending") : "none"}
+      className={`cursor-pointer select-none whitespace-nowrap text-[11px] uppercase tracking-wider transition-colors hover:text-foreground ${
+        isActive ? "text-foreground" : "text-muted-foreground"
+      } ${className ?? ""}`}
+      onClick={() => onSort(columnKey)}
+    >
+      <span className="inline-flex items-center justify-end gap-1">
+        <span>{label}</span>
+        {isActive ? (
+          sortDir === "asc" ? (
+            <ChevronUp className="size-3 shrink-0" />
+          ) : (
+            <ChevronDown className="size-3 shrink-0" />
+          )
+        ) : (
+          <ChevronDown className="size-3 shrink-0 opacity-30" />
+        )}
+      </span>
+    </TableHead>
+  );
+}
+
+function CoinTable({
+  coins,
+  onAnalyze,
+  onOpenPortal,
+  emptyHint,
+  defaultSort,
+}: CoinTableProps) {
   const tt = useTt();
+
+  // Initial sort = parent-provided default, else market_cap_rank asc (the
+  // historical order of the Top Coins feed — preserves prior behavior).
+  // The parent remounts this component (via `key={presetId}`) when the
+  // active preset changes, so this initial value is re-evaluated on each
+  // preset switch — no useEffect / derived-state needed.
+  const initial: CoinDefaultSort = defaultSort ?? {
+    key: "market_cap_rank",
+    dir: "asc",
+  };
+  const [sortKey, setSortKey] = React.useState<CoinSortKey>(initial.key);
+  const [sortDir, setSortDir] = React.useState<CoinSortDir>(initial.dir);
+
+  /** Click handler: same column → toggle dir; different column → switch +
+   *  reset to asc. Matches the contract "click to sort, click again to toggle". */
+  const handleSort = React.useCallback(
+    (key: CoinSortKey) => {
+      setSortKey((prevKey) => {
+        if (key === prevKey) {
+          setSortDir((d) => (d === "asc" ? "desc" : "asc"));
+          return prevKey;
+        }
+        setSortDir("asc");
+        return key;
+      });
+    },
+    [],
+  );
+
+  const sortedCoins = React.useMemo(() => {
+    const arr = [...coins];
+    arr.sort((a, b) => {
+      const av = getCoinSortValue(a, sortKey);
+      const bv = getCoinSortValue(b, sortKey);
+      // Null handling: asc → null = -Infinity (sinks to bottom);
+      // desc → null = +Infinity (sinks to bottom of descending list too).
+      const aNum =
+        av == null || typeof av !== "number" || isNaN(av)
+          ? sortDir === "asc"
+            ? -Infinity
+            : Infinity
+          : av;
+      const bNum =
+        bv == null || typeof bv !== "number" || isNaN(bv)
+          ? sortDir === "asc"
+            ? -Infinity
+            : Infinity
+          : bv;
+      if (aNum < bNum) return sortDir === "asc" ? -1 : 1;
+      if (aNum > bNum) return sortDir === "asc" ? 1 : -1;
+      return 0;
+    });
+    return arr;
+  }, [coins, sortKey, sortDir]);
+
   if (coins.length === 0) {
     return (
       <div className="flex h-32 items-center justify-center text-sm text-muted-foreground">
@@ -911,20 +1081,80 @@ function CoinTable({ coins, onAnalyze, onOpenPortal, emptyHint }: CoinTableProps
       <Table>
         <TableHeader className="sticky top-0 z-10 bg-muted/90 backdrop-blur-sm">
           <TableRow className="border-border/40 hover:bg-transparent">
-            <TableHead className="w-12 text-right text-[11px] uppercase tracking-wider text-muted-foreground" dir="auto">{tt("market.rank", "#")}</TableHead>
-            <TableHead className="text-[11px] uppercase tracking-wider text-muted-foreground" dir="auto">{tt("market.coin", "Coin")}</TableHead>
-            <TableHead className="text-right text-[11px] uppercase tracking-wider text-muted-foreground" dir="auto">{tt("market.price", "Price")}</TableHead>
-            <TableHead className="text-right text-[11px] uppercase tracking-wider text-muted-foreground" dir="auto">{tt("market.mktCap", "Mkt Cap")}</TableHead>
-            <TableHead className="text-right text-[11px] uppercase tracking-wider text-muted-foreground" dir="auto">{tt("market.volume", "Volume")}</TableHead>
-            <TableHead className="text-right text-[11px] uppercase tracking-wider text-muted-foreground" dir="auto">{tt("market.col24h", "24h")}</TableHead>
-            <TableHead className="text-right text-[11px] uppercase tracking-wider text-muted-foreground" dir="auto">{tt("market.col7d", "7d")}</TableHead>
-            <TableHead className="text-right text-[11px] uppercase tracking-wider text-muted-foreground" dir="auto">{tt("market.col30d", "30d")}</TableHead>
-            {onAnalyze && <TableHead className="w-20 text-right text-[11px] uppercase tracking-wider text-muted-foreground" dir="auto">{tt("market.colAction", "Action")}</TableHead>}
+            <SortableCoinHeader
+              label={tt("market.rank", "#")}
+              columnKey="market_cap_rank"
+              sortKey={sortKey}
+              sortDir={sortDir}
+              onSort={handleSort}
+              className="w-12 text-right"
+            />
+            <TableHead className="text-[11px] uppercase tracking-wider text-muted-foreground" dir="auto">
+              {tt("market.coin", "Coin")}
+            </TableHead>
+            <SortableCoinHeader
+              label={tt("market.price", "Price")}
+              columnKey="current_price"
+              sortKey={sortKey}
+              sortDir={sortDir}
+              onSort={handleSort}
+              className="text-right"
+            />
+            <SortableCoinHeader
+              label={tt("market.mktCap", "Mkt Cap")}
+              columnKey="market_cap"
+              sortKey={sortKey}
+              sortDir={sortDir}
+              onSort={handleSort}
+              className="text-right"
+            />
+            <SortableCoinHeader
+              label={tt("market.volume", "Volume")}
+              columnKey="total_volume"
+              sortKey={sortKey}
+              sortDir={sortDir}
+              onSort={handleSort}
+              className="text-right"
+            />
+            <SortableCoinHeader
+              label={tt("market.col24h", "24h")}
+              columnKey="price_change_percentage_24h_in_currency"
+              sortKey={sortKey}
+              sortDir={sortDir}
+              onSort={handleSort}
+              className="text-right"
+            />
+            <SortableCoinHeader
+              label={tt("market.col7d", "7d")}
+              columnKey="price_change_percentage_7d_in_currency"
+              sortKey={sortKey}
+              sortDir={sortDir}
+              onSort={handleSort}
+              className="text-right"
+            />
+            <SortableCoinHeader
+              label={tt("market.col30d", "30d")}
+              columnKey="price_change_percentage_30d_in_currency"
+              sortKey={sortKey}
+              sortDir={sortDir}
+              onSort={handleSort}
+              className="text-right"
+            />
+            {onAnalyze && (
+              <TableHead className="w-20 text-right text-[11px] uppercase tracking-wider text-muted-foreground" dir="auto">
+                {tt("market.colAction", "Action")}
+              </TableHead>
+            )}
           </TableRow>
         </TableHeader>
         <TableBody>
-          {coins.map((c) => (
-            <CoinRow key={`${c.id}-${c.market_cap_rank ?? c.name}`} coin={c} onAnalyze={onAnalyze} onOpenPortal={onOpenPortal} />
+          {sortedCoins.map((c) => (
+            <CoinRow
+              key={`${c.id}-${c.market_cap_rank ?? c.name}`}
+              coin={c}
+              onAnalyze={onAnalyze}
+              onOpenPortal={onOpenPortal}
+            />
           ))}
         </TableBody>
       </Table>
@@ -1240,6 +1470,96 @@ function CategoriesTable({ categories }: { categories: CmcCategory[] }) {
 }
 
 /* -------------------------------------------------------------------------- */
+/*  Top Coins preset filters                                                  */
+/* ------------------------------------------------------------------------- *
+ *  A fixed catalog of preset views for the Top Coins table. Each preset
+ *  sets a (key, dir) on CoinTable via the `defaultSort` prop. Only the
+ *  Top Coins tab uses presets — Gainers / Losers tabs already specialize
+ *  their ordering at the API layer.
+ * ------------------------------------------------------------------------- */
+
+interface CoinPreset {
+  id: string;
+  /** i18n key under `market.*`. */
+  labelKey: string;
+  /** English fallback when the i18n key is missing. */
+  label: string;
+  /** lucide-react icon element shown at left of the pill. */
+  icon: React.ReactNode;
+  sort: CoinDefaultSort;
+}
+
+const COIN_PRESETS: CoinPreset[] = [
+  {
+    id: "mktcap",
+    labelKey: "market.presetTopMktCap",
+    label: "Top 50 by Mkt Cap",
+    icon: <BarChart3 className="size-3" />,
+    sort: { key: "market_cap_rank", dir: "asc" },
+  },
+  {
+    id: "gainers24h",
+    labelKey: "market.presetTopGainers24h",
+    label: "Top Gainers 24h",
+    icon: <TrendingUp className="size-3" />,
+    sort: { key: "price_change_percentage_24h_in_currency", dir: "desc" },
+  },
+  {
+    id: "losers24h",
+    labelKey: "market.presetTopLosers24h",
+    label: "Top Losers 24h",
+    icon: <TrendingDown className="size-3" />,
+    sort: { key: "price_change_percentage_24h_in_currency", dir: "asc" },
+  },
+  {
+    id: "volume",
+    labelKey: "market.presetHighestVolume",
+    label: "Highest Volume",
+    icon: <Activity className="size-3" />,
+    sort: { key: "total_volume", dir: "desc" },
+  },
+  {
+    id: "near-ath",
+    labelKey: "market.presetNearAth",
+    label: "Near ATH",
+    icon: <ArrowUpRight className="size-3" />,
+    // ath_change_percentage is negative (e.g. -75%) — desc brings the
+    // values closest to 0 (i.e. nearest to all-time high) to the top.
+    sort: { key: "ath_change_percentage", dir: "desc" },
+  },
+  {
+    id: "near-atl",
+    labelKey: "market.presetNearAtl",
+    label: "Near ATL",
+    icon: <ArrowDownRight className="size-3" />,
+    // atl_change_percentage is positive (e.g. +5000%) — asc brings the
+    // smallest values (i.e. nearest to all-time low) to the top.
+    sort: { key: "atl_change_percentage", dir: "asc" },
+  },
+  {
+    id: "supply",
+    labelKey: "market.presetLargestSupply",
+    label: "Largest Circulating Supply",
+    icon: <Coins className="size-3" />,
+    sort: { key: "circulating_supply", dir: "desc" },
+  },
+];
+
+const DEFAULT_COIN_PRESET_ID = "mktcap";
+
+/* Fixed default sorts for the Gainers / Losers tabs. These tabs do NOT use
+   presets, but CoinTable now applies client-side sorting, so we pass a
+   defaultSort that matches the API ordering to preserve prior behavior. */
+const GAINERS_DEFAULT_SORT: CoinDefaultSort = {
+  key: "price_change_percentage_24h_in_currency",
+  dir: "desc",
+};
+const LOSERS_DEFAULT_SORT: CoinDefaultSort = {
+  key: "price_change_percentage_24h_in_currency",
+  dir: "asc",
+};
+
+/* -------------------------------------------------------------------------- */
 /*  Main component                                                            */
 /* -------------------------------------------------------------------------- */
 
@@ -1276,6 +1596,11 @@ export function MarketIntelligenceView({ onAnalyzeCoin }: MarketIntelligenceView
   const [categoriesFetched, setCategoriesFetched] = React.useState(false);
   const [categoriesError, setCategoriesError] = React.useState<string | null>(null);
   const [activeTab, setActiveTab] = React.useState("top");
+
+  // Active preset for the Top Coins tab. Drives the `defaultSort` prop
+  // passed to CoinTable. Gainers / Losers tabs do NOT use presets — they
+  // pass a fixed defaultSort matching their API ordering.
+  const [coinPreset, setCoinPreset] = React.useState<string>(DEFAULT_COIN_PRESET_ID);
 
   // AbortController refs for lazy fetches (MI-FE-4 fix: abort on rapid tab switch)
   const airdropsAbortRef = React.useRef<AbortController | null>(null);
@@ -1374,6 +1699,14 @@ export function MarketIntelligenceView({ onAnalyzeCoin }: MarketIntelligenceView
       sectors: data?.sectors?.length ?? 0,
     }),
     [data],
+  );
+
+  /* Resolve the active Top Coins preset → its CoinDefaultSort. Stable per
+     preset ID since COIN_PRESETS is module-level. Used as the CoinTable
+     `defaultSort` prop. */
+  const activePresetSort = React.useMemo<CoinDefaultSort | undefined>(
+    () => COIN_PRESETS.find((p) => p.id === coinPreset)?.sort,
+    [coinPreset],
   );
 
   return (
@@ -1563,7 +1896,43 @@ export function MarketIntelligenceView({ onAnalyzeCoin }: MarketIntelligenceView
                     </CardDescription>
                   </CardHeader>
                   <CardContent className="px-4 pb-4">
-                    <CoinTable coins={data.top_coins} onAnalyze={onAnalyzeCoin} onOpenPortal={handleOpenPortal} />
+                    {/* Preset filter pills — re-sort the Top Coins list into
+                        a specific view (gainers / losers / volume / ATH / ATL /
+                        supply). Active preset is highlighted in emerald. */}
+                    <div
+                      role="group"
+                      aria-label={tt("market.presetGroupAria", "Top Coins preset filters")}
+                      className="mb-3 flex flex-wrap gap-1.5"
+                    >
+                      {COIN_PRESETS.map((preset) => {
+                        const isActive = preset.id === coinPreset;
+                        return (
+                          <button
+                            key={preset.id}
+                            type="button"
+                            onClick={() => setCoinPreset(preset.id)}
+                            aria-pressed={isActive}
+                            dir="auto"
+                            className={[
+                              "inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-[11px] font-medium transition-colors",
+                              isActive
+                                ? "border-emerald-500/40 bg-emerald-500/15 text-emerald-400 hover:bg-emerald-500/20"
+                                : "border-border/40 bg-muted/40 text-muted-foreground hover:bg-muted/60 hover:text-foreground",
+                            ].join(" ")}
+                          >
+                            {preset.icon}
+                            <span>{tt(preset.labelKey, preset.label)}</span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                    <CoinTable
+                      key={coinPreset}
+                      coins={data.top_coins}
+                      onAnalyze={onAnalyzeCoin}
+                      onOpenPortal={handleOpenPortal}
+                      defaultSort={activePresetSort}
+                    />
                   </CardContent>
                 </Card>
               </TabsContent>
@@ -1581,7 +1950,12 @@ export function MarketIntelligenceView({ onAnalyzeCoin }: MarketIntelligenceView
                     </CardDescription>
                   </CardHeader>
                   <CardContent className="px-4 pb-4">
-                    <CoinTable coins={data.gainers} onAnalyze={onAnalyzeCoin} onOpenPortal={handleOpenPortal} />
+                    <CoinTable
+                      coins={data.gainers}
+                      onAnalyze={onAnalyzeCoin}
+                      onOpenPortal={handleOpenPortal}
+                      defaultSort={GAINERS_DEFAULT_SORT}
+                    />
                   </CardContent>
                 </Card>
               </TabsContent>
@@ -1599,7 +1973,12 @@ export function MarketIntelligenceView({ onAnalyzeCoin }: MarketIntelligenceView
                     </CardDescription>
                   </CardHeader>
                   <CardContent className="px-4 pb-4">
-                    <CoinTable coins={data.losers} onAnalyze={onAnalyzeCoin} onOpenPortal={handleOpenPortal} />
+                    <CoinTable
+                      coins={data.losers}
+                      onAnalyze={onAnalyzeCoin}
+                      onOpenPortal={handleOpenPortal}
+                      defaultSort={LOSERS_DEFAULT_SORT}
+                    />
                   </CardContent>
                 </Card>
               </TabsContent>
