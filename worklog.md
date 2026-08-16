@@ -4564,3 +4564,26 @@ Stage Summary:
 - News feed now reads from Settings page configuration
 - Remaining minor findings (5 of 8) are low-impact polish (dead param, discard response, toggle race, no-op delete, hardcoded strings)
 - Architecture is now more complete: Settings page → settings.json → news endpoint reads it
+
+---
+Task ID: polish-remaining-minor-findings
+Agent: main
+Task: Fix remaining 5 minor findings from review, ensuring NO negative impact on analysis pipeline.
+
+Work Log:
+- Carefully assessed each finding for analysis-pipeline impact:
+  - Finding 6 (hardcoded strings): display-only → safe to fix
+  - Finding 7 (dead param): FALSE POSITIVE — key_value IS used by inline Test
+  - Finding 8 (discarded response): frontend-only → safe to fix
+  - Finding 10 (toggle race): UI-only → safe to fix
+  - Finding 11 (no-op delete): settings-only, no analysis impact → safe to fix
+- Fixed 4 findings (skipped Finding 7 as false positive)
+- VERIFIED analysis pipeline unaffected:
+  - /analyze bitcoin: PQ=40.3, all 5 axes scored, category=Smart Contract Platform ✓
+  - Tests 47/47, lint clean, JSON valid, Python syntax OK
+  - delete endpoint returns removed field correctly
+
+Stage Summary:
+- All 11 review findings now addressed (3 medium + 6 minor + 1 false positive + 1 already done)
+- Analysis pipeline verified healthy after all changes
+- Zero negative impact on analysis engine
