@@ -400,11 +400,18 @@ async function fetchChart(
   if (!res.ok) {
     throw new Error(`chart HTTP ${res.status}`);
   }
-  const json = (await res.json()) as CoinChart & { error?: string };
+  const json = (await res.json()) as CoinChart & { error?: string; note?: string };
   if (json.error) {
-    throw new Error(json.error);
+    // Chart endpoint returned explicit error — log as warning, not error
+    // (rate-limiting is expected behavior, not a bug).
+    console.warn("[CoinPortal] chart:", json.error);
+    return null;
   }
   if (!Array.isArray(json.prices) || json.prices.length === 0) {
+    // Empty prices (rate-limited or no data) — graceful degradation
+    if (json.note) {
+      console.warn("[CoinPortal] chart:", json.note);
+    }
     return null;
   }
   return json;
@@ -579,7 +586,8 @@ export function CoinPortal({
           throw e;
         }),
         fetchChart(gid, 7, ctrl.signal).catch((e) => {
-          console.error("[CoinPortal] chart failed:", e);
+          // Chart rate-limiting is expected (CoinGecko free tier) — warn, not error
+          console.warn("[CoinPortal] chart rate-limited:", e);
           throw e;
         }),
         fetchMarketOverview(ctrl.signal).catch((e) => {

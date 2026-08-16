@@ -1341,6 +1341,8 @@ async def get_price_chart(gecko_id: str, days: int = 7):
     """Fetch historical price chart (sparkline) for a coin.
 
     `days` must be 1-365. CoinGecko accepts max=365 for free tier.
+    Returns empty prices array on rate-limit (graceful degradation) so
+    the frontend can show 'chart unavailable' without a thrown error.
     """
     gid = _validate_gecko_id(gecko_id)
     # Validate days — CoinGecko chart endpoint accepts 1-365
@@ -1350,7 +1352,17 @@ async def get_price_chart(gecko_id: str, days: int = 7):
         days = 365
     data = await sources.fetch_price_chart(gid, days=days)
     if data is None:
-        return {"error": "Chart data unavailable (may be rate-limited)"}
+        # Return empty structure instead of error — frontend handles
+        # empty prices array gracefully (shows 'chart unavailable' badge)
+        # without throwing a console error.
+        return {
+            "gecko_id": gid,
+            "days": days,
+            "prices": [],
+            "market_caps": [],
+            "total_volumes": [],
+            "note": "Chart data unavailable (rate-limited or no data)",
+        }
     return data
 
 
