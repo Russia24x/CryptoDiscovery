@@ -905,7 +905,9 @@
       "revenue": "درآمد",
       "trades": "معاملات",
       "volume": "حجم",
-      "sparkline": "نمودار"
+      "sparkline": "نمودار",
+      "tvlList": "لیست TVL",
+      "feesList": "لیست کارمزدها"
     }
   }
 }

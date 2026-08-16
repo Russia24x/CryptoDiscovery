@@ -1026,7 +1026,9 @@ export function CoinPortal({
                     variant="outline"
                     className="text-[10px] bg-teal-500/10 text-teal-500 border-teal-500/30"
                   >
-                    {defiMatch.source === "defi" ? "TVL list" : "Fees list"}
+                    {defiMatch.source === "defi"
+                      ? tt("portal.tvlList", "TVL list")
+                      : tt("portal.feesList", "Fees list")}
                   </Badge>
                 )
               }

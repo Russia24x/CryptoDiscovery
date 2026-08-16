@@ -274,7 +274,11 @@ export function SettingsView() {
           const e = await r.json().catch(() => ({}));
           throw new Error(e?.detail ?? `HTTP ${r.status}`);
         }
-        await r.json();
+        const result = await r.json();
+        // Use the response — check if backend confirmed the save
+        if (result && result.error) {
+          throw new Error(result.error);
+        }
         toast({
           title: tt("settings.toast.keySaved", "API key saved"),
           description: tt(
@@ -935,10 +939,12 @@ function NewsSourceTable({ sources, onToggle, onDelete }: NewsSourceTableProps) 
                   <Switch
                     checked={s.enabled}
                     onCheckedChange={(checked) => {
+                      // Disable ALL toggles during any toggle operation (prevents
+                      // race when user toggles two rows quickly — Finding 10 fix)
                       setToggling(s.name);
                       onToggle(s, checked).finally(() => setToggling(null));
                     }}
-                    disabled={toggling === s.name}
+                    disabled={toggling !== null}
                   />
                 </TableCell>
                 <TableCell className="pr-4 text-right">

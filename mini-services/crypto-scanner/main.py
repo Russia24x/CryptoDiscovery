@@ -1727,7 +1727,10 @@ async def delete_api_key(key_name: str):
         api_keys[key_name]["enabled"] = False
         settings_store.save(settings)
         log.info("API key %s removed", key_name)
-    return {"ok": True, "key_name": key_name}
+        return {"ok": True, "key_name": key_name, "removed": True}
+    # Key was not configured — return removed=False so the frontend can inform
+    # the user that there was nothing to delete (avoids silent no-op).
+    return {"ok": True, "key_name": key_name, "removed": False}
 
 
 @app.post("/settings/news-sources")
