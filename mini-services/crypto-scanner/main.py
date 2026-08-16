@@ -1697,6 +1697,15 @@ async def upsert_news_source(req: NewsSourceUpsertRequest):
         raise HTTPException(status_code=400, detail="name is required")
     if not req.url.strip():
         raise HTTPException(status_code=400, detail="url is required")
+    # URL scheme validation — prevent stored XSS via javascript: URLs
+    # rendered as <a href> in the frontend news sources table.
+    import urllib.parse as _urlparse
+    parsed = _urlparse.urlparse(req.url.strip())
+    if parsed.scheme not in ("http", "https"):
+        raise HTTPException(
+            status_code=400,
+            detail=f"URL must start with http:// or https:// (got scheme: {parsed.scheme!r})",
+        )
     settings = settings_store.load()
     sources_list = settings.setdefault("news_sources", [])
     # Find existing by name (case-insensitive)

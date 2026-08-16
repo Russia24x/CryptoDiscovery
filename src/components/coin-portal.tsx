@@ -440,9 +440,14 @@ function findDefiMatch(
 
   const symbolMatches = (p: { symbol?: string | null }): boolean =>
     !!p.symbol && (p.symbol as string).toUpperCase().trim() === sym;
-  const nameMatches = (p: { name?: string | null }): boolean =>
-    !!p.name && typeof p.name === "string" &&
-    (p.name.toLowerCase().includes(nm) || nm.includes(p.name.toLowerCase()));
+  // nameMatches: guard against empty name — "".includes("") is always true,
+  // which would match the FIRST protocol (false positive). Return false
+  // when nm is empty so we only match on real name substrings.
+  const nameMatches = (p: { name?: string | null }): boolean => {
+    if (!nm) return false;
+    return !!p.name && typeof p.name === "string" &&
+      (p.name.toLowerCase().includes(nm) || nm.includes(p.name.toLowerCase()));
+  };
 
   // 1) top_defi (TVL list)
   const defiList = Array.isArray(market.top_defi) ? market.top_defi : [];

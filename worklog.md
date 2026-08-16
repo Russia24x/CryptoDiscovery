@@ -4251,3 +4251,287 @@ Architecture:
 - Binance API is free (no key needed) — integrated as a new data source
 - Settings stored in settings.json (gitignored, chmod 600), applies to os.environ on startup
 - Coin Portal uses Promise.allSettled for parallel fetches with graceful degradation
+
+---
+Task ID: review-new-features
+Agent: code-auditor
+Task: Review newly created Coin Portal drawer, Settings page, settings_store backend, main.py settings endpoints, and page.tsx nav integration for bugs, integration issues, race conditions, error handling, type mismatches, missing i18n keys, and security issues. READ-ONLY review — no code modified.
+
+Files reviewed (read-only):
+- /home/z/my-project/src/components/coin-portal.tsx (1170 lines)
+- /home/z/my-project/src/components/views/settings-view.tsx (1537 lines)
+- /home/z/my-project/mini-services/crypto-scanner/settings_store.py (322 lines)
+- /home/z/my-project/mini-services/crypto-scanner/main.py (settings block lines 1515-1845)
+- /home/z/my-project/src/app/page.tsx (mainView state + nav)
+- /home/z/my-project/src/components/views/market-intelligence-view.tsx (CoinPortal integration)
+- /home/z/my-project/src/lib/i18n/en.json + fa.json (i18n coverage)
+- /home/z/my-project/mini-services/crypto-scanner/.gitignore + /home/z/my-project/.gitignore
+- Next.js proxy routes under /home/z/my-project/src/app/api/scanner/settings/*
+
+============================================================
+FINDINGS (11 total: 0 critical, 3 medium, 8 minor)
+============================================================
+
+------------------------------------------------------------
+FINDING 1 — MEDIUM — Missing i18n namespace (portal.*)
+------------------------------------------------------------
+File: /home/z/my-project/src/components/coin-portal.tsx (multiple call sites: lines 747, 807, 817, 831, 834, 837, 844, 871, 881, 888, 895, 902, 911, 914, 927, 937, 946, 959, 962, 984, 1000, 1004, 1012, 1015, 1047, 1055, 1063, 1071, 1078, 1097, 1104, 1113, 1124, 1126, 1127, 1137)
+File: /home/z/my-project/src/lib/i18n/en.json + fa.json (neither has a "portal" key)
+
+What's wrong:
+The Coin Portal component references ~35 translation keys under the "portal.*" namespace (portal.ariaLabel, portal.description, portal.livePrice, portal.binanceTicker, portal.refreshesEvery, portal.binanceUnavailable, portal.last24h, portal.high24h, portal.low24h, portal.volume24h, portal.trades24h, portal.sparklineSection, portal.sparkline7d, portal.last7d, portal.chartUnavailable, portal.noChartData, portal.externalLinks, portal.website, portal.runAnalysis, portal.runAnalysisHint, portal.defiSection, portal.defiLlama, portal.tvl, portal.fees24h, portal.revenue24h, portal.fees7d, portal.fees30d, portal.chains, portal.category, portal.marketOverviewUnavailable, portal.noDefiMatch, portal.cached, portal.notCached, portal.refreshAll, portal.priceSection). I confirmed via grep that BOTH en.json and fa.json end at line 865 with the settings namespace — there is NO "portal" object in either file. The `useTt()` helper falls back to the inline English string when `t(key) === key`, so the UI renders correctly in English, but Persian (fa) users see fully English text inside the Coin Portal drawer. This is inconsistent with the Settings page (which DOES have full fa translations).
+
+Suggested fix:
+Add a "portal" section to both /home/z/my-project/src/lib/i18n/en.json and /home/z/my-project/src/lib/i18n/fa.json with Persian translations for all ~35 keys. The English fallbacks are already inline in coin-portal.tsx and can be copied verbatim into en.json, then translated for fa.json.
+
+------------------------------------------------------------
+FINDING 2 — MEDIUM — Stored XSS via RSS URL scheme not validated
+------------------------------------------------------------
+File: /home/z/my-project/mini-services/crypto-scanner/main.py:1687-1722 (upsert_news_source)
+File: /home/z/my-project/src/components/views/settings-view.tsx:906-919 (renders `href={s.url}` for RSS type)
+
+What's wrong:
+`upsert_news_source` validates that `name` and `url` are non-empty and that `source_type` is in {rss, telegram}, but it does NOT validate the URL scheme. A user (or anyone with UI access) can save a news source with `url = "javascript:alert(document.cookie)"` and `source_type = "rss"`. The frontend then renders `<a href={s.url} target="_blank">{s.url}</a>` for RSS rows. Clicking the link executes the JavaScript payload in the app's origin — a stored XSS. React does NOT sanitize `javascript:` URLs in `<a href>`. Telegram type is safe (URL is wrapped as `https://t.me/s/${encodeURIComponent(s.url)}`).
+
+Suggested fix:
+In `upsert_news_source` (main.py:1700), add URL scheme validation for RSS type:
+```python
+if req.source_type == "rss":
+    parsed = urllib.parse.urlparse(req.url.strip())
+    if parsed.scheme not in ("http", "https"):
+        raise HTTPException(status_code=400, detail="RSS url must start with http:// or https://")
+```
+Also consider adding `rel="noreferrer"` or sanitizing on the frontend as defense-in-depth.
+
+------------------------------------------------------------
+FINDING 3 — MEDIUM — findDefiMatch false-positive on empty coin name
+------------------------------------------------------------
+File: /home/z/my-project/src/components/coin-portal.tsx:432-496 (findDefiMatch), specifically lines 439-445
+
+What's wrong:
+```js
+const nm = (name || "").toLowerCase().trim();
+...
+const nameMatches = (p) =>
+  !!p.name && typeof p.name === "string" &&
+  (p.name.toLowerCase().includes(nm) || nm.includes(p.name.toLowerCase()));
+```
+If `name` is empty or whitespace, `nm === ""`. Then `p.name.toLowerCase().includes("")` evaluates to `true` for ANY string (every string includes the empty substring). So `nameMatches` returns true for the FIRST protocol in `top_defi`, causing a spurious DeFi match. Although `portalCoin.name` normally comes from `coin.name` in the market overview (rarely empty), a coin with a missing/null name would silently attach the wrong DeFiLlama protocol data (TVL, fees, chains) to the portal — misleading the user. The same bug does not apply to `symbolMatches` because that uses strict `===` equality.
+
+Suggested fix:
+Add an early-return guard at the top of `findDefiMatch`:
+```js
+if (!market || (!sym && !nm)) return null;
+```
+And/or add `if (!nm) return false;` as the first line of `nameMatches`.
+
+------------------------------------------------------------
+FINDING 4 — MINOR — handleTestInline doesn't check r.ok
+------------------------------------------------------------
+File: /home/z/my-project/src/components/views/settings-view.tsx:1040-1064 (ApiKeyDialog.handleTestInline)
+
+What's wrong:
+The inline Test button in the Add/Edit API Key dialog does:
+```js
+const r = await fetch(`/api/scanner/settings/test-api-key/${encodeURIComponent(keyName)}`, {...});
+const data: TestApiKeyResponse = await r.json();
+setTestResult(data);
+```
+There is no `if (!r.ok)` check. If the backend returns a non-200 (e.g. 400 from `_validate_key_name` if `keyName` is somehow not in the allowlist, 422 from FastAPI body validation, or 500 from an unhandled exception), `r.json()` parses FastAPI's error envelope `{"detail": "..."}` which has no `valid`/`message`/`status_code` fields. The component then renders `testResult.valid` (undefined → falsy) and `testResult.message` (undefined → renders as "undefined" text) inside the Alert. Note: the table-level Test button (`testApiKey`, lines 337-383) DOES handle `!r.ok` correctly, so this is an inconsistency between the two test paths.
+
+Suggested fix:
+Add the same `if (!r.ok)` guard used in `testApiKey`:
+```js
+if (!r.ok) {
+  const e = await r.json().catch(() => ({}));
+  setTestResult({ valid: false, message: e?.detail ?? `HTTP ${r.status}`, status_code: r.status });
+  return;
+}
+```
+
+------------------------------------------------------------
+FINDING 5 — MINOR — CMC external link uses CoinGecko slug
+------------------------------------------------------------
+File: /home/z/my-project/src/components/coin-portal.tsx:730
+
+What's wrong:
+```js
+const cmcUrl = `https://coinmarketcap.com/currencies/${geckoId ?? ""}/`;
+```
+`geckoId` is CoinGecko's coin id (e.g. "bitcoin", "ethereum", "binance-coin"). CMC's URL slug is CMC's own id and frequently differs from CoinGecko's. For "bitcoin"/"ethereum" the slugs happen to match, but for many coins (e.g. geckoId "binance-coin" vs CMC "bnb") the link 404s or redirects to CMC's homepage. This is a degraded UX, not a crash.
+
+Suggested fix:
+Either (a) remove the CMC button entirely, or (b) use CMC's search URL which is slug-agnostic:
+```js
+const cmcUrl = coinSymbol
+  ? `https://coinmarketcap.com/search/?q=${encodeURIComponent(coinSymbol)}`
+  : "https://coinmarketcap.com/";
+```
+Or fetch CMC's slug via the existing CMC search endpoint if available.
+
+------------------------------------------------------------
+FINDING 6 — MINOR — Hardcoded "TVL list" / "Fees list" labels
+------------------------------------------------------------
+File: /home/z/my-project/src/components/coin-portal.tsx:1022
+
+What's wrong:
+```jsx
+{defiMatch.source === "defi" ? "TVL list" : "Fees list"}
+```
+These two labels are hardcoded English strings, not wrapped in `tt(...)`. The rest of the DeFi section uses `tt("portal.tvl", ...)`, `tt("portal.fees24h", ...)`, etc. (which themselves are missing from the i18n files per Finding 1, but at least have English fallbacks inline). "TVL list" and "Fees list" have neither an i18n key nor a `tt()` wrapper — they bypass the i18n system entirely.
+
+Suggested fix:
+```jsx
+{defiMatch.source === "defi"
+  ? tt("portal.tvlList", "TVL list")
+  : tt("portal.feesList", "Fees list")}
+```
+And add the corresponding keys to en.json/fa.json along with the other portal.* keys (Finding 1).
+
+------------------------------------------------------------
+FINDING 7 — MINOR — Dead `override_value` parameter in testApiKey
+------------------------------------------------------------
+File: /home/z/my-project/src/components/views/settings-view.tsx:337-383
+
+What's wrong:
+`testApiKey` is declared as `async (key_name: string, override_value?: string)` but is only ever called as `testApiKey(k)` from the table (line 610: `onTest={(k) => testApiKey(k)}`). The `override_value` branch (`override_value ? { key_value: override_value } : {}`) is never exercised because no caller passes a second argument. The dialog uses a completely separate `handleTestInline` function that makes its own fetch. This is dead code that misleads future readers into thinking the table Test button can test an unsaved value.
+
+Suggested fix:
+Either (a) remove the `override_value` parameter from `testApiKey`, or (b) wire the dialog's Test button to call `testApiKey(keyName, keyValue)` and delete the duplicated `handleTestInline` logic.
+
+------------------------------------------------------------
+FINDING 8 — MINOR — saveApiKey discards POST response
+------------------------------------------------------------
+File: /home/z/my-project/src/components/views/settings-view.tsx:277
+
+What's wrong:
+```js
+await r.json();   // result discarded
+toast({...});
+setApiKeyDialog(null);
+await refresh();
+```
+The upsert endpoint returns `{ ok, key_name, masked_value, enabled, type }` but `saveApiKey` throws away the parsed JSON without using it (then calls `refresh()` to re-fetch the whole settings object). Not a bug — but the redundant `await r.json()` consumes the body for nothing. It's slightly wasteful and makes the code look like a bug at first glance.
+
+Suggested fix:
+Either remove the `await r.json()` line entirely (since the body doesn't need to be consumed before `refresh()`), or use the returned `masked_value` to update the local `settings` state without a full re-fetch.
+
+------------------------------------------------------------
+FINDING 9 — MINOR — HubView cannot navigate to Settings
+------------------------------------------------------------
+File: /home/z/my-project/src/components/views/hub-view.tsx:112
+File: /home/z/my-project/src/app/page.tsx:1211
+
+What's wrong:
+`HubViewProps.onNavigate` is typed as `(view: "discovery" | "explorer" | "market" | "news") => void` — it does NOT include "settings" or "hub". The Hub view's QuickActionsGrid therefore has no card/button to jump to Settings. Users must use the top-nav Settings button (which works fine). This is a UX gap, not a functional bug. The Settings page IS reachable via the top-nav button at page.tsx:1191-1205.
+
+Suggested fix:
+Add "settings" to the `onNavigate` union type in hub-view.tsx:112 and add a Settings quick-action card (e.g. next to the existing discovery/explorer/market/news cards). Low priority since the top-nav button already works.
+
+------------------------------------------------------------
+FINDING 10 — MINOR — NewsSourceTable toggle race (single toggling string)
+------------------------------------------------------------
+File: /home/z/my-project/src/components/views/settings-view.tsx:873 + 937-942
+
+What's wrong:
+`NewsSourceTable` holds `const [toggling, setToggling] = React.useState<string | null>(null)` — a single string tracking which source is currently being toggled. The Switch's `onCheckedChange` does `setToggling(s.name); onToggle(s, checked).finally(() => setToggling(null))`. If the user quickly toggles source A then source B before A's POST completes:
+1. `setToggling("A")` → A's Switch disabled
+2. `setToggling("B")` → B's Switch disabled, A's Switch re-enabled (toggling now "B")
+3. A's POST completes → `.finally(() => setToggling(null))` → BOTH switches re-enabled (even though B is still in flight)
+This lets the user click B's Switch again while B's first POST is still pending, potentially sending two contradictory updates. The backend's `upsert_news_source` is idempotent so the final state converges, but the UX is briefly inconsistent.
+
+Suggested fix:
+Track toggling state per-row (e.g. `useState<Record<string, boolean>>({})`), or use a Set. Or simpler: disable ALL switches while any toggle is in flight.
+
+------------------------------------------------------------
+FINDING 11 — MINOR — `delete_api_key` no-op silently returns ok
+------------------------------------------------------------
+File: /home/z/my-project/mini-services/crypto-scanner/main.py:1667-1684
+
+What's wrong:
+```python
+@app.delete("/settings/api-keys/{key_name}")
+async def delete_api_key(key_name: str):
+    _validate_key_name(key_name)
+    settings = settings_store.load()
+    api_keys = settings.get("api_keys", {})
+    if key_name in api_keys:
+        api_keys[key_name]["value"] = ""
+        api_keys[key_name]["enabled"] = False
+        settings_store.save(settings)
+        log.info("API key %s removed", key_name)
+    return {"ok": True, "key_name": key_name}
+```
+If `key_name` is valid but was never configured (not in `api_keys` dict), the endpoint returns `{"ok": True, "key_name": key_name}` without saving anything. The frontend toast says "API key removed" even though nothing was removed. The frontend's `deleteApiKey` disables the Delete button when `!k.has_value` (settings-view.tsx:837: `disabled={isSaving || !k.has_value}`) so this is mostly defensive, but a stale UI could still trigger it. Also note: "delete" actually means "clear value + disable" — the entry row is preserved. This is by design (comment says "Clear the value but keep the entry") but the endpoint name `delete_api_key` is misleading vs the actual behavior.
+
+Suggested fix:
+Either (a) return a distinct `{"ok": True, "already_empty": True}` flag when nothing was removed so the frontend can show a different toast, or (b) rename the endpoint behavior in the docstring to "clear" rather than "delete" to match reality. Low priority.
+
+============================================================
+VERIFIED WORKING (no action needed)
+============================================================
+
+1. Binance 15s auto-refresh interval cleanup — PASS
+   File: coin-portal.tsx:662-695
+   The effect creates `window.setInterval(tick, 15_000)` and returns a cleanup that calls `window.clearInterval(id)` AND `binanceAbortRef.current?.abort()`. Cleanup runs on unmount and on geckoId/coinSymbol change. Separate `binanceAbortRef` from `mainAbortRef` so the auto-refresh never aborts the main 4-source load. The `tick` closure also re-checks `loadedGeckoRef.current !== geckoId` before/after the await to discard stale responses when the user has switched coins.
+
+2. AbortController + reqIdRef stale-response guard — PASS
+   File: coin-portal.tsx:528-533, 553-649
+   `mainAbortRef` aborted before each new loadAll call; `reqIdRef.current` incremented per call and checked after `Promise.allSettled` resolves so a slow response from coin A doesn't overwrite state when coin B is current. Mirrors the MI-FE-2 pattern documented in market-intelligence-view.
+
+3. Promise.allSettled graceful degradation — PASS
+   File: coin-portal.tsx:566-641
+   All 4 sources (search, binance, chart, market) run in parallel; each failure is captured per-source into `errors` state and shown as an `UnavailableSection` badge. No single source failure breaks the others. Errors are console.error'd (not silently swallowed).
+
+4. Market Intelligence row click → Coin Portal — PASS
+   File: market-intelligence-view.tsx:503-511, 1258-1263, 1766-1775
+   `CoinRow.handleRowClick` calls `onOpenPortal(coin.id, coin.symbol.toUpperCase(), coin.name)` when available, which calls `setPortalCoin({geckoId, symbol, name})`. `<CoinPortal>` receives `geckoId={portalCoin?.geckoId ?? null}`, `coinSymbol`, `coinName`, `onClose`, `onAnalyze`. geckoId IS properly threaded end-to-end.
+
+5. CoinRow "Analyze" button still works — PASS
+   File: market-intelligence-view.tsx:513-515, 578-581
+   The Analyze button calls `e.stopPropagation()` then `handleAnalyze()` which calls `onAnalyze(coin.id, coin.name)` directly — independent of the row click handler. Row click opens the Portal; the Analyze button bypasses the Portal and jumps straight to Coin Explorer. Both paths work.
+
+6. Settings nav button in main navigation — PASS
+   File: page.tsx:368 (mainView type includes "settings"), 1191-1205 (Settings nav button rendered), 1243 (`{mainView === "settings" && <SettingsView />}`), 87 (SettingsView import)
+   The Settings nav button is in the top nav bar alongside Hub/Discovery/Explorer/Market/News. It uses the teal accent and shows a pulse dot when active. Clicking sets `mainView = "settings"` which conditionally renders `<SettingsView />`.
+
+7. settings.json is gitignored — PASS
+   File: /home/z/my-project/mini-services/crypto-scanner/.gitignore line 3: `settings.json`
+   Also /home/z/my-project/.gitignore has `.env*` for env files. settings.json is properly excluded from VCS.
+
+8. Restart-required limitation surfaced — PASS
+   File: settings-view.tsx:518-530 (amber Alert box at top of Settings page), 278-284 (toast after save: "Restart the scanner service for the key to take effect."), 1080-1086 (dialog addDesc: "loaded into the scanner process on next restart"), 745-756 in en.json/fa.json (restartNotice.title + restartNotice.body).
+   The restart requirement is surfaced in three places: persistent banner, save toast, and dialog description. Users cannot miss it.
+
+9. Backend-down handling — PASS
+   File: settings-view.tsx:238-251 (refresh), 532-540 (error Alert render)
+   If the backend is down, `fetch("/api/scanner/settings")` throws (network error), caught by try/catch, sets `error` state, which renders a destructive Alert with the error message. `loading` is set false in `finally`. The Settings table shows skeletons while loading and the error Alert replaces the table on failure. User can click Refresh to retry.
+
+10. API key masking / no key leakage — PASS
+    File: settings_store.py:108-119 (mask_value: ****XXXX), main.py:1601 (masked_value in GET response), 1661 (masked_value in POST response)
+    Raw key values are NEVER returned to the frontend. The mask shows only the last 4 chars. The frontend `ApiKeyEntry.masked_value` field always receives the masked form. The `get_api_key_value` helper (used only by test-api-key) returns the raw value server-side and never serializes it.
+
+11. Frontend/backend type alignment — PASS
+    Compared `ApiKeyEntry`, `NewsSourceEntry`, `SettingsResponse`, `TestApiKeyResponse` (settings-view.tsx:112-147) against `_build_api_keys_view` (main.py:1583-1607) and the GET /settings response (main.py:1612-1628). All fields match: key_name, label, description, masked_value, has_value, enabled, type, active, name, url, type, enabled. supported_api_keys: key_name, label, description, default_type — also matches.
+
+12. Input validation on backend — PASS (with one exception, Finding 2)
+    `_validate_key_name` (main.py:1572-1580) rejects key names not in KNOWN_API_KEYS. `key_type` validated against {free, keyed, manual} (main.py:1641-1645). `source_type` validated against {rss, telegram} (main.py:1691-1695). `name` and `url` checked non-empty (main.py:1696-1699). The only gap is RSS URL scheme validation (Finding 2).
+
+13. settings_store thread safety + atomic write — PASS
+    File: settings_store.py:101 (threading.Lock), 214-225 (atomic write via .tmp + replace + chmod 0o600)
+    `_write_unsafe` writes to `settings.json.tmp` then `os.replace` for atomicity. `os.chmod(0o600)` restricts to owner-only. All public functions (`load`, `save`) acquire `_LOCK`. `_default_api_keys` reads `os.environ` so .env-supplied keys appear in the UI on first run.
+
+14. Proxy routes exist and pass through correctly — PASS
+    All 6 Next.js proxy routes exist under /home/z/my-project/src/app/api/scanner/settings/* (route.ts, api-keys/route.ts, api-keys/[key_name]/route.ts, news-sources/route.ts, news-sources/[name]/route.ts, test-api-key/[key_name]/route.ts). `scannerFetch` (scanner-client.ts:16) sets `Content-Type: application/json` and uses an AbortController with timeout. DELETE routes use `encodeURIComponent` on path params.
+
+============================================================
+NEXT ACTIONS (recommended priority order)
+============================================================
+1. MEDIUM — Finding 2 (XSS): Add RSS URL scheme validation in main.py upsert_news_source. Quick fix, real security improvement.
+2. MEDIUM — Finding 3 (empty-name false DeFi match): Add `if (!sym && !nm) return null;` guard in coin-portal.tsx findDefiMatch. One-line fix.
+3. MEDIUM — Finding 1 (missing portal.* i18n): Add ~35 keys to en.json + fa.json. Larger but mechanical — English fallbacks already inline in the component.
+4. MINOR — Finding 4 (handleTestInline r.ok): Add `if (!r.ok)` check matching the table-level testApiKey. Small consistency fix.
+5. MINOR — Finding 6 (hardcoded TVL/Fees list labels): Wrap in tt() calls. Trivial.
+6. MINOR — Findings 5, 7, 8, 9, 10, 11: Cosmetic / dead code / UX nits. Address opportunistically.
+
+No code was modified during this review. All findings are read-only observations appended to worklog.md.
