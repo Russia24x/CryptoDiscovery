@@ -2051,7 +2051,9 @@ async def fetch_telegram_channel(channel: str, limit: int = 20) -> dict[str, Any
         "fetched_at": _datetime.now(_tz.utc).isoformat(),
     }
     cache_set(cache_key, out)
-    log.info("Telegram @%s: fetched %d messages", channel, len(messages))
+    # TE-3 fix: log the post-slice count (matching what's actually returned),
+    # not the pre-slice count which was misleading.
+    log.info("Telegram @%s: fetched %d messages", channel, out["message_count"])
     return out
 
 

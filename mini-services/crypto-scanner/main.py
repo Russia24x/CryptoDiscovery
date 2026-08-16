@@ -1082,8 +1082,6 @@ def _get_user_news_sources() -> list[tuple[str, str]]:
                 if name and url:
                     result.append((name, url))
         return result
-    except asyncio.CancelledError:
-        raise
     except Exception:
         return []
 
@@ -1144,6 +1142,13 @@ async def get_news_fa(limit: int = 40, category: str = ""):
         limit = 1
     elif limit > 200:
         limit = 200
+    # FE-1 fix: validate category against allowed set
+    allowed_categories = {"", "breaking", "blog", "news", "analysis"}
+    if category not in allowed_categories:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Invalid category: {category!r}. Must be one of: breaking, blog, news, analysis, or empty.",
+        )
     articles = await sources.fetch_crypto_news_fa(limit=limit, category=category)
     return {
         "count": len(articles),
