@@ -345,7 +345,13 @@ async def fetch_fees_overview() -> list[dict[str, Any]]:
     The /overview/fees endpoint returns a dict with a 'protocols' key
     containing the list of protocol fee data. Field names are:
     total24h, total7d, total30d (NOT fees_24h etc.)
+
+    Cached for 90s. Returns all ~2500 protocols sorted by fees_24h desc.
     """
+    cache_key = "fees_overview"
+    cached = cache_get(cache_key, ttl=90.0)
+    if cached is not None:
+        return cached
     async with httpx.AsyncClient(follow_redirects=True) as c:
         data = await _get_json(c, DEFILLAMA_FEES)
     # Handle both dict (new API) and list (old API) formats
@@ -374,6 +380,7 @@ async def fetch_fees_overview() -> list[dict[str, Any]]:
             "revenue_30d": p.get("revenue_30d"),
             "chains": p.get("chains", []),
         })
+    cache_set(cache_key, slim)
     return slim
 
 

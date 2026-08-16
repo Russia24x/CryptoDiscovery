@@ -1124,6 +1124,98 @@ async def market_top_coins(
     }
 
 
+@app.get("/market/top-defi")
+async def market_top_defi(
+    sort_by: str = "tvl",
+    limit: int = 50,
+):
+    """Fetch top DeFi protocols sorted by a specific metric from DeFiLlama.
+
+    Searches the FULL DeFiLlama dataset (2500+ protocols), not just the
+    top 50 from /market/overview. Powers the DeFi preset buttons in the
+    Market Intelligence view.
+
+    Query params:
+      sort_by — one of: tvl, fees_24h, fees_7d, fees_30d
+      limit   — max protocols to return (1-250, default 50)
+    """
+    if limit < 1:
+        limit = 1
+    elif limit > 250:
+        limit = 250
+
+    # Fetch DeFiLlama protocols + fees in parallel (both cached 90s)
+    import asyncio as _aio
+    results = await _aio.gather(
+        sources.fetch_defillama_protocols(),
+        sources.fetch_fees_overview(),
+        return_exceptions=True,
+    )
+    protos = results[0] if isinstance(results[0], list) else []
+    fees_list = results[1] if isinstance(results[1], list) else []
+
+    if not protos:
+        return {"protocols": [], "count": 0, "sort_by": sort_by}
+
+    # Build a lookup: slug → fee entry
+    fees_by_slug: dict[str, dict] = {}
+    fees_by_name: dict[str, dict] = {}
+    for f in fees_list:
+        if f.get("slug"):
+            fees_by_slug[f["slug"]] = f
+        if f.get("name"):
+            fees_by_name[f["name"].lower()] = f
+
+    # Merge: for each protocol, attach fee data if available
+    merged = []
+    for p in protos:
+        slug = p.get("slug", "")
+        name_lower = (p.get("name") or "").lower()
+        fee_entry = fees_by_slug.get(slug) or fees_by_name.get(name_lower, {})
+        merged.append({
+            "name": p.get("name"),
+            "slug": slug,
+            "symbol": p.get("symbol", ""),
+            "category": p.get("category", ""),
+            "tvl": p.get("tvl") or 0,
+            "chain": p.get("chain") or "",
+            "chains": p.get("chains") or "",
+            "logo": p.get("logo") or p.get("icon"),
+            "url": p.get("url"),
+            "twitter": p.get("twitter"),
+            "github": p.get("github"),
+            "fees_24h": (fee_entry or {}).get("fees_24h") or 0,
+            "fees_7d": (fee_entry or {}).get("fees_7d") or 0,
+            "fees_30d": (fee_entry or {}).get("fees_30d") or 0,
+            "revenue_24h": (fee_entry or {}).get("revenue_24h"),
+        })
+
+    # Define sort key extractors
+    DEFIFIN_SORT_KEYS = {
+        "tvl":       lambda m: m.get("tvl") or 0,
+        "fees_24h":  lambda m: m.get("fees_24h") or 0,
+        "fees_7d":   lambda m: m.get("fees_7d") or 0,
+        "fees_30d":  lambda m: m.get("fees_30d") or 0,
+    }
+
+    if sort_by not in DEFIFIN_SORT_KEYS:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Invalid sort_by: {sort_by!r}. Must be one of: {', '.join(DEFIFIN_SORT_KEYS.keys())}",
+        )
+
+    key_fn = DEFIFIN_SORT_KEYS[sort_by]
+    sorted_protos = sorted(merged, key=key_fn, reverse=True)[:limit]
+
+    return {
+        "protocols": sorted_protos,
+        "count": len(sorted_protos),
+        "sort_by": sort_by,
+        "total_available": len(merged),
+        "fetched_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+
 # --------------------------------------------------------------------------- #
 #  Crypto News — multi-source aggregation
 # --------------------------------------------------------------------------- #
