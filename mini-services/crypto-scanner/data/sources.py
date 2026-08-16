@@ -1621,13 +1621,13 @@ async def _fetch_rss_feed(client: httpx.AsyncClient, name: str, url: str, catego
     CONTENT_NS = "{http://purl.org/rss/1.0/modules/content/}"
 
     def _first_real_img(html_text: str) -> str | None:
-        """Extract the first non-data: URI image from HTML."""
+        """Extract the first real image URL from HTML."""
         if not html_text:
             return None
         for m in _re.finditer(r'<img[^>]+src=["\']([^"\']+)["\']', html_text):
             url = m.group(1)
-            # Skip base64 data: URIs (SVG placeholders, tiny inline images)
-            if not url.startswith("data:"):
+            # Skip base64 data: URIs and non-http(s) schemes (javascript:, etc.)
+            if url.lower().startswith(("http://", "https://")):
                 return url
         return None
 
@@ -1636,6 +1636,12 @@ async def _fetch_rss_feed(client: httpx.AsyncClient, name: str, url: str, catego
     for it in items[:30]:
         title = (it.findtext("title") or "").strip()
         link = (it.findtext("link") or "").strip()
+        # NF-2 fix: validate URL scheme — reject javascript:, data:, etc.
+        # RSS feeds are partially trusted (user can add arbitrary feeds in
+        # Settings), and a compromised feed could inject <link>javascript:...</link>.
+        # Same pattern as upsert_news_source validation (Finding 2 from review).
+        if link and not link.lower().startswith(("http://", "https://")):
+            link = ""  # never render non-http(s) as href
         pub = it.findtext("pubDate")
         desc_raw = it.findtext("description") or ""
         # content:encoded (full article body — often has images that description lacks)
