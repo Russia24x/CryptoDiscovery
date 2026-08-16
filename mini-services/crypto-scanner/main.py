@@ -1546,6 +1546,8 @@ async def system_health_check():
                 kl = await sources.fetch_cmc_keyless_by_symbol(sym)
                 if not kl or not kl.get("name"):
                     issues.append("CMC Keyless: no data (slug mismatch)")
+            except asyncio.CancelledError:
+                raise
             except Exception:  # noqa: BLE001
                 issues.append("CMC Keyless: fetch failed")
 
@@ -1903,6 +1905,8 @@ async def test_api_key(key_name: str, req: TestApiKeyRequest | None = None):
         return {"valid": False,
                 "message": f"Network error: {exc.__class__.__name__}.",
                 "status_code": None}
+    except asyncio.CancelledError:
+        raise
     except Exception as exc:  # noqa: BLE001
         return {"valid": False,
                 "message": f"Test failed: {exc.__class__.__name__}.",
