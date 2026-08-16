@@ -4587,3 +4587,504 @@ Stage Summary:
 - All 11 review findings now addressed (3 medium + 6 minor + 1 false positive + 1 already done)
 - Analysis pipeline verified healthy after all changes
 - Zero negative impact on analysis engine
+
+---
+Task ID: audit-phase-3-news-feed
+Agent: subagent (code auditor, read-only)
+Task: Audit /news, /news/fa, /telegram endpoints + news-feed-view.tsx frontend.
+
+Scope:
+- Backend: mini-services/crypto-scanner/main.py lines 1091-1173 (3 endpoints) + data/sources.py fetch_telegram_channel + fetch_crypto_news(_fa) + _fetch_rss_feed
+- Frontend: src/components/views/news-feed-view.tsx (1414 lines)
+- Plus proxy routes: src/app/api/scanner/{news,news/fa,telegram}/route.ts
+
+Read previous worklog first (4589 lines). Confirmed:
+- Previous task face1ee claimed "integrated /news with settings.json" — only partial (see NE-1 below)
+- MI-FE-2 / coin-portal reqIdRef + AbortController stale-response pattern was applied to coin-portal but NOT to news-feed-view (see NF-2)
+- No prior audit of these endpoints exists
+
+============================================================
+FINDINGS
+============================================================
+
+------------------------------------------------------------
+NF-1 — CRITICAL — news-feed-view.tsx:1201-1205 — Infinite fetch retry loop on persistent backend failure
+------------------------------------------------------------
+What's wrong:
+The initial-load effect:
+```js
+React.useEffect(() => {
+  if (tab === "news" && !news && !newsLoading) fetchNews(false);
+  else if (tab === "news_fa" && !newsFa && !newsFaLoading) fetchNewsFa(false);
+  else if (tab === "telegram" && !telegram && !tgLoading) fetchTelegram(false);
+}, [tab, news, newsFa, telegram, newsLoading, newsFaLoading, tgLoading, fetchNews, fetchNewsFa, fetchTelegram]);
+```
+deps include `newsLoading`/`newsFaLoading`/`tgLoading`. When a fetch fails:
+1. fetchNews(false) is called from effect
+2. setNewsLoading(true) — dep changes, effect re-runs, `!newsLoading` is false, no dup fetch ✓
+3. fetch fails → catch sets newsError, finally sets setNewsLoading(false)
+4. `newsLoading` flipped true→false → effect re-runs → `!news && !newsLoading` → true → fetchNews(false) AGAIN
+5. Loop indefinitely, one fetch per network round-trip
+
+Each iteration sends a fresh request to /api/scanner/news, hammering the backend and the upstream RSS/CryptoPanic/CryptoCompare APIs. With a fast 500 response (~50ms), this is ~20 req/s. With DNS failure, slightly slower but still continuous. UI flickers between loading and error states because `newsLoading` and `newsError` flip every cycle. Same bug applies to news_fa and telegram tabs (independent loops).
+
+`newsError` is NOT in the deps array — so a failed fetch doesn't add a guard, and `news` stays null forever on persistent failure. There is no reqIdRef/AbortController guard (unlike coin-portal.tsx MI-FE-2 fix).
+
+Suggested fix:
+Add an explicit "attempted" guard state per tab. Simplest:
+```js
+const [newsAttempted, setNewsAttempted] = React.useState(false);
+// in fetchNews finally: setNewsAttempted(true)
+// in effect: if (tab === "news" && !news && !newsLoading && !newsAttempted) fetchNews(false);
+```
+Or: gate the effect on `newsError !== null` to skip retry on the same error (force user to click Retry).
+Or: track an attempt counter and cap retries (e.g. max 1 auto-retry).
+
+------------------------------------------------------------
+NF-2 — MEDIUM — news-feed-view.tsx:267-319, 446-477, 500 — XSS via javascript: URIs in article/message links
+------------------------------------------------------------
+What's wrong:
+- ArticleCard line 271: `<a href={article.url} target="_blank" rel="noopener noreferrer">` — article.url comes from RSS `<link>` field (sources.py:1638 `link = it.findtext("link")`). No scheme validation.
+- PersianArticleCard line 751: same pattern.
+- MessageBubble line 431, 446, 463: `deepLink` and message link chips use `msg.links` parsed from t.me HTML (sources.py:1976-1980 `_re.findall(r'href="(https?://[^"]+)"...')` — these ARE restricted to https? URLs, so message links are safe ✓)
+- MessageBubble line 415: `msg.channel_url` is constructed server-side as `f"https://t.me/{channel}"` — safe ONLY if channel is validated (see TE-1).
+
+The RSS-derived `article.url` is the real risk: a malicious or compromised RSS feed could serve `<link>javascript:alert(document.cookie)</link>`. React does NOT sanitize href attributes against javascript: URIs — clicking the card runs the script in the page origin. Same applies to `article.image` for `<img src>` (less severe since browsers block javascript: in img src, but data: URIs could still be used for tracking/CSS exfiltration).
+
+Frontend reads the link raw from RSS, no allowlist. RSS feeds are partially trusted (CoinDesk etc.) but the user can add ANY RSS URL via Settings (and user feeds are accepted with only http(s) scheme check on the feed URL itself, not on the article links inside the feed).
+
+Suggested fix:
+Add a URL scheme guard before rendering:
+```js
+function safeUrl(u: string | null | undefined): string | null {
+  if (!u) return null;
+  try {
+    const parsed = new URL(u);
+    if (parsed.protocol === "http:" || parsed.protocol === "https:") return u;
+  } catch { /* fall through */ }
+  return null;
+}
+// then: const href = safeUrl(article.url); if (!href) return <div>...no-link card...</div>
+```
+Apply to article.url, article.image, msg.channel_url, deepLink, and msg.links (defense-in-depth even though backend filters msg.links).
+
+------------------------------------------------------------
+NE-1 — MEDIUM — main.py:1108-1116 — User-configured RSS feeds never fetched
+------------------------------------------------------------
+What's wrong:
+```python
+user_feeds = _get_user_news_sources()
+default_urls = {url for _, url in sources.NEWS_FEEDS}
+merged_feeds = list(sources.NEWS_FEEDS)
+for name, url in user_feeds:
+    if url not in default_urls:
+        merged_feeds.append((name, url))
+
+articles = await sources.fetch_crypto_news(limit=limit * 2 if source else limit)
+```
+`merged_feeds` is built but NEVER passed to `fetch_crypto_news`. That function only takes `limit` and reads from the module-level `sources.NEWS_FEEDS` constant (sources.py:1739-1753). So:
+- The response's `sources_configured.rss` lists user-configured feed names (line 1124: `[n for n, _ in merged_feeds]`).
+- The response's `sources_configured.user_feeds: len(user_feeds)` shows a count.
+- BUT the actual articles returned in `articles[]` come ONLY from the 4 hardcoded default RSS feeds (CoinDesk, Cointelegraph, Decrypt, Bitcoinist).
+
+Previous worklog entry (face1ee) titled "news settings integration" claimed: "Now merges user feeds from settings.json with defaults (deduped by URL). Closed the 'known limitation' from Settings page review." This is FALSE — only the response payload was updated, not the actual fetch. The user who adds a custom RSS feed in Settings sees their feed name listed as "configured" but never receives articles from it. This violates the "Never guess missing data" principle — the UI implies data is being fetched from a source that isn't actually being fetched from.
+
+Suggested fix:
+Either:
+(a) Refactor `sources.fetch_crypto_news` to accept an optional `feeds: list[tuple[str, str]] = None` param defaulting to `NEWS_FEEDS`, then in main.py:
+```python
+articles = await sources.fetch_crypto_news(limit=..., feeds=merged_feeds)
+```
+(b) Or have `fetch_crypto_news` read user feeds directly via `_get_user_news_sources` (but that couples sources.py to settings_store — currently sources.py is settings-agnostic).
+
+Option (a) is cleaner. Same fix needed for `fetch_crypto_news_fa` if Persian user feeds are ever added.
+
+------------------------------------------------------------
+TE-1 — MEDIUM — main.py:1165-1173 + sources.py:2007 — Telegram channel parameter has no validation
+------------------------------------------------------------
+What's wrong:
+```python
+@app.get("/telegram")
+async def get_telegram(channel: str = "Mastersharkcrypto", limit: int = 20):
+    data = await sources.fetch_telegram_channel(channel, limit=limit)
+    return data
+```
+And in sources.py:
+```python
+channel = channel.strip().lstrip("@")
+url = f"{TELEGRAM_BASE}/{channel}"  # https://t.me/s/<channel>
+```
+No validation on `channel`. Telegram usernames must match `^[a-zA-Z][a-zA-Z0-9_]{4,31}$` but anything is accepted here. Risks:
+1. Path traversal: `channel="../"` → URL `https://t.me/s/../` → httpx resolves to `https://t.me/` → returns landing page HTML → parser finds no `data-post` attrs → returns empty messages. Not a security risk (t.me is hardcoded), but the user gets a confusing "No messages" empty state.
+2. Query injection: `channel="Mastersharkcrypto?evil=1"` → URL `https://t.me/s/Mastersharkcrypto?evil=1`. Bypasses the `?before=` pagination control t.me supports, could be used to fetch different message ranges. Benign.
+3. Reflected XSS risk: backend returns `{"channel": "<user input>"}` which frontend renders as `@{channelName}` in JSX. React auto-escapes, so no XSS. But if channel contains `\u200f` (RTL mark) or other control chars, the UI layout could break.
+4. Empty channel: `channel=" "` → `channel.strip()` returns "" → URL `https://t.me/s/` → 301 redirect to t.me landing → empty messages.
+
+The previous Phase 2 audit fixed similar issues for `upsert_news_source` (RSS URL scheme validation, main.py:1690ish) but `/telegram` was missed.
+
+Suggested fix:
+```python
+import re
+_TG_CHANNEL_RE = re.compile(r"^[a-zA-Z][a-zA-Z0-9_]{4,31}$")
+
+@app.get("/telegram")
+async def get_telegram(channel: str = "Mastersharkcrypto", limit: int = 20):
+    channel = (channel or "").strip().lstrip("@")
+    if not _TG_CHANNEL_RE.match(channel):
+        return JSONResponse(
+            status_code=422,
+            content={"error": "Invalid channel name", "detail": "Must be 5-32 chars, [a-zA-Z0-9_], start with letter"}
+        )
+    # clamp limit
+    limit = max(1, min(limit, 50))
+    data = await sources.fetch_telegram_channel(channel, limit=limit)
+    return data
+```
+
+------------------------------------------------------------
+TE-2 — MEDIUM — main.py:1166 + sources.py:2030 — Telegram limit not validated, negative limit causes Python slice footgun
+------------------------------------------------------------
+What's wrong:
+```python
+@app.get("/telegram")
+async def get_telegram(channel: str = "Mastersharkcrypto", limit: int = 20):
+    data = await sources.fetch_telegram_channel(channel, limit=limit)
+```
+And in sources.py:2030: `"messages": messages[:limit],` and `"message_count": len(messages[:limit])`.
+
+If `limit=-1`, `messages[:-1]` returns all messages EXCEPT the last one (Python slice semantics). If `limit=-5`, returns all except the last 5. If `limit=0`, returns `messages[:0]` = empty list, then `message_count=0` but messages list still iterated in log.info at line 2035 (`len(messages)` = full count). The user-facing response says `message_count=0` with the backend log saying "fetched N messages" — misleading.
+
+If `limit=10000`, returns ALL parsed messages (no upper bound). t.me/s/ typically returns ~20 messages per page, so this is bounded by the HTML, but the API doesn't enforce a sane cap.
+
+Same pattern was already documented and fixed for `/dune/query/{query_id}` (main.py:1278, see worklog comment "Negative limits cause Python slicing to return unexpected slices"). /telegram has the same bug class but was not fixed.
+
+The /news and /news/fa endpoints DO validate (main.py:1103-1106, 1142-1146) with `if limit < 1: limit = 1; elif limit > 200: limit = 200`. /telegram does not.
+
+Suggested fix: Add the same clamping as /news:
+```python
+if limit < 1:
+    limit = 1
+elif limit > 50:
+    limit = 50  # t.me/s/ rarely has >20 messages anyway
+```
+
+------------------------------------------------------------
+NE-2 — MINOR — main.py:1117-1119 — Source filter uses substring match, not exact match
+------------------------------------------------------------
+What's wrong:
+```python
+if source:
+    s = source.lower()
+    articles = [a for a in articles if s in (a.get("source") or "").lower()]
+```
+`s in source.lower()` is substring match. `?source=coin` matches "CoinDesk", "Cointelegraph", "CryptoCompare", etc. `?source=c` matches everything containing "c". The docstring says "filter by source name (case-insensitive, e.g. 'CoinDesk')" which suggests exact match. The frontend never sends a source param (always fetches unfiltered then filters client-side with `a.source === sourceFilter` exact match), so this is latent. But a direct API user could be surprised.
+
+Suggested fix:
+```python
+if source:
+    s = source.strip().lower()
+    articles = [a for a in articles if (a.get("source") or "").lower() == s]
+```
+
+------------------------------------------------------------
+NE-3 — MINOR — main.py:1116 — limit*2 heuristic may under-fill when source filter is selective
+------------------------------------------------------------
+What's wrong:
+```python
+articles = await sources.fetch_crypto_news(limit=limit * 2 if source else limit)
+```
+When `source` is set, fetches 2× limit, then filters client-side. If a source contributes <50% of articles, fewer than `limit` are returned for that source. E.g. user requests `?limit=40&source=CryptoPanic` → fetches 80 total → CryptoPanic only contributes 20 → returns 20 articles despite `limit=40`. Not catastrophic, but the user gets fewer than requested. The 2× multiplier is arbitrary.
+
+Suggested fix: Either document this in the docstring, or fetch without limit and slice after filtering:
+```python
+articles = await sources.fetch_crypto_news(limit=200)  # fetch plenty
+if source:
+    articles = [a for a in articles if ...]
+articles = articles[:limit]
+```
+Trade-off: more memory/CPU for the typical case. Probably fine to leave as-is with a docstring note.
+
+------------------------------------------------------------
+NE-4 — MINOR — main.py:1085-1086 — `except asyncio.CancelledError: raise` in a non-async function is dead code
+------------------------------------------------------------
+What's wrong:
+```python
+def _get_user_news_sources() -> list[tuple[str, str]]:  # NOTE: not async
+    try:
+        settings = settings_store.load()
+        ...
+        return result
+    except asyncio.CancelledError:
+        raise
+    except Exception:
+        return []
+```
+`_get_user_news_sources` is a synchronous def. `asyncio.CancelledError` can only be raised inside a coroutine (or via `task.cancel()` scheduling). The `except asyncio.CancelledError: raise` branch is unreachable dead code. Harmless but misleading — implies the function might be cancelled.
+
+Suggested fix: Remove the `except asyncio.CancelledError: raise` lines (1085-1086). Keep only `except Exception: return []`.
+
+------------------------------------------------------------
+FE-1 — MINOR — main.py:1135 — /news/fa category parameter not validated
+------------------------------------------------------------
+What's wrong:
+```python
+@app.get("/news/fa")
+async def get_news_fa(limit: int = 40, category: str = ""):
+    ...
+    articles = await sources.fetch_crypto_news_fa(limit=limit, category=category)
+```
+Docstring says category can be "breaking", "blog", "news", "analysis". No validation. If user passes `category="breaking"`, filters sources to those tagged `cat == "breaking"` (only ArzDigital /breaking/feed/). If user passes `category="foobar"`, no feeds match → returns 0 articles. The frontend only ever sends `category=` (empty) and filters client-side, so this is latent. But the API silently returns empty for invalid categories instead of 422.
+
+Suggested fix:
+```python
+_VALID_FA_CATEGORIES = {"", "breaking", "blog", "news", "analysis"}
+if category not in _VALID_FA_CATEGORIES:
+    return JSONResponse(status_code=422, content={"error": "Invalid category"})
+```
+
+------------------------------------------------------------
+TE-3 — MINOR — sources.py:2035 — Telegram log prints full pre-slice count, response returns post-slice count
+------------------------------------------------------------
+What's wrong:
+```python
+out = {
+    ...
+    "messages": messages[:limit],
+    "message_count": len(messages[:limit]),  # post-slice
+    ...
+}
+cache_set(cache_key, out)
+log.info("Telegram @%s: fetched %d messages", channel, len(messages))  # pre-slice
+```
+`len(messages)` in the log is the pre-slice count. If `limit=5` and 20 messages were parsed, the log says "fetched 20 messages" but the response's `message_count` is 5. Misleading for log-based monitoring.
+
+Also, `len(messages[:limit])` is computed twice (once for messages list, once for message_count). Minor inefficiency.
+
+Suggested fix:
+```python
+sliced = messages[:limit]
+out = {..., "messages": sliced, "message_count": len(sliced), ...}
+cache_set(cache_key, out)
+log.info("Telegram @%s: fetched %d messages (returning %d)", channel, len(messages), len(sliced))
+```
+
+------------------------------------------------------------
+NF-3 — MINOR — news-feed-view.tsx:1185-1194 — fetchSources silently swallows errors including non-OK HTTP responses
+------------------------------------------------------------
+What's wrong:
+```js
+const fetchSources = React.useCallback(async () => {
+    try {
+      const res = await fetch("/api/scanner/sources");
+      if (!res.ok) return;          // silent on HTTP error
+      const data = (await res.json()) as SourcesStatus;
+      if (data?.sources) setSources(data.sources);
+    } catch {
+      // Non-critical — silently ignore.
+    }
+}, []);
+```
+Both `if (!res.ok) return;` (network/HTTP errors) and `catch {}` (exceptions) silently swallow. The SourcesBadgeRow just won't render (line 542: `if (relevant.length === 0) return null;`). Intentional and acceptable (sources row is decorative), but per audit category #9, this is a finding — at minimum should `console.warn` for debugging.
+
+Suggested fix:
+```js
+} catch (e) {
+  console.warn("fetchSources failed (non-critical):", e);
+}
+```
+
+------------------------------------------------------------
+NF-4 — MINOR — news-feed-view.tsx:1122-1183 — No AbortController on fetches; race conditions possible
+------------------------------------------------------------
+What's wrong:
+`fetchNews`, `fetchNewsFa`, `fetchTelegram` use plain `fetch()` with no AbortController. Issues:
+1. If user clicks Refresh then immediately switches tab and back, the in-flight Refresh completes later and overwrites state. Not data-corrupting (just a wasted update) but could cause "loading..." to flash briefly.
+2. Auto-refresh interval (line 1210): `setInterval(() => fetchTelegram(true), 60_000)` calls fetchTelegram every 60s. If a fetch takes >60s (slow network), multiple pile up. The last-resolving one wins, which may be the OLDER data.
+3. On component unmount, in-flight fetches complete and call setState on an unmounted component. React 18 doesn't warn but it's a wasted update.
+4. No `reqIdRef` guard like the MI-FE-2 fix in coin-portal.tsx — a slow fetch could overwrite state from a fast fetch that started later.
+
+This is the same pattern that was fixed in coin-portal.tsx (worklog verified PASS for "AbortController + reqIdRefRef stale-response guard"). News feed was missed.
+
+Suggested fix:
+Add an AbortController ref per tab, abort previous fetch on new fetch. Add a reqId counter and check after `await` to discard stale responses. Mirror the coin-portal.tsx:528-533 / 553-649 pattern.
+
+------------------------------------------------------------
+NF-5 — MINOR — news-feed-view.tsx:1115-1119 + 1255 — 1-second setInterval forces full re-render of 40+ article cards every second
+------------------------------------------------------------
+What's wrong:
+```js
+const [, setTick] = React.useState(0);
+React.useEffect(() => {
+  const id = setInterval(() => setTick((x) => x + 1), 1000);
+  return () => clearInterval(id);
+}, []);
+...
+// line 1255 (dead code):
+void secondsSince(activeFetchedAt ?? null);
+```
+The `setTick` interval triggers a re-render of the entire NewsFeedView component every 1 second. None of the child components (NewsTabContent, PersianNewsTabContent, TelegramTabContent, ArticleCard, MessageBubble) are wrapped in React.memo, so they all re-render too. With 40 news articles × 1 card each + 20 telegram messages, that's ~60 component re-renders per second = wasted CPU.
+
+The purpose is to update "Xs ago" relative time labels, which only need 1-second precision for the first minute (showing "5s ago", "30s ago") and could degrade to 1-minute precision afterward. A 1s tick is overkill.
+
+Additionally, line 1255 `void secondsSince(activeFetchedAt ?? null);` is dead code — computes a value and discards it. The comment claims it "forces re-render" but the re-render is already forced by `setTick`. The `secondsSince` call has no side effect.
+
+Suggested fix:
+1. Remove line 1255 (dead code).
+2. Either (a) increase interval to 30s or 60s and accept that "Xs ago" only updates every minute, or (b) wrap ArticleCard / MessageBubble in React.memo so only the time labels re-render.
+3. Better: extract the "Xs ago" display into its own component with its own 1s interval, so only that component re-renders.
+
+------------------------------------------------------------
+NF-6 — MINOR — news-feed-view.tsx:634, 642, 829, 832 — Source filter chip counts don't reflect search filter
+------------------------------------------------------------
+What's wrong:
+```jsx
+<SourceChip
+  active={sourceFilter === "all"}
+  ...
+  count={news?.articles.length ?? 0}
+/>
+{sources.map((s) => (
+  <SourceChip
+    ...
+    count={news?.articles.filter((a) => a.source === s).length ?? 0}
+  />
+))}
+```
+The chip count shows total articles per source, not articles matching the current search query. If the user searches "bitcoin" and the filter is "all", the "All Sources" chip still shows "40" but only 5 articles are visible. Misleading — user might think the search isn't working.
+
+Suggested fix: Use `filteredArticles` for the "All" count, and compute per-source counts from filteredArticles:
+```js
+const filteredBySource = (s: string) => filteredArticles.filter(a => a.source === s).length;
+count={sourceFilter === "all" ? filteredArticles.length : filteredBySource(sourceFilter)}
+```
+Or simpler: always show counts from the post-search-filter set.
+
+------------------------------------------------------------
+NF-7 — MINOR — news-feed-view.tsx:521 — `msg.views != null` renders empty "views" string for views=""
+------------------------------------------------------------
+What's wrong:
+```jsx
+{msg.views != null && (
+  <span ...>
+    <Eye className="size-3" />
+    {msg.views} {tt("telegram.views", "views")}
+  </span>
+)}
+```
+`msg.views != null` is true for empty string `""` (because `!=` not `!==`). If the backend's `views_match.group(1).strip()` returns an empty string (Telegram sometimes returns " " for messages with no view count yet), the chip renders as `· views` with no number. Confusing.
+
+Suggested fix:
+```jsx
+{msg.views && msg.views.trim() !== "" && (
+  ...
+)}
+```
+Or use truthiness directly: `{Boolean(msg.views) && ...}`.
+
+------------------------------------------------------------
+NF-8 — MINOR — news-feed-view.tsx:779-782 — Persian article footer hardcodes arzdigital.com / mihanblockchain.com
+------------------------------------------------------------
+What's wrong:
+```jsx
+{article.source === "ArzDigital" ? "arzdigital.com" : "mihanblockchain.com"}
+```
+Hardcoded domain strings based on source name. If a new Persian source is added (or user-configured), the footer shows "mihanblockchain.com" for any non-ArzDigital source. Also, the domain should ideally come from the article URL itself (parse hostname).
+
+Suggested fix:
+```js
+let host = "";
+try { host = new URL(article.url).hostname.replace(/^www\./, ""); } catch { host = article.source; }
+// then: {host}
+```
+Same pattern as MessageBubble line 493-498 which correctly extracts hostname from URL.
+
+------------------------------------------------------------
+NF-9 — MINOR — news-feed-view.tsx:1167-1169 — Telegram channel hardcoded in frontend URL
+------------------------------------------------------------
+What's wrong:
+```js
+const res = await fetch(
+  "/api/scanner/telegram?channel=Mastersharkcrypto&limit=20",
+);
+```
+Channel name "Mastersharkcrypto" is hardcoded in the fetch URL. If the user wants to view a different channel, there's no UI to change it. The backend supports arbitrary channels (per TE-1, with no validation). This is a product decision (single fixed channel), not a bug per se, but if multi-channel is ever added, this hardcoded URL is a blocker. Also: limit=20 is hardcoded — could be a constant.
+
+Suggested fix: If keeping single-channel, extract to a constant at top of file:
+```js
+const DEFAULT_TG_CHANNEL = "Mastersharkcrypto";
+const DEFAULT_TG_LIMIT = 20;
+```
+Then use in fetch URL and in the fallbacks on lines 941-942.
+
+------------------------------------------------------------
+NF-10 — MINOR — news-feed-view.tsx:941-942 — Telegram fallback URL/channel hardcoded
+------------------------------------------------------------
+What's wrong:
+```js
+const channelUrl = telegram?.channel_url ?? "https://t.me/Mastersharkcrypto";
+const channelName = telegram?.channel ?? "Mastersharkcrypto";
+```
+Hardcoded fallback. Same issue as NF-9 — fine for current single-channel design but brittle. The hardcoded URL `https://t.me/Mastersharkcrypto` is rendered in the "Join Channel" button when telegram state is null (during loading). This is acceptable behavior — shows the user where they'll go once loaded.
+
+Suggested fix: Same as NF-9 — extract to a constant.
+
+============================================================
+VERIFIED WORKING (no action needed)
+============================================================
+
+1. Telegram auto-refresh interval cleanup — PASS (with caveat, see NF-4)
+   File: news-feed-view.tsx:1208-1212
+   Effect creates `setInterval(() => fetchTelegram(true), 60_000)` and returns cleanup `clearInterval(id)`. Cleanup runs on unmount and on `autoRefresh` toggle. Deps `[autoRefresh, fetchTelegram]` are stable (fetchTelegram is useCallback with [] deps). Interval is properly cleared.
+
+2. Graceful degradation when ALL RSS sources fail — PASS
+   File: sources.py:1739-1826
+   `fetch_crypto_news` uses `asyncio.gather(*tasks, return_exceptions=True)` so individual RSS feed failures return as exceptions, filtered by `isinstance(res, list)`. CryptoPanic and CryptoCompare each have their own try/except. If ALL sources fail, returns empty list. Frontend shows empty state (news-feed-view.tsx:693-722). No crash, no error response. Empty `articles: []` is a valid response.
+
+3. /news limit validation — PASS
+   File: main.py:1103-1106
+   Clamps limit to [1, 200]. Matches /news/fa (1142-1146). Only /telegram is missing this (TE-2).
+
+4. Persian news RSS parallel fetch — PASS
+   File: sources.py:1845-1854
+   Uses `asyncio.gather(*tasks, return_exceptions=True)`. Same graceful degradation as English news. Category filter applied at fetch time (`if not category or cat == category`) so only matching feeds are fetched — efficient.
+
+5. Telegram HTML parsing robustness — PASS
+   File: sources.py:1888-1998
+   Two-tier regex (greedy then fallback per-post-id). Handles missing fields gracefully (text_match/author_match return None defaults). HTML entity unescaping via `_html.unescape`. RTL/LRM/zero-width char stripping. Filters out empty-text messages (line 1929-1930: `if not text: continue`). No regex catastrophic backtracking observed (the patterns are bounded by `[^"]*` etc.).
+
+6. Cache TTLs — PASS
+   File: sources.py:1745 (news 300s), 1838 (news_fa 300s), 2009 (telegram 120s)
+   Reasonable. Telegram's 120s cache combined with 60s auto-refresh means auto-refresh can hit cache — that's fine, but it also means "Auto-refresh" might not show new messages for up to 120s after the first fetch. Minor UX limitation, not a bug.
+
+7. React rendering of untrusted text — PASS
+   File: news-feed-view.tsx throughout
+   All article titles, summaries, message text, source names, channel names are rendered as JSX children `{value}` (auto-escaped by React). No use of `dangerouslySetInnerHTML` anywhere in the file. The only XSS surface is `href` attributes (see NF-2).
+
+8. React.memo unnecessary — ArticleImage resets errored state on src change — PASS
+   File: news-feed-view.tsx:247
+   `React.useEffect(() => setErrored(false), [src]);` resets the error state when src prop changes. Correct.
+
+9. Effect dep arrays — MOSTLY PASS
+   All useCallback deps are correct (fetchNews, fetchNewsFa, fetchTelegram, fetchSources, tt, handleRefresh all have proper deps). The initial-load effect (1201-1205) deps include all relevant state + stable callbacks. The bug is the inclusion of *Loading states triggering infinite retry (NF-1), not a missing dep.
+
+10. Proxy routes exist and pass through correctly — PASS
+    File: src/app/api/scanner/{news,news/fa,telegram}/route.ts
+    All 3 Next.js proxy routes exist. They use `scannerJson` from scanner-client.ts (which has AbortController + timeout per worklog line 4525). `encodeURIComponent` used on query params (channel, limit, source, category). Errors return 502 with detail.
+
+============================================================
+NEXT ACTIONS (recommended priority order)
+============================================================
+
+1. CRITICAL — NF-1 (infinite fetch loop): Add an "attempted" guard state per tab OR remove *Loading from the effect deps array. Without this fix, any backend outage causes the news view to hammer the API and flicker. This is the same MI-FE-2 pattern fixed in coin-portal.tsx — apply the same fix here.
+
+2. MEDIUM — NF-2 (XSS via javascript: URIs): Add safeUrl() helper and apply to article.url, article.image, msg.channel_url, deepLink. Real security improvement; RSS feeds are partially trusted but the Settings page lets users add arbitrary RSS URLs.
+
+3. MEDIUM — NE-1 (user feeds never fetched): Pass merged_feeds to fetch_crypto_news. The previous commit face1ee claimed this was done but only updated the response payload. This is a "Never guess missing data" violation — UI advertises sources that aren't actually fetched.
+
+4. MEDIUM — TE-1 (telegram channel validation): Add regex validation `^[a-zA-Z][a-zA-Z0-9_]{4,31}$`. Quick fix, prevents path traversal / query injection.
+
+5. MEDIUM — TE-2 (telegram limit validation): Add clamping to [1, 50], same as /news. Prevents Python slice footgun with negative limits.
+
+6. MINOR — NE-2, NE-3, NE-4, FE-1, TE-3, NF-3 through NF-10: Address opportunistically. None are urgent; mostly cosmetic / robustness / dead code.
+
+No code was modified during this review. All findings are read-only observations appended to worklog.md.

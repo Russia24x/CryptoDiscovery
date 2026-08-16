@@ -1107,13 +1107,13 @@ async def get_news(limit: int = 40, source: str = ""):
 
     # Merge user-configured RSS feeds with defaults
     user_feeds = _get_user_news_sources()
-    default_urls = {url for _, url in sources.NEWS_FEEDS}
-    merged_feeds = list(sources.NEWS_FEEDS)
-    for name, url in user_feeds:
-        if url not in default_urls:
-            merged_feeds.append((name, url))
 
-    articles = await sources.fetch_crypto_news(limit=limit * 2 if source else limit)
+    # NE-1 fix: actually pass user_feeds to the fetcher (was computed but
+    # never passed — UI advertised sources that weren't actually fetched).
+    articles = await sources.fetch_crypto_news(
+        limit=limit * 2 if source else limit,
+        extra_feeds=user_feeds,
+    )
     if source:
         s = source.lower()
         articles = [a for a in articles if s in (a.get("source") or "").lower()]
@@ -1121,7 +1121,7 @@ async def get_news(limit: int = 40, source: str = ""):
     return {
         "count": len(articles),
         "sources_configured": {
-            "rss": [n for n, _ in merged_feeds],
+            "rss": [n for n, _ in sources.NEWS_FEEDS] + [n for n, _ in user_feeds],
             "user_feeds": len(user_feeds),
             "cryptopanic": bool(sources.CRYPTOPANIC_TOKEN),
             "cryptocompare": bool(sources.CRYPTOCOMPARE_KEY),
@@ -1168,8 +1168,26 @@ async def get_telegram(channel: str = "Mastersharkcrypto", limit: int = 20):
 
     Default channel: Mastersharkcrypto (the user's requested channel).
     Works for any public channel — no API key or bot token required.
+
+    Channel must be a valid Telegram username: starts with a letter,
+    alphanumeric + underscore, 5-32 chars.
     """
-    data = await sources.fetch_telegram_channel(channel, limit=limit)
+    # TE-1 fix: validate channel format — prevents path traversal,
+    # query injection, and control characters.
+    import re
+    ch = (channel or "").strip()
+    if not re.match(r"^[a-zA-Z][a-zA-Z0-9_]{4,31}$", ch):
+        raise HTTPException(
+            status_code=422,
+            detail=f"Invalid channel format: {channel!r}. Must be 5-32 chars, "
+                   f"start with a letter, alphanumeric + underscore only.",
+        )
+    # TE-2 fix: validate limit — negative causes Python slice footgun
+    if limit < 1:
+        limit = 1
+    elif limit > 100:
+        limit = 100
+    data = await sources.fetch_telegram_channel(ch, limit=limit)
     return data
 
 

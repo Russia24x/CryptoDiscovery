@@ -1736,12 +1736,25 @@ async def fetch_binance_ticker(symbol: str) -> dict[str, Any] | None:
     return None
 
 
-async def fetch_crypto_news(limit: int = 40) -> list[dict[str, Any]]:
+async def fetch_crypto_news(limit: int = 40, extra_feeds: list[tuple[str, str]] | None = None) -> list[dict[str, Any]]:
     """Aggregate crypto news from multiple free RSS sources + optional API keys.
 
     Deduplicates by title and sorts by published_at descending.
+
+    Args:
+        limit: max articles to return
+        extra_feeds: user-configured RSS feeds from settings.json (merged
+                     with built-in NEWS_FEEDS, deduped by URL)
     """
-    cache_key = f"news:{limit}"
+    # Build merged feed list: defaults + user-configured (deduped by URL)
+    feeds = list(NEWS_FEEDS)
+    if extra_feeds:
+        default_urls = {url for _, url in NEWS_FEEDS}
+        for name, url in extra_feeds:
+            if url not in default_urls:
+                feeds.append((name, url))
+
+    cache_key = f"news:{limit}:{len(feeds)}"
     cached = cache_get(cache_key, ttl=300.0)  # 5-min cache
     if cached is not None:
         return cached
@@ -1750,7 +1763,7 @@ async def fetch_crypto_news(limit: int = 40) -> list[dict[str, Any]]:
 
     # 1) RSS feeds (always available, no key)
     async with httpx.AsyncClient(follow_redirects=True) as c:
-        tasks = [_fetch_rss_feed(c, name, url) for name, url in NEWS_FEEDS]
+        tasks = [_fetch_rss_feed(c, name, url) for name, url in feeds]
         results = await asyncio.gather(*tasks, return_exceptions=True)
         for res in results:
             if isinstance(res, list):

@@ -1198,11 +1198,25 @@ export function NewsFeedView({ initialTab = "news" }: NewsFeedViewProps) {
     fetchSources();
   }, [fetchSources]);
 
+  // Track which tabs have been fetched to prevent infinite re-fetch loops.
+  // The old code used `!news && !newsLoading` as the fetch condition, but
+  // newsLoading flips false in the finally block — which is a dep of this
+  // same effect — causing the effect to re-fire, see news is still null
+  // (fetch failed), and fetch again forever (NF-1 critical fix).
+  const fetchedTabs = React.useRef<Set<string>>(new Set());
+
   React.useEffect(() => {
-    if (tab === "news" && !news && !newsLoading) fetchNews(false);
-    else if (tab === "news_fa" && !newsFa && !newsFaLoading) fetchNewsFa(false);
-    else if (tab === "telegram" && !telegram && !tgLoading) fetchTelegram(false);
-  }, [tab, news, newsFa, telegram, newsLoading, newsFaLoading, tgLoading, fetchNews, fetchNewsFa, fetchTelegram]);
+    if (tab === "news" && !fetchedTabs.current.has("news")) {
+      fetchedTabs.current.add("news");
+      fetchNews(false);
+    } else if (tab === "news_fa" && !fetchedTabs.current.has("news_fa")) {
+      fetchedTabs.current.add("news_fa");
+      fetchNewsFa(false);
+    } else if (tab === "telegram" && !fetchedTabs.current.has("telegram")) {
+      fetchedTabs.current.add("telegram");
+      fetchTelegram(false);
+    }
+  }, [tab, fetchNews, fetchNewsFa, fetchTelegram]);
 
   // ----- Auto-refresh telegram every 60s when toggle is on -----
   React.useEffect(() => {
