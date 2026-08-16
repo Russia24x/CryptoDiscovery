@@ -1709,6 +1709,71 @@ export function MarketIntelligenceView({ onAnalyzeCoin }: MarketIntelligenceView
     [coinPreset],
   );
 
+  /* Preset coins — when a non-default preset is selected, fetch the
+     full 250-coin market snapshot sorted by that metric from the backend
+     (instead of just re-sorting the existing top 50). This ensures the
+     preset searches the ENTIRE market, not just the top 50 by mkt cap. */
+  const [presetCoins, setPresetCoins] = React.useState<TopCoin[] | null>(null);
+  const [presetLoading, setPresetLoading] = React.useState(false);
+  const presetAbortRef = React.useRef<AbortController | null>(null);
+
+  // Map preset IDs to backend sort_by values
+  const PRESET_TO_SORT_BY: Record<string, string> = {
+    mktcap: "market_cap",
+    gainers24h: "gainers_24h",
+    losers24h: "losers_24h",
+    volume: "volume",
+    "near-ath": "near_ath",
+    "near-atl": "near_atl",
+    supply: "circulating_supply",
+  };
+
+  React.useEffect(() => {
+    // Default preset uses the already-fetched top_coins — no extra fetch
+    if (coinPreset === DEFAULT_COIN_PRESET_ID) {
+      setPresetCoins(null);
+      return;
+    }
+    const sortBy = PRESET_TO_SORT_BY[coinPreset] || "market_cap";
+
+    // Abort any in-flight preset fetch
+    presetAbortRef.current?.abort();
+    const ctrl = new AbortController();
+    presetAbortRef.current = ctrl;
+    setPresetLoading(true);
+
+    (async () => {
+      try {
+        const res = await fetch(
+          `/api/scanner/market/top-coins?sort_by=${encodeURIComponent(sortBy)}&limit=50`,
+          { signal: ctrl.signal },
+        );
+        if (!res.ok) {
+          console.warn("[MarketIntel] preset fetch HTTP", res.status);
+          return;
+        }
+        const data = await res.json();
+        if (!ctrl.signal.aborted && Array.isArray(data.coins)) {
+          setPresetCoins(data.coins as TopCoin[]);
+        }
+      } catch (e) {
+        if (e instanceof DOMException && e.name === "AbortError") return;
+        console.warn("[MarketIntel] preset fetch failed:", e);
+      } finally {
+        if (!ctrl.signal.aborted) {
+          setPresetLoading(false);
+        }
+      }
+    })();
+  }, [coinPreset]);
+
+  // The coins to display in the Top Coins table:
+  // - Default preset: use data.top_coins from market overview (no extra fetch)
+  // - Other presets: use presetCoins from /market/top-coins endpoint
+  const topCoinsToDisplay = coinPreset === DEFAULT_COIN_PRESET_ID
+    ? (data?.top_coins ?? [])
+    : (presetCoins ?? []);
+
   return (
     <TooltipProvider>
       <div className="space-y-5">
@@ -1928,7 +1993,7 @@ export function MarketIntelligenceView({ onAnalyzeCoin }: MarketIntelligenceView
                     </div>
                     <CoinTable
                       key={coinPreset}
-                      coins={data.top_coins}
+                      coins={topCoinsToDisplay}
                       onAnalyze={onAnalyzeCoin}
                       onOpenPortal={handleOpenPortal}
                       defaultSort={activePresetSort}

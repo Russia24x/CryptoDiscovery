@@ -1060,6 +1060,70 @@ async def market_overview():
     }
 
 
+@app.get("/market/top-coins")
+async def market_top_coins(
+    sort_by: str = "market_cap",
+    limit: int = 50,
+):
+    """Fetch top coins sorted by a specific metric — searches the FULL market,
+    not just the top 50 by market cap.
+
+    Uses the cached 250-coin market snapshot (90s TTL) and sorts client-side.
+    This endpoint powers the preset filter buttons in the Market Intelligence
+    view (Top Gainers, Top Losers, Highest Volume, Near ATH/ATL, etc.).
+
+    Query params:
+      sort_by — one of: market_cap, volume, gainers_24h, losers_24h,
+                gainers_7d, gainers_30d, near_ath, near_atl,
+                circulating_supply, fdv
+      limit   — max coins to return (1-250, default 50)
+    """
+    if limit < 1:
+        limit = 1
+    elif limit > 250:
+        limit = 250
+
+    # Fetch the full 250-coin snapshot (cached 90s)
+    markets = await sources.fetch_top_markets_extended(per_page=250)
+    if not markets:
+        return {"coins": [], "count": 0, "sort_by": sort_by}
+
+    # Define sort key extractors for each metric
+    SORT_KEYS = {
+        "market_cap":        lambda m: m.get("market_cap") or 0,
+        "volume":            lambda m: m.get("total_volume") or 0,
+        "gainers_24h":       lambda m: m.get("price_change_percentage_24h_in_currency") or -999,
+        "losers_24h":        lambda m: m.get("price_change_percentage_24h_in_currency") if m.get("price_change_percentage_24h_in_currency") is not None else 999,
+        "gainers_7d":        lambda m: m.get("price_change_percentage_7d_in_currency") or -999,
+        "gainers_30d":       lambda m: m.get("price_change_percentage_30d_in_currency") or -999,
+        "near_ath":          lambda m: m.get("ath_change_percentage") or -999,  # closest to 0 = nearest ATH
+        "near_atl":          lambda m: m.get("atl_change_percentage") if m.get("atl_change_percentage") is not None else 999,  # smallest = nearest ATL
+        "circulating_supply": lambda m: m.get("circulating_supply") or 0,
+        "fdv":               lambda m: m.get("fully_diluted_valuation") or 0,
+    }
+
+    if sort_by not in SORT_KEYS:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Invalid sort_by: {sort_by!r}. Must be one of: {', '.join(SORT_KEYS.keys())}",
+        )
+
+    key_fn = SORT_KEYS[sort_by]
+    # For most metrics, sort descending (highest first).
+    # For losers_24h and near_atl, sort ascending (lowest first).
+    reverse = sort_by not in ("losers_24h", "near_atl")
+
+    sorted_coins = sorted(markets, key=key_fn, reverse=reverse)[:limit]
+
+    return {
+        "coins": sorted_coins,
+        "count": len(sorted_coins),
+        "sort_by": sort_by,
+        "total_available": len(markets),
+        "fetched_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+
 # --------------------------------------------------------------------------- #
 #  Crypto News — multi-source aggregation
 # --------------------------------------------------------------------------- #
