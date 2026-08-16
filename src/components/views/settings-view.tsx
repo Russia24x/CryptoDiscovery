@@ -1050,6 +1050,14 @@ function ApiKeyDialog({
           body: JSON.stringify(keyValue ? { key_value: keyValue } : {}),
         },
       );
+      // Finding 4 fix: check r.ok before parsing (consistent with table-level Test)
+      if (!r.ok) {
+        setTestResult({
+          valid: false,
+          message: `HTTP ${r.status}`,
+        });
+        return;
+      }
       const data: TestApiKeyResponse = await r.json();
       setTestResult(data);
     } catch (e) {

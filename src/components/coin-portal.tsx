@@ -732,7 +732,9 @@ export function CoinPortal({
 
   // External links.
   const coingeckoUrl = `https://www.coingecko.com/en/coins/${geckoId ?? ""}`;
-  const cmcUrl = `https://coinmarketcap.com/currencies/${geckoId ?? ""}/`;
+  // CMC uses different slugs than CoinGecko (e.g. CoinGecko "bitcoin" vs CMC "bitcoin").
+  // Link to search results instead of guessing — avoids 404s.
+  const cmcUrl = `https://coinmarketcap.com/search/?q=${encodeURIComponent(coinSymbol || coinName)}`;
   const defillamaUrl = defiMatch?.slug
     ? `https://defillama.com/protocol/${defiMatch.slug}`
     : `https://defillama.com/protocols${geckoId ? `?q=${encodeURIComponent(geckoId)}` : ""}`;

@@ -58,6 +58,7 @@ import {
   Newspaper,
   Radar,
   Send,
+  Settings,
   ShieldCheck,
   Sparkles,
   TrendingUp,
@@ -109,7 +110,7 @@ import type {
 
 export interface HubViewProps {
   /** Navigate to a specific main view. */
-  onNavigate: (view: "discovery" | "explorer" | "market" | "news") => void;
+  onNavigate: (view: "discovery" | "explorer" | "market" | "news" | "settings") => void;
   /** Start a scan immediately (shortcut to Discovery scan). */
   onQuickScan?: () => void;
 }
@@ -660,6 +661,17 @@ function QuickActionsGrid({
       actionKey: "hub.quickActions.newsAction",
       actionFallback: "Latest News",
       accent: "rose",
+    },
+    {
+      view: "settings",
+      icon: <Settings className="size-6" />,
+      titleKey: "hub.quickActions.settingsTitle",
+      titleFallback: "Settings",
+      subtitleKey: "hub.quickActions.settingsSubtitle",
+      subtitleFallback: "API keys + news sources",
+      actionKey: "hub.quickActions.settingsAction",
+      actionFallback: "Configure",
+      accent: "teal",
     },
   ];
 
