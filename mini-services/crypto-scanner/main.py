@@ -1049,14 +1049,54 @@ async def market_overview():
 # --------------------------------------------------------------------------- #
 #  Crypto News — multi-source aggregation
 # --------------------------------------------------------------------------- #
+def _get_user_news_sources() -> list[tuple[str, str]]:
+    """Load user-configured RSS feeds from settings.json.
+
+    Returns list of (name, url) tuples for enabled RSS sources.
+    Merges with built-in defaults (deduped by URL).
+    """
+    try:
+        settings = settings_store.load()
+        user_sources = settings.get("news_sources", [])
+        result: list[tuple[str, str]] = []
+        for s in user_sources:
+            if not s.get("enabled", True):
+                continue
+            if s.get("type") == "rss":
+                name = str(s.get("name", "")).strip()
+                url = str(s.get("url", "")).strip()
+                if name and url:
+                    result.append((name, url))
+        return result
+    except Exception:
+        return []
+
+
 @app.get("/news")
 async def get_news(limit: int = 40, source: str = ""):
     """Aggregate crypto news from multiple RSS feeds + optional API-key sources.
+
+    Reads user-configured RSS feeds from settings.json (Settings page) and
+    merges with built-in defaults (CoinDesk, Cointelegraph, etc.).
 
     Query params:
       limit  — max articles to return (default 40)
       source — filter by source name (case-insensitive, e.g. "CoinDesk")
     """
+    # Validate limit
+    if limit < 1:
+        limit = 1
+    elif limit > 200:
+        limit = 200
+
+    # Merge user-configured RSS feeds with defaults
+    user_feeds = _get_user_news_sources()
+    default_urls = {url for _, url in sources.NEWS_FEEDS}
+    merged_feeds = list(sources.NEWS_FEEDS)
+    for name, url in user_feeds:
+        if url not in default_urls:
+            merged_feeds.append((name, url))
+
     articles = await sources.fetch_crypto_news(limit=limit * 2 if source else limit)
     if source:
         s = source.lower()
@@ -1065,7 +1105,8 @@ async def get_news(limit: int = 40, source: str = ""):
     return {
         "count": len(articles),
         "sources_configured": {
-            "rss": [n for n, _ in sources.NEWS_FEEDS],
+            "rss": [n for n, _ in merged_feeds],
+            "user_feeds": len(user_feeds),
             "cryptopanic": bool(sources.CRYPTOPANIC_TOKEN),
             "cryptocompare": bool(sources.CRYPTOCOMPARE_KEY),
         },
@@ -1082,6 +1123,11 @@ async def get_news_fa(limit: int = 40, category: str = ""):
       limit    — max articles (default 40)
       category — "breaking", "blog", "news", "analysis" (empty = all)
     """
+    # Validate limit
+    if limit < 1:
+        limit = 1
+    elif limit > 200:
+        limit = 200
     articles = await sources.fetch_crypto_news_fa(limit=limit, category=category)
     return {
         "count": len(articles),
