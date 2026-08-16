@@ -33,6 +33,7 @@ import {
   PieChart,
   Radar,
   Search,
+  Settings,
   ShieldAlert,
   ShieldCheck,
   SlidersHorizontal,
@@ -83,6 +84,7 @@ import { CoinExplorerView } from "@/components/views/coin-explorer-view";
 import { MarketIntelligenceView } from "@/components/views/market-intelligence-view";
 import { NewsFeedView } from "@/components/views/news-feed-view";
 import { HubView } from "@/components/views/hub-view";
+import { SettingsView } from "@/components/views/settings-view";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { LanguageToggle } from "@/components/language-toggle";
 import { ReportDetail } from "@/components/report-detail";
@@ -362,8 +364,8 @@ export default function Home() {
   const [diffScanB, setDiffScanB] = useState<ScanStatus | null>(null);
   // help dialog
   const [showHelp, setShowHelp] = useState(false);
-  // main view tab: hub (landing) | discovery (scan) | explorer (manual coin analysis) | market (intelligence) | news (feed)
-  const [mainView, setMainView] = useState<"hub" | "discovery" | "explorer" | "market" | "news">("hub");
+  // main view tab: hub (landing) | discovery (scan) | explorer (manual coin analysis) | market (intelligence) | news (feed) | settings
+  const [mainView, setMainView] = useState<"hub" | "discovery" | "explorer" | "market" | "news" | "settings">("hub");
   // when set, Coin Explorer auto-loads this coin (triggered from Market Intelligence click)
   const [explorerInitialId, setExplorerInitialId] = useState<string | null>(null);
   // search input ref for keyboard shortcut
@@ -1186,6 +1188,21 @@ export default function Home() {
             <Newspaper className="h-4 w-4" />
             <span>{t("nav.news")}</span>
           </button>
+          <button
+            onClick={() => setMainView("settings")}
+            className={cn(
+              "flex items-center gap-2 px-3.5 py-2 rounded-lg text-xs font-medium transition-all whitespace-nowrap",
+              mainView === "settings"
+                ? "bg-teal-500/15 text-teal-400 shadow-sm"
+                : "text-muted-foreground hover:text-foreground hover:bg-muted/40",
+            )}
+          >
+            <Settings className="h-4 w-4" />
+            <span>{t("nav.settings")}</span>
+            {mainView === "settings" && (
+              <span className="ml-1 h-1.5 w-1.5 rounded-full bg-teal-400 animate-pulse" />
+            )}
+          </button>
         </div>
 
         {/* ============ Hub view (default landing) ============ */}
@@ -1221,6 +1238,9 @@ export default function Home() {
 
         {/* ============ News & Telegram Feed view ============ */}
         {mainView === "news" && <NewsFeedView />}
+
+        {/* ============ Settings view ============ */}
+        {mainView === "settings" && <SettingsView />}
 
         {/* ============ Discovery view (default) ============ */}
         {mainView === "discovery" && (

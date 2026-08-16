@@ -30,6 +30,12 @@ from models.schemas import (
     ScanProgress,
     ScanStatus,
 )
+# IMPORTANT: settings_store must be imported BEFORE `from data import sources`
+# so that API keys configured via the Settings UI (stored in settings.json)
+# are applied to os.environ before sources.py caches them at module-load time.
+# settings_store's __init__ calls apply_to_env() which is idempotent and safe.
+import settings_store  # noqa: F401 — side effect: applies settings to env
+
 from framework import analysis, discovery, evidence
 from data import sources
 import db
@@ -1505,6 +1511,332 @@ async def system_health_check():
     }
 
     return report
+
+
+# ========================================================================== #
+#  Settings management — API keys + news sources (Task: settings-page)
+# ========================================================================== #
+# This block exposes:
+#   GET    /settings
+#   POST   /settings/api-keys
+#   DELETE /settings/api-keys/{key_name}
+#   POST   /settings/news-sources
+#   DELETE /settings/news-sources/{name}
+#   POST   /settings/test-api-key/{key_name}
+#
+# All responses mask API key values (****XXXX — last 4 chars only).
+# Raw values are NEVER returned, NEVER logged.
+#
+# Storage: settings.json (gitignored). The settings_store module loads
+# it on import and applies enabled keys to os.environ so that the
+# existing data layer (`from data import sources`) picks them up at
+# scanner startup.
+
+# --- Pydantic request models --------------------------------------------- #
+
+class ApiKeyUpsertRequest(BaseModel):
+    """Add or update an API key entry in settings.json.
+
+    `key_type` is informational (free | keyed | manual) and controls how
+    the UI presents the row; it does NOT change runtime behaviour.
+    `key_value` is required for add/update but optional on test (use
+    the stored value when omitted).
+    """
+    key_name: str
+    key_value: str = ""
+    enabled: bool = True
+    key_type: str = "keyed"
+
+
+class NewsSourceUpsertRequest(BaseModel):
+    """Add or update a news source (RSS feed or Telegram channel)."""
+    name: str
+    url: str
+    source_type: str = "rss"  # "rss" | "telegram"
+    enabled: bool = True
+
+
+class TestApiKeyRequest(BaseModel):
+    """Optional body for the test-api-key endpoint. If `key_value` is
+    provided, it overrides the stored value (useful for testing a key
+    before saving it). Otherwise the currently stored value is used."""
+    key_value: str | None = None
+
+
+# --- Helpers -------------------------------------------------------------- #
+
+# Allowed news-source types (strict allowlist — prevents typos like "tg").
+_ALLOWED_SOURCE_TYPES = {"rss", "telegram"}
+
+
+def _validate_key_name(key_name: str) -> str:
+    """Reject anything that's not in our known API keys list."""
+    known = {name for name, *_ in settings_store.list_known_api_keys()}
+    if key_name not in known:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unknown API key name: {key_name}. Supported: {sorted(known)}",
+        )
+    return key_name
+
+
+def _build_api_keys_view(raw_keys: dict) -> list[dict]:
+    """Transform the on-disk api_keys dict into the masked GET response list.
+
+    Always includes EVERY known API key, even if "Not configured" — this
+    matches the "Never guess missing data" principle: the UI can always
+    show all configurable keys with their real status.
+    """
+    known = settings_store.list_known_api_keys()
+    view: list[dict] = []
+    for env_name, default_type, label, description in known:
+        entry = raw_keys.get(env_name) or {}
+        value = str(entry.get("value") or "")
+        enabled = bool(entry.get("enabled"))
+        key_type = str(entry.get("type") or default_type)
+        view.append({
+            "key_name": env_name,
+            "label": label,
+            "description": description,
+            "masked_value": settings_store.mask_value(value),
+            "has_value": bool(value),
+            "enabled": enabled,
+            "type": key_type,
+            "active": bool(value and enabled),
+        })
+    return view
+
+
+# --- Endpoints ------------------------------------------------------------ #
+
+@app.get("/settings")
+async def get_settings():
+    """Return the current settings.
+
+    API key values are MASKED — only the last 4 characters are shown.
+    News sources are returned in full (URLs are not secret).
+    """
+    settings = settings_store.load()
+    return {
+        "api_keys": _build_api_keys_view(settings.get("api_keys", {})),
+        "news_sources": settings.get("news_sources", []),
+        "supported_api_keys": [
+            {"key_name": name, "label": label, "description": desc,
+             "default_type": ktype}
+            for name, ktype, label, desc in settings_store.list_known_api_keys()
+        ],
+    }
+
+
+@app.post("/settings/api-keys")
+async def upsert_api_key(req: ApiKeyUpsertRequest):
+    """Add or update an API key entry.
+
+    - If `key_value` is empty, the existing value is preserved (only the
+      `enabled` flag / `key_type` are updated).
+    - If `key_value` is non-empty, it OVERWRITES the stored value.
+    """
+    key_name = _validate_key_name(req.key_name)
+    # Validate key_type against a small allowlist (free|keyed|manual)
+    if req.key_type not in {"free", "keyed", "manual"}:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid key_type: {req.key_type!r}. Must be free|keyed|manual.",
+        )
+    settings = settings_store.load()
+    api_keys = settings.setdefault("api_keys", {})
+    entry = api_keys.get(key_name) or {}
+    new_value = req.key_value if req.key_value else str(entry.get("value") or "")
+    api_keys[key_name] = {
+        "value": new_value,
+        "enabled": bool(req.enabled),
+        "type": req.key_type,
+    }
+    settings_store.save(settings)
+    log.info("API key %s updated (enabled=%s, has_value=%s, type=%s)",
+             key_name, req.enabled, bool(new_value), req.key_type)
+    return {
+        "ok": True,
+        "key_name": key_name,
+        "masked_value": settings_store.mask_value(new_value),
+        "enabled": bool(req.enabled),
+        "type": req.key_type,
+    }
+
+
+@app.delete("/settings/api-keys/{key_name}")
+async def delete_api_key(key_name: str):
+    """Remove an API key from settings.json.
+
+    Note: this only removes the value from settings.json. If the same key
+    is also set via .env / shell, the env value remains in effect until
+    the next process restart (env takes precedence per settings_store.apply_to_env).
+    """
+    _validate_key_name(key_name)
+    settings = settings_store.load()
+    api_keys = settings.get("api_keys", {})
+    if key_name in api_keys:
+        # Clear the value but keep the entry (so the UI still shows the row).
+        api_keys[key_name]["value"] = ""
+        api_keys[key_name]["enabled"] = False
+        settings_store.save(settings)
+        log.info("API key %s removed", key_name)
+    return {"ok": True, "key_name": key_name}
+
+
+@app.post("/settings/news-sources")
+async def upsert_news_source(req: NewsSourceUpsertRequest):
+    """Add or update a news source. Existing sources with the same `name`
+    are updated in-place (URL / type / enabled)."""
+    if req.source_type not in _ALLOWED_SOURCE_TYPES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid source_type: {req.source_type!r}. Must be rss|telegram.",
+        )
+    if not req.name.strip():
+        raise HTTPException(status_code=400, detail="name is required")
+    if not req.url.strip():
+        raise HTTPException(status_code=400, detail="url is required")
+    settings = settings_store.load()
+    sources_list = settings.setdefault("news_sources", [])
+    # Find existing by name (case-insensitive)
+    name_lower = req.name.strip().lower()
+    existing = None
+    for s in sources_list:
+        if str(s.get("name", "")).strip().lower() == name_lower:
+            existing = s
+            break
+    payload = {
+        "name": req.name.strip(),
+        "url": req.url.strip(),
+        "type": req.source_type,
+        "enabled": bool(req.enabled),
+    }
+    if existing is None:
+        sources_list.append(payload)
+    else:
+        existing.update(payload)
+    settings_store.save(settings)
+    log.info("News source %r updated (type=%s, enabled=%s)",
+             req.name, req.source_type, req.enabled)
+    return {"ok": True, "source": payload}
+
+
+@app.delete("/settings/news-sources/{name}")
+async def delete_news_source(name: str):
+    """Remove a news source by name (case-insensitive)."""
+    settings = settings_store.load()
+    sources_list = settings.get("news_sources", [])
+    name_lower = name.strip().lower()
+    before = len(sources_list)
+    settings["news_sources"] = [
+        s for s in sources_list
+        if str(s.get("name", "")).strip().lower() != name_lower
+    ]
+    if len(settings["news_sources"]) != before:
+        settings_store.save(settings)
+        log.info("News source %r removed", name)
+    return {"ok": True, "name": name}
+
+
+@app.post("/settings/test-api-key/{key_name}")
+async def test_api_key(key_name: str, req: TestApiKeyRequest | None = None):
+    """Test if an API key works by making a real upstream API call.
+
+    Returns {valid: bool, message: str, status_code: int|null}.
+
+    The test does NOT log the key value. It returns a human-readable
+    message indicating success or the specific failure reason.
+
+    Supported keys:
+      - CMC_API_KEY        → CoinMarketCap Pro /v1/cryptocurrency/listings/latest?limit=1
+      - DUNE_API_KEY       → Dune API /health (lightweight, no quota consumed)
+      - COINGECKO_API_KEY  → CoinGecko /ping (lightweight, no quota consumed)
+      - CRYPTOPANIC_TOKEN  → CryptoPanic /api/v1/posts/?limit=1
+      - CRYPTOCOMPARE_KEY  → CryptoCompare /data/v2/news/?feeds=abc
+    """
+    _validate_key_name(key_name)
+    # If a key_value is provided in the body, use it (lets users test
+    # before saving). Otherwise use the stored value.
+    if req and req.key_value:
+        value = req.key_value
+    else:
+        value = settings_store.get_api_key_value(key_name)
+    if not value:
+        return {
+            "valid": False,
+            "message": "Key is not configured. Set a value first.",
+            "status_code": None,
+        }
+    import httpx
+    tests = {
+        "CMC_API_KEY": {
+            "url": "https://pro-api.coinmarketcap.com/v1/cryptocurrency/listings/latest",
+            "params": {"limit": 1, "convert": "USD"},
+            "headers": {"X-CMC_Pro_API_Key": value, "Accept": "application/json"},
+            "ok_codes": {200},
+        },
+        "DUNE_API_KEY": {
+            # /health doesn't require auth — use /api/v1/queries endpoint instead.
+            "url": "https://api.dune.com/api/v1/queries",
+            "params": {"page": 1, "page_size": 1},
+            "headers": {"x-dune-api-key": value},
+            "ok_codes": {200, 400, 422},  # 400/422 with valid auth = key OK
+        },
+        "COINGECKO_API_KEY": {
+            "url": "https://api.coingecko.com/api/v3/ping",
+            "params": {},
+            "headers": {"x-cg-demo-api-key": value, "accept": "application/json"},
+            "ok_codes": {200},
+        },
+        "CRYPTOPANIC_TOKEN": {
+            "url": "https://cryptopanic.com/api/v1/posts/",
+            "params": {"auth_token": value, "kind": "news", "page": 1},
+            "headers": {},
+            "ok_codes": {200},
+        },
+        "CRYPTOCOMPARE_KEY": {
+            "url": "https://min-api.cryptocompare.com/data/v2/news/",
+            "params": {"feeds": "cryptocompare", "lang": "EN"},
+            "headers": {"authorization": f"Apikey {value}"},
+            "ok_codes": {200},
+        },
+    }
+    spec = tests.get(key_name)
+    if not spec:
+        return {"valid": False, "message": f"No test available for {key_name}",
+                "status_code": None}
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            r = await client.get(
+                spec["url"], params=spec["params"], headers=spec["headers"],
+            )
+        ok = r.status_code in spec["ok_codes"]
+        # NEVER log r.text — it might contain hints. Just status code.
+        if ok:
+            msg = f"OK — upstream returned HTTP {r.status_code} (key accepted)."
+        else:
+            # Map common failure codes to actionable messages
+            sc = r.status_code
+            if sc == 401 or sc == 403:
+                msg = f"Invalid key — upstream returned HTTP {sc} (authentication failed)."
+            elif sc == 429:
+                msg = f"Rate-limited — HTTP {sc}. The key may be valid but the upstream is throttling us."
+            else:
+                msg = f"Upstream returned HTTP {sc}. Key may be invalid or the service is unavailable."
+        return {"valid": ok, "message": msg, "status_code": r.status_code}
+    except httpx.TimeoutException:
+        return {"valid": False,
+                "message": "Timed out connecting to upstream API. The key was not verified.",
+                "status_code": None}
+    except httpx.HTTPError as exc:
+        return {"valid": False,
+                "message": f"Network error: {exc.__class__.__name__}.",
+                "status_code": None}
+    except Exception as exc:  # noqa: BLE001
+        return {"valid": False,
+                "message": f"Test failed: {exc.__class__.__name__}.",
+                "status_code": None}
 
 
 if __name__ == "__main__":

@@ -4,7 +4,8 @@
     "discovery": "Discovery",
     "explorer": "Coin Explorer",
     "market": "Market Intelligence",
-    "news": "News & Signals"
+    "news": "News & Signals",
+    "settings": "Settings"
   },
   "header": {
     "title": "Crypto Discovery Framework",
@@ -739,6 +740,127 @@
       "allOperational": "All systems operational",
       "sourcesOffline": "{count} source(s) offline",
       "total": "{count} sources"
+    }
+  },
+  "settings": {
+    "title": "Settings",
+    "subtitle": "Manage API keys and news sources. Changes are persisted to settings.json and applied on the next scanner restart.",
+    "refresh": "Refresh",
+    "tabs": {
+      "apiKeys": "API Keys",
+      "newsSources": "News Sources"
+    },
+    "restartNotice": {
+      "title": "Changes need a scanner restart to take effect",
+      "body": "API keys are loaded into the scanner process at startup. Save your changes here, then restart the scanner service (mini-services/crypto-scanner/start.sh) for new keys to become active."
+    },
+    "error": {
+      "loadFailed": "Failed to load settings"
+    },
+    "confirm": {
+      "deleteKey": "Remove this API key? You can re-add it later.",
+      "deleteSource": "Remove this news source?"
+    },
+    "toast": {
+      "keySaved": "API key saved",
+      "keySavedDesc": "Restart the scanner service for the key to take effect.",
+      "saveFailed": "Failed to save key",
+      "keyDeleted": "API key removed",
+      "deleteFailed": "Failed to remove key",
+      "keyValid": "Key is valid",
+      "keyInvalid": "Key test failed",
+      "testFailed": "Test request failed",
+      "sourceSaved": "News source saved",
+      "sourceSaveFailed": "Failed to save source",
+      "sourceDeleted": "News source removed",
+      "sourceDeleteFailed": "Failed to remove source",
+      "toggleFailed": "Failed to toggle source"
+    },
+    "apiKeys": {
+      "title": "API Keys",
+      "description": "Optional API keys for cross-verification, on-chain data, and richer news. Free keys are available — links in the description column.",
+      "add": "Add Key",
+      "edit": "Edit",
+      "delete": "Delete",
+      "test": "Test",
+      "testTooltip": "Test this key against the upstream API",
+      "editTooltip": "Edit value or toggle enabled",
+      "deleteTooltip": "Remove the stored value",
+      "testError": "Test failed",
+      "notConfigured": "Not configured",
+      "empty": "No API keys configured.",
+      "col": {
+        "name": "Name",
+        "value": "Value",
+        "status": "Status",
+        "type": "Type",
+        "actions": "Actions"
+      },
+      "status": {
+        "active": "Active",
+        "disabled": "Disabled",
+        "inactive": "Inactive",
+        "notConfigured": "Not configured"
+      },
+      "typeBadge": {
+        "free": "Free",
+        "manual": "Manual",
+        "keyed": "Keyed"
+      },
+      "type": {
+        "free": "Free (no key required)",
+        "keyed": "API key required",
+        "manual": "Manual / custom"
+      },
+      "dialog": {
+        "addTitle": "Add API Key",
+        "editTitle": "Edit API Key",
+        "addDesc": "Choose a key, paste its value, and save. The key is stored locally in settings.json (gitignored) and loaded into the scanner process on next restart.",
+        "editDesc": "Update the value, type, or enabled flag. Leave the value field empty to preserve the existing key.",
+        "keyName": "Key name",
+        "keyNamePlaceholder": "Select a key to configure",
+        "keyValue": "Key value",
+        "valuePlaceholder": "Leave empty to keep current value ({masked})",
+        "valuePlaceholderAdd": "Paste key here",
+        "valueHint": "Stored locally in settings.json (gitignored). Never sent to any third party other than the upstream API.",
+        "keyType": "Key type",
+        "enabled": "Enabled",
+        "enabledHint": "Disabled keys are kept in storage but not loaded into the scanner process.",
+        "testButton": "Test Key",
+        "cancel": "Cancel",
+        "save": "Save",
+        "testValid": "Key is valid",
+        "testInvalid": "Key test failed"
+      }
+    },
+    "newsSources": {
+      "title": "News Sources",
+      "description": "RSS feeds and Telegram channels aggregated by the News feed. Pre-populated with the built-in sources (CoinDesk, Cointelegraph, ArzDigital, MihanBlockchain, etc.).",
+      "add": "Add Source",
+      "delete": "Delete",
+      "empty": "No news sources configured.",
+      "col": {
+        "name": "Name",
+        "url": "URL / Channel",
+        "type": "Type",
+        "enabled": "Enabled",
+        "actions": "Actions"
+      },
+      "dialog": {
+        "addTitle": "Add News Source",
+        "addDesc": "Add an RSS feed or Telegram public channel. For Telegram, use the channel username (without @ and without t.me/).",
+        "name": "Name",
+        "url": "RSS URL",
+        "channel": "Channel username",
+        "type": "Type",
+        "typeRss": "RSS Feed",
+        "typeTelegram": "Telegram Channel",
+        "rssHint": "Standard RSS / Atom feed URL.",
+        "telegramHint": "Public channel preview via t.me/s/<channel> — no bot token needed.",
+        "enabled": "Enabled",
+        "cancel": "Cancel",
+        "save": "Add Source"
+      }
     }
   }
 }

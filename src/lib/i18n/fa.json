@@ -4,7 +4,8 @@
     "discovery": "دیسکاوری",
     "explorer": "کاوش ارز",
     "market": "هوش بازار",
-    "news": "اخبار و سیگنال"
+    "news": "اخبار و سیگنال",
+    "settings": "تنظیمات"
   },
   "header": {
     "title": "فریمورک کشف کریپتو",
@@ -739,6 +740,127 @@
       "allOperational": "تمام سیستم‌ها عملیاتی هستند",
       "sourcesOffline": "{count} منبع غیرفعال",
       "total": "{count} منبع"
+    }
+  },
+  "settings": {
+    "title": "تنظیمات",
+    "subtitle": "مدیریت کلیدهای API و منابع خبری. تغییرات در settings.json ذخیره و با ری‌استارت اسکنر اعمال می‌شوند.",
+    "refresh": "بازه‌بندی",
+    "tabs": {
+      "apiKeys": "کلیدهای API",
+      "newsSources": "منابع خبری"
+    },
+    "restartNotice": {
+      "title": "اعمال تغییرات نیازمند ری‌استارت اسکنر است",
+      "body": "کلیدهای API هنگام راه‌اندازی به پروسه اسکنر بارگذاری می‌شوند. تغییرات را اینجا ذخیره کنید، سپس سرویس اسکنر را (mini-services/crypto-scanner/start.sh) ری‌استارت کنید تا کلیدهای جدید فعال شوند."
+    },
+    "error": {
+      "loadFailed": "بارگذاری تنظیمات ناموفق بود"
+    },
+    "confirm": {
+      "deleteKey": "این کلید API حذف شود؟ می‌توانید بعداً دوباره اضافه‌اش کنید.",
+      "deleteSource": "این منبع خبری حذف شود؟"
+    },
+    "toast": {
+      "keySaved": "کلید API ذخیره شد",
+      "keySavedDesc": "سرویس اسکنر را ری‌استارت کنید تا کلید اعمال شود.",
+      "saveFailed": "ذخیره کلید ناموفق بود",
+      "keyDeleted": "کلید API حذف شد",
+      "deleteFailed": "حذف کلید ناموفق بود",
+      "keyValid": "کلید معتبر است",
+      "keyInvalid": "تست کلید ناموفق بود",
+      "testFailed": "درخواست تست ناموفق بود",
+      "sourceSaved": "منبع خبری ذخیره شد",
+      "sourceSaveFailed": "ذخیره منبع ناموفق بود",
+      "sourceDeleted": "منبع خبری حذف شد",
+      "sourceDeleteFailed": "حذف منبع ناموفق بود",
+      "toggleFailed": "تغییر وضعیت منبع ناموفق بود"
+    },
+    "apiKeys": {
+      "title": "کلیدهای API",
+      "description": "کلیدهای اختیاری برای راستی‌آوری متقابل، داده‌های زنجیره‌ای و اخبار غنی‌تر. کلیدهای رایگان در دسترس هستند — لینک‌ها در ستون توضیحات.",
+      "add": "افزودن کلید",
+      "edit": "ویرایش",
+      "delete": "حذف",
+      "test": "تست",
+      "testTooltip": "این کلید را در برابر API بالا‌دستی تست کن",
+      "editTooltip": "ویرایش مقدار یا تغییر فعال بودن",
+      "deleteTooltip": "حذف مقدار ذخیره شده",
+      "testError": "تست ناموفق بود",
+      "notConfigured": "پیکربندی نشده",
+      "empty": "هیچ کلید API‌ای پیکربندی نشده است.",
+      "col": {
+        "name": "نام",
+        "value": "مقدار",
+        "status": "وضعیت",
+        "type": "نوع",
+        "actions": "عملیات"
+      },
+      "status": {
+        "active": "فعال",
+        "disabled": "غیرفعال",
+        "inactive": "نا فعال",
+        "notConfigured": "پیکربندی نشده"
+      },
+      "typeBadge": {
+        "free": "رایگان",
+        "manual": "دستی",
+        "keyed": "کلید‌دار"
+      },
+      "type": {
+        "free": "رایگان (بدون کلید)",
+        "keyed": "کلید API لازم است",
+        "manual": "دستی / سفارشی"
+      },
+      "dialog": {
+        "addTitle": "افزودن کلید API",
+        "editTitle": "ویرایش کلید API",
+        "addDesc": "یک کلید انتخاب کنید، مقدارش را paste کنید و ذخیره کنید. کلید به‌صورت محلی در settings.json (gitignored) ذخیره می‌شود و در ری‌استارت بعدی به پروسه اسکنر بارگذاری می‌شود.",
+        "editDesc": "مقدار، نوع یا پرچم فعال را به‌روز کنید. برای حفظ مقدار فعلی، فیلد مقدار را خالی بگذارید.",
+        "keyName": "نام کلید",
+        "keyNamePlaceholder": "یک کلید برای پیکربندی انتخاب کنید",
+        "keyValue": "مقدار کلید",
+        "valuePlaceholder": "خالی بگذارید تا مقدار فعلی ({masked}) حفظ شود",
+        "valuePlaceholderAdd": "کلید را اینجا paste کنید",
+        "valueHint": "به‌صورت محلی در settings.json (gitignored) ذخیره می‌شود. به هیچ third-party‌ای جز API بالا‌دستی ارسال نمی‌شود.",
+        "keyType": "نوع کلید",
+        "enabled": "فعال",
+        "enabledHint": "کلیدهای غیرفعال در storage نگه داشته می‌شوند اما به پروسه اسکنر بارگذاری نمی‌شوند.",
+        "testButton": "تست کلید",
+        "cancel": "لغو",
+        "save": "ذخیره",
+        "testValid": "کلید معتبر است",
+        "testInvalid": "تست کلید ناموفق بود"
+      }
+    },
+    "newsSources": {
+      "title": "منابع خبری",
+      "description": "فیدهای RSS و کانال‌های تلگرام که در فید اخبار نمایش داده می‌شوند. با منابع پیش‌فرض (CoinDesk، Cointelegraph، ArzDigital، MihanBlockchain و ...) آماده شده است.",
+      "add": "افزودن منبع",
+      "delete": "حذف",
+      "empty": "هیچ منبع خبری‌ای پیکربندی نشده است.",
+      "col": {
+        "name": "نام",
+        "url": "URL / کانال",
+        "type": "نوع",
+        "enabled": "فعال",
+        "actions": "عملیات"
+      },
+      "dialog": {
+        "addTitle": "افزودن منبع خبری",
+        "addDesc": "یک فید RSS یا کانال عمومی تلگرام اضافه کنید. برای تلگرام، یوزرنیم کانال را بدون @ و بدون t.me/ وارد کنید.",
+        "name": "نام",
+        "url": "URL فید RSS",
+        "channel": "یوزرنیم کانال",
+        "type": "نوع",
+        "typeRss": "فید RSS",
+        "typeTelegram": "کانال تلگرام",
+        "rssHint": "URL استاندارد RSS / Atom.",
+        "telegramHint": "پیش‌نمایش کانال عمومی از طریق t.me/s/<channel> — بدون نیاز به bot token.",
+        "enabled": "فعال",
+        "cancel": "لغو",
+        "save": "افزودن منبع"
+      }
     }
   }
 }

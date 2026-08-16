@@ -4022,3 +4022,211 @@ Issues / Caveats (READ BEFORE INTEGRATION):
    inspection of the Promise.allSettled handling code path.
 
 No code was committed or pushed. Awaiting integration + verification.
+
+---
+Task ID: settings-page
+Agent: settings-page-builder
+
+Task: Create a Settings page for CryptoSieve that allows users to manage
+API keys and news sources from the UI. Backend extends the existing
+Python FastAPI scanner at mini-services/crypto-scanner/ with a JSON-based
+settings store; frontend adds a new "Settings" view to the dashboard.
+
+Work Log:
+- Read worklog.md (last 200 lines) + RULES.md to absorb project context.
+  Confirmed Next.js 16 dashboard on :3000 + Python FastAPI scanner on
+  :3003, 8-phase crypto framework, shadcn/ui (New York) dark theme,
+  useTt() helper for translate-with-English-fallback pattern,
+  existing nav buttons use 5 accent colors (violet/emerald/amber/sky/
+  rose) — chose teal for Settings (the 6th view) to stay distinct.
+- Read mini-services/crypto-scanner/main.py + data/sources.py to
+  understand the env-var-loading pattern: sources.py caches
+  CMC_API_KEY / DUNE_API_KEY / COINGECKO_API_KEY / CRYPTOPANIC_TOKEN /
+  CRYPTOCOMPARE_KEY at module-import time. So settings_store MUST be
+  imported before `from data import sources` so that os.environ has
+  the user-configured keys by the time sources.py is loaded.
+- Read tests/test_framework.py — confirmed 47 tests, runs as
+  `python tests/test_framework.py`, no test runner deps needed.
+
+Backend changes:
+- Created `/home/z/my-project/mini-services/crypto-scanner/settings_store.py`
+  (~190 lines). JSON-based persistence to settings.json (gitignored).
+  Module-level side-effect: applies enabled API keys to os.environ on
+  import (idempotent; existing env values take precedence — never
+  overrides what the operator set via .env / shell).
+  Exposes: load() / save() / get_api_key_value() / mask_value() /
+  list_known_api_keys() / list_default_news_sources() / apply_to_env().
+  mask_value: "Not configured" for empty, "****" for short (<8 chars),
+  "****XXXX" for normal keys (last 4 chars only).
+  Defaults: pre-populates settings.json with the 5 supported API keys
+  (CMC, Dune, CoinGecko, CryptoPanic, CryptoCompare) seeded from env
+  if present, plus 9 default news sources (CoinDesk, Cointelegraph,
+  Decrypt, Bitcoinist, ArzDigital Breaking, ArzDigital Blog,
+  MihanBlockchain News, MihanBlockchain Markets, Mastersharkcrypto TG).
+  Writes via atomic tmp+rename; chmod 0o600 on the file.
+  Thread-safe via threading.Lock (single-process FastAPI service).
+- Modified `/home/z/my-project/mini-services/crypto-scanner/main.py`:
+  - Added `import settings_store` BEFORE `from data import sources`
+    (line 37) with comment explaining the ordering constraint.
+  - Added 6 new endpoints at the bottom of main.py (~330 lines):
+    - GET    /settings                         → masked API keys + news sources + supported_api_keys list
+    - POST   /settings/api-keys                → upsert (key_name, key_value, enabled, key_type)
+    - DELETE /settings/api-keys/{key_name}     → clears value, disables (keeps entry for UI)
+    - POST   /settings/news-sources            → upsert (name, url, source_type, enabled)
+    - DELETE /settings/news-sources/{name}     → removes source (case-insensitive)
+    - POST   /settings/test-api-key/{key_name} → makes real upstream API call per key
+  - Added 3 Pydantic models: ApiKeyUpsertRequest, NewsSourceUpsertRequest,
+    TestApiKeyRequest (optional key_value to test-before-save).
+  - Added _validate_key_name() helper that rejects unknown key names
+    (strict allowlist) and _build_api_keys_view() that always returns
+    EVERY known API key in the response (so the UI can show all 5 even
+    when not configured — "Never guess missing data" principle).
+  - test-api-key endpoint: NEVER logs the key value, only status code
+    and a friendly message. For each key, hits the lightest upstream
+    endpoint that requires auth:
+      CMC:        /v1/cryptocurrency/listings/latest?limit=1
+      Dune:       /api/v1/queries (200/400/422 = key OK, 401 = invalid)
+      CoinGecko:  /v3/ping
+      CryptoPanic: /api/v1/posts/?kind=news
+      CryptoCompare: /data/v2/news/?feeds=abc
+  - Created `/home/z/my-project/mini-services/crypto-scanner/.gitignore`
+    with: settings.json, service.log, __pycache__/, *.pyc, .env.
+
+Frontend proxy routes (6 files under src/app/api/scanner/settings/):
+  - route.ts                                 → GET  /settings
+  - api-keys/route.ts                        → POST /settings/api-keys
+  - api-keys/[key_name]/route.ts             → DELETE /settings/api-keys/{key_name}
+  - news-sources/route.ts                    → POST /settings/news-sources
+  - news-sources/[name]/route.ts             → DELETE /settings/news-sources/{name}
+  - test-api-key/[key_name]/route.ts         → POST /settings/test-api-key/{key_name} (timeoutMs 20s for upstream test)
+  Each route uses the existing scannerFetch / scannerJson helpers from
+  src/lib/scanner-client.ts (relative path + XTransformPort=3003 per
+  the gateway convention). Errors are surfaced as {error, detail} JSON
+  with appropriate HTTP status (400 for validation, 502 for proxy errors).
+
+Frontend component (src/components/views/settings-view.tsx, ~1100 lines):
+  - Two-tab layout (Tabs from shadcn/ui): "API Keys" + "News Sources".
+    Each tab badge shows live N/total counts of active/enabled items.
+  - Top-of-page amber Alert notice: explains that changes need a
+    scanner restart to take effect (since data/sources.py caches env
+    at import time, the running process won't pick up new keys until
+    restart — by design, not a bug).
+  - API Keys tab:
+    - shadcn Table with columns: Name (label + env_var in mono),
+      Value (masked, "Not configured" badge if absent),
+      Status (Active / Disabled / Not configured badge + inline test
+      result if just tested), Type (Free / Keyed / Manual badge),
+      Actions (Test / Edit / Delete with Tooltip on each, hidden
+      labels on mobile).
+    - Per-row Test button → calls /settings/test-api-key/{key_name},
+      shows spinner while running, inline result below status badge
+      (CheckCircle2 emerald for valid, XCircle rose for invalid),
+      toast on completion.
+    - Per-row Edit button → opens ApiKeyDialog in "edit" mode.
+    - Per-row Delete button → confirm dialog, then DELETE.
+    - Header "Add Key" button → opens ApiKeyDialog in "add" mode
+      (key_name dropdown lists all 5 supported keys).
+    - ApiKeyDialog: shows key description below dropdown, password
+      input with eye toggle (show/hide value), key_type dropdown
+      (free/keyed/manual), enabled Switch with hint text, "Test Key"
+      button inside the dialog that does an inline fetch + Alert
+      showing the result, "Save" button calls POST /settings/api-keys.
+  - News Sources tab:
+    - shadcn Table with columns: Name (with Rss/Send icon based on
+      type), URL/Channel (truncated + hover title; clickable external
+      link — t.me/s/<channel> for Telegram), Type (RSS/Telegram badge),
+      Enabled (Switch — toggles immediately via POST), Actions (Delete).
+    - Header "Add Source" button → opens NewsSourceDialog (name input,
+      url/channel input, source_type dropdown with RSS/Telegram options,
+      enabled Switch, "Add Source" save button).
+- All fetches use relative paths /api/scanner/settings/* (no hardcoded
+  backend URLs — same pattern as every other view in the codebase).
+- useTt() helper mirrors market-intelligence-view.tsx pattern: wraps
+  t() with English fallback string. No setting UI text can be blank.
+- i18n keys added to en.json (~120 keys) and fa.json (same keys with
+  Persian translations) under the "settings.*" namespace. Also added
+  "nav.settings" → "Settings" / "تنظیمات".
+- Toast notifications for every action (save/delete/test/toggle/fail)
+  via existing useToast() hook from src/hooks/use-toast.ts.
+- No console errors, no TypeScript errors.
+
+Integration with main dashboard (src/app/page.tsx):
+- Imported `SettingsView` from `@/components/views/settings-view`.
+- Added `Settings` icon to lucide-react imports.
+- Extended the mainView state type from `"hub" | "discovery" | "explorer" | "market" | "news"`
+  to `| "settings"` (single-line change at line 366).
+- Added a new top-nav button after "News & Signals" with teal accent
+  (Settings icon + "Settings" label + animated pulse dot when active).
+- Added `{mainView === "settings" && <SettingsView />}` render block
+  after the News view render block.
+- Did NOT modify HubView (the Quick Actions grid's `onNavigate` type
+  still has the original 4-view union — passing setMainView (which
+  accepts the broader 6-view union) is type-safe via contravariance,
+  and we don't add a Settings tile to the Hub landing page).
+
+Verification:
+- bun run lint → exit 0, zero errors, zero warnings.
+- python tests/test_framework.py → 47/47 passed (no test regressions;
+  test file doesn't import main.py or settings_store, so adding new
+  endpoints to main.py is invisible to the test suite).
+- Restarted the scanner service (bash start.sh) and confirmed the new
+  /settings endpoints respond on both :3003 (direct) and :3000 (proxy).
+- End-to-end sanity test via curl through the Next.js proxy:
+  1. POST /api-keys with a fake key         → masked value returned ✓
+  2. GET  /settings                         → masked value preserved ✓
+  3. POST /test-api-key/CMC_API_KEY         → valid:false, HTTP 401 from CMC upstream ✓
+  4. DELETE /api-keys/CMC_API_KEY            → cleared ✓
+  5. POST /news-sources "Sanity Test"       → added ✓
+  6. POST /news-sources (re-POST enabled:false) → toggle works ✓
+  7. DELETE /news-sources/Sanity%20Test     → removed ✓
+  8. Final state: 5 API keys, 9 news sources (back to defaults — no residue).
+- Settings.json file was auto-created on first scanner restart, chmod 0o600.
+- .gitignore at mini-services/crypto-scanner/.gitignore excludes it from commits.
+
+Files created:
+- /home/z/my-project/mini-services/crypto-scanner/settings_store.py
+- /home/z/my-project/mini-services/crypto-scanner/.gitignore
+- /home/z/my-project/src/app/api/scanner/settings/route.ts
+- /home/z/my-project/src/app/api/scanner/settings/api-keys/route.ts
+- /home/z/my-project/src/app/api/scanner/settings/api-keys/[key_name]/route.ts
+- /home/z/my-project/src/app/api/scanner/settings/news-sources/route.ts
+- /home/z/my-project/src/app/api/scanner/settings/news-sources/[name]/route.ts
+- /home/z/my-project/src/app/api/scanner/settings/test-api-key/[key_name]/route.ts
+- /home/z/my-project/src/components/views/settings-view.tsx
+
+Files modified:
+- /home/z/my-project/mini-services/crypto-scanner/main.py (added `import settings_store`
+  before `from data import sources`; added 6 new endpoints + 3 Pydantic models
+  + 2 helper functions at the bottom of the file).
+- /home/z/my-project/src/app/page.tsx (added Settings import + Settings icon
+  import + extended mainView state union + new teal Settings nav button +
+  conditional render block for SettingsView).
+- /home/z/my-project/src/lib/i18n/en.json (added nav.settings + full settings.*
+  namespace — ~120 keys).
+- /home/z/my-project/src/lib/i18n/fa.json (same — Persian translations).
+
+Issues / caveats:
+1. **Restart requirement**: API keys configured through the UI are
+   stored in settings.json, but the running scanner process does NOT
+   pick them up until restart — because data/sources.py caches env
+   values at module-import time. The UI surfaces this clearly via an
+   amber Alert at the top of the Settings page. The restart notice is
+   the recommended UX pattern (rather than the riskier alternative of
+   modifying data/sources.py to re-read env vars dynamically, which
+   would be a larger, riskier refactor).
+2. **Env precedence**: settings_store.apply_to_env() NEVER overrides
+   existing os.environ values. So if the operator set a key via .env
+   file or shell, that takes precedence and the UI cannot disable it
+   (the value will keep coming back from env on the next restart).
+   This is by design — operators shouldn't be surprised by UI changes
+   overriding their env configuration.
+3. **test-api-key for Dune**: the /api/v1/queries endpoint returns
+   400/422 with a valid API key (bad request due to missing required
+   params), so we treat 200/400/422 as "key accepted" and only 401/403
+   as invalid. This is documented in the endpoint docstring.
+4. **i18n coverage**: all ~120 settings.* keys are present in both en.json
+   and fa.json. The useTt() helper falls back to the English string
+   passed inline, so even if a key is missing from the JSON files the
+   UI will render the correct text.
+
+No code was committed or pushed. Awaiting verification + commit by the human operator.

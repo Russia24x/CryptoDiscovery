@@ -1,0 +1,14 @@
+# Settings file contains API keys in plaintext (gitignored by design).
+# Never commit this file — see settings_store.py for details.
+settings.json
+
+# Service log
+service.log
+
+# Python bytecode
+__pycache__/
+*.pyc
+
+# Local environment file
+.env
+.env.local
