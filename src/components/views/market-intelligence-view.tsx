@@ -81,6 +81,7 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { useLanguage } from "@/lib/i18n/LanguageProvider";
+import { CoinPortal } from "@/components/coin-portal";
 import type {
   CmcAirdropsResponse,
   CmcCategoriesResponse,
@@ -101,7 +102,7 @@ import type {
 /* -------------------------------------------------------------------------- */
 
 export interface MarketIntelligenceViewProps {
-  /** Called when user clicks a coin row to analyze it in the Coin Explorer. */
+  /** Called when user clicks the Analyze button to run framework analysis. */
   onAnalyzeCoin?: (geckoId: string, coinName: string) => void;
 }
 
@@ -489,14 +490,25 @@ function DefiTvlPanel({
 interface CoinRowProps {
   coin: TopCoin;
   onAnalyze?: (geckoId: string, name: string) => void;
+  onOpenPortal?: (geckoId: string, symbol: string, name: string) => void;
 }
 
-function CoinRow({ coin, onAnalyze }: CoinRowProps) {
+function CoinRow({ coin, onAnalyze, onOpenPortal }: CoinRowProps) {
   const tt = useTt();
   const change24h = coin.price_change_percentage_24h_in_currency;
   const change7d = coin.price_change_percentage_7d_in_currency;
   const change30d = coin.price_change_percentage_30d_in_currency;
-  const clickable = !!onAnalyze;
+  const clickable = !!(onAnalyze || onOpenPortal);
+
+  const handleRowClick = React.useCallback(() => {
+    // Row click opens Coin Portal (full details drawer) if available,
+    // otherwise falls back to analyze (legacy behavior).
+    if (onOpenPortal) {
+      onOpenPortal(coin.id, coin.symbol.toUpperCase(), coin.name);
+    } else if (onAnalyze) {
+      onAnalyze(coin.id, coin.name);
+    }
+  }, [onAnalyze, onOpenPortal, coin.id, coin.symbol, coin.name]);
 
   const handleAnalyze = React.useCallback(() => {
     onAnalyze?.(coin.id, coin.name);
@@ -505,7 +517,7 @@ function CoinRow({ coin, onAnalyze }: CoinRowProps) {
   return (
     <TableRow
       className={`text-xs ${clickable ? "cursor-pointer hover:bg-muted/30" : ""}`}
-      onClick={clickable ? handleAnalyze : undefined}
+      onClick={clickable ? handleRowClick : undefined}
     >
       <TableCell className="text-right text-muted-foreground tabular-nums">
         {coin.market_cap_rank ?? "—"}
@@ -881,10 +893,11 @@ function SectorsChart({ sectors }: { sectors: SectorBreakdown[] }) {
 interface CoinTableProps {
   coins: TopCoin[];
   onAnalyze?: (geckoId: string, name: string) => void;
+  onOpenPortal?: (geckoId: string, symbol: string, name: string) => void;
   emptyHint?: string;
 }
 
-function CoinTable({ coins, onAnalyze, emptyHint }: CoinTableProps) {
+function CoinTable({ coins, onAnalyze, onOpenPortal, emptyHint }: CoinTableProps) {
   const tt = useTt();
   if (coins.length === 0) {
     return (
@@ -911,7 +924,7 @@ function CoinTable({ coins, onAnalyze, emptyHint }: CoinTableProps) {
         </TableHeader>
         <TableBody>
           {coins.map((c) => (
-            <CoinRow key={`${c.id}-${c.market_cap_rank ?? c.name}`} coin={c} onAnalyze={onAnalyze} />
+            <CoinRow key={`${c.id}-${c.market_cap_rank ?? c.name}`} coin={c} onAnalyze={onAnalyze} onOpenPortal={onOpenPortal} />
           ))}
         </TableBody>
       </Table>
@@ -1235,6 +1248,24 @@ export function MarketIntelligenceView({ onAnalyzeCoin }: MarketIntelligenceView
   const { data, loading, refreshing, error, refresh } = useMarketOverview();
   const cacheAge = useCacheAge(data?.cached_at);
 
+  // Coin Portal state — when set, the portal drawer opens with full coin details
+  const [portalCoin, setPortalCoin] = React.useState<{
+    geckoId: string;
+    symbol: string;
+    name: string;
+  } | null>(null);
+
+  const handleOpenPortal = React.useCallback(
+    (geckoId: string, symbol: string, name: string) => {
+      setPortalCoin({ geckoId, symbol, name });
+    },
+    [],
+  );
+
+  const handleClosePortal = React.useCallback(() => {
+    setPortalCoin(null);
+  }, []);
+
   /* ----- CMC Pro exclusive data (airdrops + categories) — lazy-loaded on tab click ----- */
   const [airdropsData, setAirdropsData] = React.useState<CmcAirdropsResponse | null>(null);
   const [airdropsLoading, setAirdropsLoading] = React.useState(false);
@@ -1532,7 +1563,7 @@ export function MarketIntelligenceView({ onAnalyzeCoin }: MarketIntelligenceView
                     </CardDescription>
                   </CardHeader>
                   <CardContent className="px-4 pb-4">
-                    <CoinTable coins={data.top_coins} onAnalyze={onAnalyzeCoin} />
+                    <CoinTable coins={data.top_coins} onAnalyze={onAnalyzeCoin} onOpenPortal={handleOpenPortal} />
                   </CardContent>
                 </Card>
               </TabsContent>
@@ -1550,7 +1581,7 @@ export function MarketIntelligenceView({ onAnalyzeCoin }: MarketIntelligenceView
                     </CardDescription>
                   </CardHeader>
                   <CardContent className="px-4 pb-4">
-                    <CoinTable coins={data.gainers} onAnalyze={onAnalyzeCoin} />
+                    <CoinTable coins={data.gainers} onAnalyze={onAnalyzeCoin} onOpenPortal={handleOpenPortal} />
                   </CardContent>
                 </Card>
               </TabsContent>
@@ -1568,7 +1599,7 @@ export function MarketIntelligenceView({ onAnalyzeCoin }: MarketIntelligenceView
                     </CardDescription>
                   </CardHeader>
                   <CardContent className="px-4 pb-4">
-                    <CoinTable coins={data.losers} onAnalyze={onAnalyzeCoin} />
+                    <CoinTable coins={data.losers} onAnalyze={onAnalyzeCoin} onOpenPortal={handleOpenPortal} />
                   </CardContent>
                 </Card>
               </TabsContent>
@@ -1730,6 +1761,18 @@ export function MarketIntelligenceView({ onAnalyzeCoin }: MarketIntelligenceView
           </>
         )}
       </div>
+
+      {/* Coin Portal — left drawer with full coin details (opens on row click) */}
+      <CoinPortal
+        geckoId={portalCoin?.geckoId ?? null}
+        coinSymbol={portalCoin?.symbol ?? ""}
+        coinName={portalCoin?.name ?? ""}
+        onClose={handleClosePortal}
+        onAnalyze={(gid, name) => {
+          handleClosePortal();
+          onAnalyzeCoin?.(gid, name);
+        }}
+      />
     </TooltipProvider>
   );
 }

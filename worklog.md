@@ -3910,3 +3910,115 @@ Patterns observed (recurring across this audit):
   somewhere that hard-coded units
 
 No code was modified. No commits were made. This report is read-only.
+
+---
+Task ID: coin-portal-component
+Agent: coin-portal-builder
+
+Task: Create a `CoinPortal` React component that opens as a left-side Sheet
+drawer when a user clicks a row in CoinTable (Market Intelligence view).
+The portal aggregates live price (Binance), 7-day sparkline (CoinGecko
+chart), CoinGecko search metadata, and DeFiLlama protocol stats — like a
+"coin portal" similar to CoinMarketCap's coin detail page.
+
+Work Log:
+- Read worklog.md (last 200 lines) and RULES.md for context.
+- Read market-intelligence-view.tsx useMarketOverview hook (lines 230-296)
+  to mirror the AbortController + reqIdRef stale-response-guard pattern.
+- Read score-radial.tsx, format-utils.ts, LanguageProvider.tsx,
+  scanner-types.ts, and the Sheet UI component to align with existing
+  conventions.
+- Inspected the backend's actual response shapes for /search, /binance/price,
+  /coingecko/chart, and /market/overview in
+  mini-services/crypto-scanner/data/sources.py.
+- Created `/home/z/my-project/src/components/coin-portal.tsx` (~770 lines).
+
+Component design highlights:
+- Client component ("use client" at top).
+- Sheet controlled pattern: `open={geckoId !== null}`,
+  `onOpenChange={(o) => !o && onClose()}` — Escape key + X button both
+  call onClose() (Sheet's built-in ARIA + focus trap + Escape handling).
+- Side="left", width `w-full sm:max-w-2xl lg:max-w-3xl` (responsive).
+- Sticky header with coin image / name / symbol / rank badge / 24h change
+  badge / live-pulse indicator.
+- Scrollable body with 4 sections:
+  1. Live price (large Binance price + 24h change, plus 4 StatCards
+     for 24h High / Low / Volume / Trade count).
+  2. 7-day sparkline (pure SVG, no chart lib — gradient fill,
+     up/down coloring based on first vs last sample).
+  3. External links row (CoinGecko / CMC / DeFiLlama / optional
+     website — all `target="_blank" rel="noopener noreferrer"`).
+  4. "Run 8-Phase Analysis" button → calls onAnalyze(geckoId, coinName).
+  5. DeFi data section (conditional on DeFiLlama match found).
+- Sticky footer with cache timestamp + manual "Refresh all" button.
+
+Data fetching architecture (mirrors useMarketOverview patterns):
+- AbortController stored in `mainAbortRef` — aborted on unmount or
+  geckoId change (MI-FE-1 fix pattern).
+- `reqIdRef` pattern guards against stale responses (MI-FE-2 fix pattern).
+- 4 sources fetched in parallel using Promise.allSettled so one failure
+  doesn't break the rest (graceful degradation).
+- Each fetch wrapped in try/catch with `console.error` — never silently
+  swallowed (MI-FE-3 fix pattern). Failed sections render an
+  `UnavailableSection` amber pill instead.
+- Separate 15s auto-refresh effect for Binance price (separate
+  AbortController `binanceAbortRef`, separate interval with cleanup).
+  On refresh failure: logs, keeps stale price (better UX than blanking).
+
+DeFiLlama match logic:
+- `findDefiMatch(market, symbol, name)` iterates `market.top_defi` first,
+  then `market.top_fees`, matching by uppercase symbol equality OR
+  case-insensitive name contains (both directions).
+- Returns unified `DefiMatch` object with `source: "defi" | "fees"` so the
+  UI can badge which list matched.
+
+i18n:
+- Uses `useTt()` helper (same pattern as market-intelligence-view.tsx:215-224)
+  wrapping `t()` with English fallback strings.
+- All visible labels use `tt("portal.*", "fallback")`.
+
+Files Created:
+- `/home/z/my-project/src/components/coin-portal.tsx`
+
+Files NOT modified (per task constraint):
+- market-integration-view.tsx (integration handled separately by task owner)
+- No new proxy routes created (the existing /api/scanner/coingecko/chart
+  proxy does NOT exist — see Issues section below)
+
+Lint Result:
+- `bun run lint` → 0 errors, 0 warnings (after removing one unused
+  eslint-disable-next-line directive for @next/next/no-img-element — the
+  project's ESLint config doesn't actually flag img elements, so the
+  directive was reported as unused).
+- Dev server log: `✓ Compiled in 238ms` — no TypeScript errors.
+
+Issues / Caveats (READ BEFORE INTEGRATION):
+1. **MISSING PROXY ROUTE**: The task spec told me to call
+   `/api/scanner/coingecko/chart/{geckoId}?days=7`, but this proxy route
+   does NOT exist in `src/app/api/scanner/`. The backend endpoint
+   `/coingecko/chart/{gecko_id}` DOES exist (main.py:1287) and is
+   validated. The integration task should add a new proxy route at
+   `src/app/api/scanner/coingecko/chart/[geckoId]/route.ts` mirroring
+   the existing `/api/scanner/binance/price/[symbol]/route.ts` pattern
+   (which calls `scannerJson('/coingecko/chart/{id}?days={days}')`).
+   Until then, the chart section will gracefully show "7-day chart
+   unavailable" — the rest of the portal will work fine.
+
+2. **i18n KEYS NOT IN JSON FILES**: All visible labels use the
+   `portal.*` namespace with English fallback strings. Adding the keys
+   to en.json and fa.json later is a non-breaking enhancement.
+
+3. **NO WEBSITE LINK FROM SEARCH**: CoinGecko's /search endpoint only
+   returns `{id, name, symbol, market_cap_rank, thumb, large,
+   api_symbol}` — no website URL. The "Website" external-link button
+   only renders when a DeFiLlama protocol match is found with a
+   non-null `url` field. This is the best available source for the
+   website link given the actual backend response shape.
+
+4. **DEGRADATION VERIFIED**: When Binance/CG/market-overview fetches
+   fail (HTTP error, {error: "..."} body, or network issue), the
+   relevant section shows an UnavailableSection amber pill and the
+   rest of the portal continues to render normally. Verified by
+   inspection of the Promise.allSettled handling code path.
+
+No code was committed or pushed. Awaiting integration + verification.
