@@ -4535,3 +4535,32 @@ NEXT ACTIONS (recommended priority order)
 6. MINOR — Findings 5, 7, 8, 9, 10, 11: Cosmetic / dead code / UX nits. Address opportunistically.
 
 No code was modified during this review. All findings are read-only observations appended to worklog.md.
+
+---
+Task ID: engineering-improvements-review-fixes
+Agent: main
+Task: Review new features (Coin Portal, Settings, Binance) for issues, fix findings, continue improving engineering details.
+
+Work Log:
+- Subagent audit found 11 findings (0 critical, 3 medium, 8 minor)
+- Fixed all 3 medium:
+  1. XSS via RSS URL scheme → added urllib.parse.urlparse scheme check (http/https only)
+  2. findDefiMatch false-positive on empty name → early return false when nm empty
+  3. Missing portal.* i18n namespace → added full portal section to en.json + fa.json (35+ keys)
+- Fixed 3 minor:
+  4. handleTestInline missing r.ok check → added check
+  5. CMC link used wrong slug → changed to search URL
+  9. HubView can't navigate to Settings → added 'settings' to type + Settings quick action card
+- Also: integrated /news with settings.json (reads user-configured RSS feeds)
+  - Previously used only hardcoded sources.NEWS_FEEDS
+  - Now merges user feeds from settings.json with defaults (deduped by URL)
+  - Closed the 'known limitation' from Settings page review
+
+Commits: 25a4e9e (3 medium fixes), af21007 (3 minor fixes), face1ee (news settings integration)
+Tests: 47/47 throughout, lint clean, all pushed + verified
+
+Stage Summary:
+- All 6 review findings fixed (3 medium + 3 minor)
+- News feed now reads from Settings page configuration
+- Remaining minor findings (5 of 8) are low-impact polish (dead param, discard response, toggle race, no-op delete, hardcoded strings)
+- Architecture is now more complete: Settings page → settings.json → news endpoint reads it
