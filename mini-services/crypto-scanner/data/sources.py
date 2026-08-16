@@ -31,6 +31,12 @@ DEFILLAMA_PROTOCOLS = "https://api.llama.fi/protocols"
 DEFILLAMA_FEES = "https://api.llama.fi/overview/fees"
 DEFILLAMA_STABLECOINS = "https://api.llama.fi/stablecoins"
 
+# Binance public API — free, no key required.
+# Provides live 24h ticker data (price, volume, high, low, change).
+# Rate limit: 1200 requests/min (very generous).
+# Symbol format: BTCUSDT, ETHUSDT, BNBUSDT, etc.
+BINANCE_BASE = "https://api.binance.com/api/v3"
+
 # CoinGecko API key (optional — free demo key at https://www.coingecko.com/api/pricing)
 # Without a key: 5-15 calls/min (frequent 429s)
 # With demo key: 30 calls/min (much more stable)
@@ -1675,6 +1681,59 @@ async def _fetch_rss_feed(client: httpx.AsyncClient, name: str, url: str, catego
             "category": category,
         })
     return out
+
+
+# --------------------------------------------------------------------------- #
+#  Binance public API — live 24h ticker (free, no key)
+# --------------------------------------------------------------------------- #
+async def fetch_binance_ticker(symbol: str) -> dict[str, Any] | None:
+    """Fetch live 24h ticker from Binance (free, no API key).
+
+    Args:
+        symbol: trading symbol WITHOUT the quote currency suffix (e.g. "BTC",
+                "ETH", "BNB"). The function appends "USDT" automatically.
+
+    Returns dict with: symbol, price, change_24h_pct, high_24h, low_24h,
+    volume_24h (in quote currency), or None on error/not found.
+
+    Binance symbol format: BTCUSDT, ETHUSDT, etc. Some tokens trade against
+    USDC or BUSD — we try USDT first, fall back to USDC.
+    """
+    sym = (symbol or "").upper().strip()
+    if not sym or not all(c.isalnum() for c in sym):
+        return None
+
+    # Try USDT pair first (most liquid), then USDC as fallback
+    for quote in ("USDT", "USDC"):
+        binance_symbol = f"{sym}{quote}"
+        cache_key = f"binance_ticker:{binance_symbol}"
+        cached = cache_get(cache_key, ttl=15.0)  # 15s cache for "live" feel
+        if cached is not None:
+            return cached
+        try:
+            async with httpx.AsyncClient(follow_redirects=True, timeout=8) as c:
+                r = await _get_json(c, f"{BINANCE_BASE}/ticker/24hr",
+                                    symbol=binance_symbol)
+            if r and "lastPrice" in r:
+                out = {
+                    "symbol": sym,
+                    "binance_symbol": binance_symbol,
+                    "price": float(r.get("lastPrice", 0)),
+                    "change_24h_pct": float(r.get("priceChangePercent", 0)),
+                    "high_24h": float(r.get("highPrice", 0)),
+                    "low_24h": float(r.get("lowPrice", 0)),
+                    "volume_24h": float(r.get("quoteVolume", 0)),
+                    "trade_count": int(r.get("count", 0)),
+                    "source": "Binance",
+                    "fetched_at": _datetime.now(_tz.utc).isoformat(),
+                }
+                cache_set(cache_key, out)
+                return out
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            continue
+    return None
 
 
 async def fetch_crypto_news(limit: int = 40) -> list[dict[str, Any]]:

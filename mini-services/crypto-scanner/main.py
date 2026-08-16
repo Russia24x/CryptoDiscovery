@@ -1337,6 +1337,29 @@ async def get_coingecko_categories():
 
 
 # --------------------------------------------------------------------------- #
+#  Binance — live price ticker (free, no API key)
+# --------------------------------------------------------------------------- #
+@app.get("/binance/price/{symbol}")
+async def get_binance_price(symbol: str):
+    """Fetch live 24h price ticker from Binance (free, no API key).
+
+    Args:
+        symbol: trading symbol without quote suffix (e.g. "BTC", "ETH").
+                The backend appends "USDT" (or "USDC" as fallback).
+
+    Returns: {symbol, price, change_24h_pct, high_24h, low_24h,
+              volume_24h, source: "Binance"}
+    """
+    sym = (symbol or "").strip().upper()
+    if not sym or not all(c.isalnum() for c in sym):
+        raise HTTPException(422, f"invalid symbol format: {symbol!r}")
+    data = await sources.fetch_binance_ticker(sym)
+    if data is None:
+        return {"error": f"No Binance market found for {sym}USDT or {sym}USDC"}
+    return data
+
+
+# --------------------------------------------------------------------------- #
 #  System Health Check — validates data pipeline integrity
 # --------------------------------------------------------------------------- #
 # This endpoint scans the top coins and checks for data quality issues:
