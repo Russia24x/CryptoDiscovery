@@ -1614,6 +1614,96 @@ async def get_coingecko_categories():
     return {"categories": data or [], "count": len(data or [])}
 
 
+@app.get("/market/sector-rotation")
+async def market_sector_rotation():
+    """Sector rotation analysis — which sectors are gaining/losing market cap.
+
+    Uses CoinGecko's free /coins/categories endpoint (no API key needed).
+    Returns sectors ranked by 24h market cap change, mapped to our
+    sector taxonomy via _sector_for().
+
+    Each sector entry includes:
+    - sector: our taxonomy name (DeFi, L1/L2, MEME, AI, etc.)
+    - total_market_cap: sum of all categories in this sector
+    - total_volume_24h: sum of 24h volume
+    - avg_change_24h: weighted average of 24h market cap change
+    - category_count: number of CoinGecko categories mapped to this sector
+    - top_categories: top 3 categories by market cap in this sector
+    - top_gainer: category with highest 24h change
+    - top_loser: category with lowest 24h change
+    """
+    cats = await sources.fetch_coingecko_categories()
+    if not cats:
+        return {"sectors": [], "fetched_at": datetime.now(timezone.utc).isoformat()}
+
+    # Group CoinGecko categories into our sector taxonomy
+    from framework.discovery import _sector_for
+    sector_data: dict[str, dict] = {}
+    for cat in cats:
+        cat_name = cat.get("name") or ""
+        sector = _sector_for(cat_name)
+        mc = cat.get("market_cap") or 0
+        vol = cat.get("volume_24h") or 0
+        ch24 = cat.get("market_cap_change_24h")
+        if mc <= 0:
+            continue
+
+        if sector not in sector_data:
+            sector_data[sector] = {
+                "sector": sector,
+                "total_market_cap": 0.0,
+                "total_volume_24h": 0.0,
+                "weighted_change_sum": 0.0,
+                "category_count": 0,
+                "categories": [],
+            }
+
+        s = sector_data[sector]
+        s["total_market_cap"] += mc
+        s["total_volume_24h"] += vol
+        s["weighted_change_sum"] += (ch24 or 0) * mc
+        s["category_count"] += 1
+        s["categories"].append({
+            "name": cat_name,
+            "market_cap": mc,
+            "volume_24h": vol,
+            "change_24h": ch24,
+            "top_3_coins": cat.get("top_3_coins_id") or [],
+        })
+
+    # Finalize: compute weighted avg, sort, pick top categories
+    result = []
+    for s in sector_data.values():
+        mc = s["total_market_cap"]
+        s["avg_change_24h"] = round(s["weighted_change_sum"] / mc, 2) if mc > 0 else 0
+        del s["weighted_change_sum"]
+
+        # Sort categories by market cap within sector
+        s["categories"].sort(key=lambda x: x["market_cap"], reverse=True)
+        s["top_categories"] = [c["name"] for c in s["categories"][:3]]
+
+        # Find top gainer and loser
+        with_change = [c for c in s["categories"] if c["change_24h"] is not None]
+        if with_change:
+            sorted_by_change = sorted(with_change, key=lambda x: x["change_24h"], reverse=True)
+            s["top_gainer"] = {"name": sorted_by_change[0]["name"], "change_24h": sorted_by_change[0]["change_24h"]}
+            s["top_loser"] = {"name": sorted_by_change[-1]["name"], "change_24h": sorted_by_change[-1]["change_24h"]}
+        else:
+            s["top_gainer"] = None
+            s["top_loser"] = None
+
+        result.append(s)
+
+    # Sort sectors by total market cap
+    result.sort(key=lambda x: x["total_market_cap"], reverse=True)
+
+    return {
+        "sectors": result,
+        "total_sectors": len(result),
+        "fetched_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+
 # --------------------------------------------------------------------------- #
 #  Binance — live price ticker (free, no API key)
 # --------------------------------------------------------------------------- #
