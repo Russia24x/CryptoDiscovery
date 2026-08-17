@@ -5202,3 +5202,30 @@ Verified:
   fields (ath_change_percentage, atl_change_percentage, circulating_supply).
 
 No issues encountered.
+
+---
+Task ID: expand-sectors-meme-ai-gamefi-socialfi
+Agent: main
+Task: User requested expanding sector categories to include MEME, AI, GameFi, SocialFi + improving category selection from CoinGecko.
+
+Work Log:
+- _sector_for (discovery.py): added 4 new sectors + expanded existing
+- lens_hidden_infrastructure: AI added to infrastructure
+- lens_emerging: meme/gaming/socialfi/ai added
+- _apply_category_inferences: MEME=weak value_capture, AI=infrastructure, GameFi=user_facing, SocialFi=community
+- Category selection priority: skip generic tags (ecosystem, index, etc.), priority-match specific sectors
+- Sector propagation: candidate.sector updated from real CoinGecko category in build_report()
+- Frontend SECTOR_OPTIONS: added MEME, AI, GameFi, SocialFi
+
+Verified:
+- Dogecoin: Category=Meme, Sector=MEME, value_capture=weak ✓
+- Bitcoin: Sector=L1/L2 (was Payments/Stablecoins — was wrong!) ✓
+- Render: Sector=AI ✓
+- Tests 47/47, lint clean, page renders
+
+Stage Summary:
+- 4 new sectors added (MEME, AI, GameFi, SocialFi)
+- Bitcoin's sector fixed (was Payments/Stablecoins, now correctly L1/L2)
+- Category selection now uses priority matching (prevents Dogecoin getting "Smart Contract Platform")
+- All new sectors affect: discovery lenses, evidence inferences, thesis text, frontend filter
+- Commit: 72c9b77
