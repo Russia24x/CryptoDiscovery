@@ -1654,6 +1654,7 @@ async def market_sector_rotation():
                 "total_market_cap": 0.0,
                 "total_volume_24h": 0.0,
                 "weighted_change_sum": 0.0,
+                "weighted_mc": 0.0,  # only mc of categories WITH change data
                 "category_count": 0,
                 "categories": [],
             }
@@ -1661,7 +1662,13 @@ async def market_sector_rotation():
         s = sector_data[sector]
         s["total_market_cap"] += mc
         s["total_volume_24h"] += vol
-        s["weighted_change_sum"] += (ch24 or 0) * mc
+        # Only include in weighted average if change data exists (None ≠ 0%).
+        # The old code did `(ch24 or 0) * mc` which silently treated missing
+        # data as 0% while keeping mc in the denominator — biasing the
+        # weighted average toward 0. Same "pattern #1" as has_api/retention_pct.
+        if ch24 is not None:
+            s["weighted_change_sum"] += ch24 * mc
+            s["weighted_mc"] += mc
         s["category_count"] += 1
         s["categories"].append({
             "name": cat_name,
@@ -1675,8 +1682,9 @@ async def market_sector_rotation():
     result = []
     for s in sector_data.values():
         mc = s["total_market_cap"]
-        s["avg_change_24h"] = round(s["weighted_change_sum"] / mc, 2) if mc > 0 else 0
+        s["avg_change_24h"] = round(s["weighted_change_sum"] / s["weighted_mc"], 2) if s.get("weighted_mc", 0) > 0 else None
         del s["weighted_change_sum"]
+        del s["weighted_mc"]
 
         # Sort categories by market cap within sector
         s["categories"].sort(key=lambda x: x["market_cap"], reverse=True)
