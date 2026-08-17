@@ -5229,3 +5229,1167 @@ Stage Summary:
 - Category selection now uses priority matching (prevents Dogecoin getting "Smart Contract Platform")
 - All new sectors affect: discovery lenses, evidence inferences, thesis text, frontend filter
 - Commit: 72c9b77
+
+---
+Task ID: audit-phase-4-final-sweep
+Agent: subagent (code auditor, read-only)
+Task: FINAL phase of audit. Read-only review of /search + /dune/insights/{symbol}
+       backend endpoints + src/components/report-detail.tsx + src/lib/scanner-types.ts.
+       Cross-check frontend types against backend response shapes.
+
+Mode: READ-ONLY audit. No files modified. No commits made.
+
+Scope:
+- Backend: mini-services/crypto-scanner/main.py lines 501-505 (/search) +
+           1507-1533 (/dune/insights/{symbol}) + underlying sources.py
+           fetch_dune_* (929-1031) + search_coins (1274-1304) +
+           fetch_dune_execute (877-926)
+- Frontend: src/components/report-detail.tsx (798 lines)
+- Frontend types: src/lib/scanner-types.ts (519 lines) — cross-checked against
+                 mini-services/crypto-scanner/models/schemas.py (356 lines) +
+                 framework/analysis.py (relevant lines 248-302, 710-864)
+
+Read previous worklog first (5231 lines). Confirmed:
+- Phase 2 audit (MI-*): market-intelligence endpoints; established patterns like
+  H7/D4 (redundant local imports), MI-4 (import asyncio as _aio), MI-1 (silent
+  all-failed-200), MI-2 (truthiness vs is-not-None).
+- Phase 3 audit (NF-*, NE-*, TE-*): news-feed; established NF-2 (XSS via javascript:
+  URIs in article.url — needs safeUrl() helper, deferred to next commit).
+- This Phase 4 sweep is the final pass — covering previously-unaudited
+  /search, /dune/insights, report-detail.tsx, and scanner-types.ts.
+
+============================================================
+FINDINGS
+============================================================
+
+------------------------------------------------------------
+SE-1 — MEDIUM — main.py:501-505 — /search endpoint has no try/except guard
+------------------------------------------------------------
+What's wrong:
+```python
+@app.get("/search")
+async def search_coins(q: str = ""):
+    """Search coins by name/symbol via CoinGecko."""
+    results = await sources.search_coins(q)
+    return {"query": q, "count": len(results), "results": results}
+```
+No try/except. `sources.search_coins` (sources.py:1274-1304) wraps the network call
+in `_get_json` (which catches httpx.HTTPError + ValueError and returns None on
+failure), so transient network errors are handled. BUT:
+
+1. If `search_coins` itself raises any non-(httpx.HTTPError|ValueError) exception
+   (e.g., a future bug introduces an `AttributeError` from `query.strip()` if
+   `q` somehow becomes None, or a `KeyError` in a code path that bypasses
+   `_get_json`), the endpoint returns HTTP 500 with no structured error body.
+   Bug category #4 (missing defensive `except Exception`).
+
+2. No `asyncio.CancelledError: raise` guard. With no try/except at all,
+   CancelledError does propagate naturally (good), but other unexpected
+   exceptions are uncaught. Compare with /alerts at main.py:524-529 which
+   DOES validate input + raise HTTPException(422) for invalid thresholds.
+
+3. No length cap on `q` (SE-2 below).
+
+What it should be:
+```python
+@app.get("/search")
+async def search_coins(q: str = ""):
+    q = (q or "")[:200]  # sanity cap
+    try:
+        results = await sources.search_coins(q)
+    except asyncio.CancelledError:
+        raise
+    except Exception as exc:
+        log.warning("/search failed for q=%r: %s", q, exc)
+        return {"query": q, "count": 0, "results": [], "fetch_failed": True}
+    return {"query": q, "count": len(results), "results": results}
+```
+Pattern matches what's recommended in MC-4 (phase 2 audit) for /cmc/* endpoints.
+
+------------------------------------------------------------
+SE-2 — LOW — main.py:502 — No upper bound on `q` query parameter length
+------------------------------------------------------------
+What's wrong:
+`q: str = ""` accepts any string. A `?q=<100KB string>` request is forwarded
+verbatim to `sources.search_coins(q)` → `_get_json(c, ..., query=q.strip())` →
+CoinGecko's `/search` endpoint. CoinGecko likely rejects or truncates, but the
+backend doesn't enforce a sane limit. Risks:
+1. Memory abuse: each search request caches by query string
+   (sources.py:1281 `cache_key = f"search:{query.strip().lower()}"`). A 1MB
+   query string with low-cardinality pattern could poison the cache.
+2. Log injection: `log.warning("GET %s -> %s", url, r.status_code)` interpolates
+   the URL (which includes ?q=<user input>). A query containing newlines could
+   forge log entries.
+3. Forwarded as URL query param to CoinGecko — httpx will URL-encode it, so
+   the request itself is well-formed, but CoinGecko may 414 URI Too Long.
+
+What it should be: `q = (q or "")[:200]` (200 chars is generous for a coin name).
+
+------------------------------------------------------------
+SE-3 — MINOR — main.py:505 — Response echoes raw `q` instead of normalized
+------------------------------------------------------------
+What's wrong:
+`return {"query": q, "count": len(results), "results": results}` returns the raw
+`q` parameter. If client sends `?q=%20%20bitcoin%20%20` (whitespace-padded), the
+response's `query` field is `"  bitcoin  "` while `results` were fetched using
+the stripped `query.strip()` (sources.py:1286). Cosmetic inconsistency: the
+response's `query` field doesn't match what was actually searched.
+
+What it should be: `return {"query": q.strip(), "count": ...}` or echo the raw
+input but document that `results` are based on the stripped query.
+
+------------------------------------------------------------
+DE-1 — MEDIUM — main.py:1518 — `import asyncio as _aio` inside /dune/insights
+------------------------------------------------------------
+What's wrong:
+```python
+async def get_dune_insights(symbol: str):
+    ...
+    import asyncio as _aio
+    results = await _aio.gather(...)
+```
+Module-level `import asyncio` already exists at main.py:14. Same redundant-local-
+import anti-pattern flagged as MI-4 (phase 2 audit, main.py:917 /market/overview).
+The codebase has already established the convention against this; the import
+here is a copy-paste leftover. Inconsistency + minor perf hit (cached, but
+still useless). Signals the function was copied from another endpoint that
+had the same anti-pattern.
+
+What it should be: remove the local import, use module-level `asyncio.gather(...)`.
+
+------------------------------------------------------------
+DE-2 — MEDIUM — main.py:1507 — /dune/insights/{symbol} has no `symbol` validation
+------------------------------------------------------------
+What's wrong:
+```python
+@app.get("/dune/insights/{symbol}")
+async def get_dune_insights(symbol: str):
+    ...
+    results = await _aio.gather(
+        sources.fetch_dune_token_concentration(symbol),
+        sources.fetch_dune_real_revenue(symbol),
+        sources.fetch_dune_active_users(symbol),
+        return_exceptions=True,
+    )
+```
+No validation on `symbol`. Empty symbol, control characters, very long
+strings, and special characters are all forwarded to Dune as
+`{"token_symbol": symbol}` (sources.py:944) and `{"protocol": symbol}`
+(sources.py:979, 1013). Risks:
+1. Empty symbol: `symbol=""` → all three Dune queries execute with empty
+   params → Dune returns empty results → endpoint returns HTTP 200 with
+   all-None fields (DE-5 below).
+2. Very long symbol: `symbol=<10KB string>` forwarded to Dune API as a
+   query parameter — wasteful but Dune likely rejects.
+3. Special characters: `symbol="BTC/USD"` or `symbol="BTC USD"` are passed
+   through; Dune's parameter handling is permissive so these may "succeed"
+   with zero matching rows.
+4. SQL-like injection: Dune query parameters are not SQL — they're templated
+   into the query at execution time. If the user's Dune query is written
+   naively (e.g., `WHERE symbol = '{{token_symbol}}'` without quoting), a
+   malicious `token_symbol="BTC' OR '1'='1"` could break the query. This is
+   a USER-Dune-query risk, not a backend-sources risk, but the API endpoint
+   has no way to know if the user's Dune query is safe.
+
+Compare with `_validate_gecko_id` (main.py:1539-1550) which validates against
+`^[a-z0-9-]+$` for the /coingecko/* endpoints. /dune/insights has no equivalent.
+
+What it should be:
+```python
+import re
+_SYMBOL_RE = re.compile(r"^[A-Za-z0-9._-]{1,32}$")
+
+@app.get("/dune/insights/{symbol}")
+async def get_dune_insights(symbol: str):
+    sym = (symbol or "").strip().upper()
+    if not _SYMBOL_RE.match(sym):
+        raise HTTPException(422, "invalid symbol format (max 32 chars, [A-Za-z0-9._-])")
+    ...
+```
+(The pattern is permissive because token symbols include things like "USDC.e",
+"WBTC", "wstETH", etc.)
+
+------------------------------------------------------------
+DE-3 — MEDIUM — main.py:1520-1525 — gather(return_exceptions=True) swallows CancelledError
+------------------------------------------------------------
+What's wrong:
+```python
+results = await _aio.gather(
+    sources.fetch_dune_token_concentration(symbol),
+    sources.fetch_dune_real_revenue(symbol),
+    sources.fetch_dune_active_users(symbol),
+    return_exceptions=True,
+)
+return {
+    "symbol": symbol,
+    "token_concentration": results[0] if isinstance(results[0], dict) else None,
+    ...
+}
+```
+With `return_exceptions=True`, ALL exceptions raised by the child coroutines
+(including `asyncio.CancelledError`) are captured as result values rather than
+re-raised. The `isinstance(results[X], dict)` check then filters them out as
+None. Per bug category #3 (except Exception without asyncio.CancelledError:
+raise guard), this is the same anti-pattern at the gather level.
+
+Practical impact: when the client disconnects (e.g., user closes the Sheet),
+FastAPI/Starlette cancels the request handler task. The cancellation signal
+propagates into the gather, but with `return_exceptions=True`, the child
+CancelledError is captured rather than re-raised. The endpoint continues to
+poll Dune (which can take up to 30s per `fetch_dune_execute`, sources.py:903)
+even after the client is gone, wasting Dune API quota and server resources.
+
+Compare with /market/overview (main.py:917-925) which uses the same pattern
+and has the same issue (was not flagged in phase 2 audit because the impact
+there is bounded — CoinGecko requests complete quickly, no 30s polling).
+
+What it should be: detect cancelled children explicitly and re-raise:
+```python
+import asyncio as _aio
+results = await _aio.gather(..., return_exceptions=True)
+for r in results:
+    if isinstance(r, asyncio.CancelledError):
+        raise asyncio.CancelledError()
+    if isinstance(r, Exception) and not isinstance(r, (dict, type(None))):
+        log.warning("Dune insight fetch raised: %s", r)
+return {...}
+```
+OR: don't use return_exceptions=True — wrap each call individually with its
+own try/except, and propagate CancelledError naturally.
+
+------------------------------------------------------------
+DE-4 — MEDIUM — sources.py:951-954, 985-988, 1019-1024 — Truthiness bug in Dune row parsing
+------------------------------------------------------------
+What's wrong:
+```python
+out = {
+    "symbol": symbol,
+    "top_10_holder_pct": row.get("top_10_pct") or row.get("top_10_holder_pct"),
+    "top_100_holder_pct": row.get("top_100_pct") or row.get("top_100_holder_pct"),
+    "whale_wallet_count": row.get("whale_count") or row.get("whale_wallets"),
+    "team_wallet_concentration_pct": row.get("team_concentration") or row.get("team_pct"),
+    ...
+}
+```
+The `or` chain treats `0` (and `0.0`) as falsy. If a Dune query returns a
+legitimate value of 0 — e.g., `whale_count=0` for a brand-new token with no
+whales yet, or `top_10_pct=0.0` for a token with very distributed holdings —
+the `or` chain ignores the 0 and tries the next key. If the next key is also
+missing (returns None), the final value is None instead of 0.
+
+Same pattern in `fetch_dune_real_revenue` (sources.py:985-988):
+```python
+"total_fees_24h": row.get("total_fees_24h") or row.get("fees_24h"),
+"real_revenue_24h": row.get("revenue_24h") or row.get("real_revenue_24h"),
+```
+And in `fetch_dune_active_users` (sources.py:1019-1024):
+```python
+"dau": row.get("dau") or row.get("daily_active_users"),
+"mau": row.get("mau") or row.get("monthly_active_users"),
+"new_users_24h": row.get("new_users_24h"),
+"retention_7d": row.get("retention_7d"),
+```
+
+If `total_fees_24h=0` (a protocol with zero fees — possible for non-monetized
+protocols), `real_revenue_24h=0`, `dau=0`, `mau=0`, `new_users_24h=0`, or
+`retention_7d=0` — all silently become None. The frontend then shows "—" (via
+fmtUsd/fmtPct null-handling) instead of "0", masking the actual data.
+
+Bug category #4 (truthiness checks that treat 0/"" as falsy). Same root cause
+as MI-2 (phase 2 audit, main.py:938-942 — `m.get("market_cap")` truthy filter).
+
+What it should be: use `is not None` checks:
+```python
+def _first_present(row, *keys):
+    for k in keys:
+        v = row.get(k)
+        if v is not None:
+            return v
+    return None
+
+out = {
+    "top_10_holder_pct": _first_present(row, "top_10_pct", "top_10_holder_pct"),
+    ...
+}
+```
+Or simpler: standardize on a single key name in the user's Dune query.
+
+------------------------------------------------------------
+DE-5 — LOW — main.py:1526-1533 — Silent all-None response when Dune has no data for symbol
+------------------------------------------------------------
+What's wrong:
+When Dune is configured (`is_dune_available()` returns True) but the symbol
+isn't found in any of the three configured queries (e.g., `symbol=NOPE` for a
+non-existent token), each `fetch_dune_*` returns None (sources.py:945
+`if not data or not data.get("rows"): return None`). The endpoint returns:
+```json
+{
+  "symbol": "NOPE",
+  "token_concentration": null,
+  "real_revenue": null,
+  "active_users": null,
+  "config": {"available": true, "has_token_concentration_query": true, ...},
+  "fetched_at": "2025-..."
+}
+```
+HTTP 200, no error field. The frontend has no way to distinguish:
+(a) "Dune is configured but the symbol is unknown" (this case), vs.
+(b) "Dune returned 0 rows for this symbol because the query is wrong", vs.
+(c) "Dune was rate-limited and returned None silently".
+Same silent-empty-200 pattern as MI-1 (phase 2 audit, /market/overview).
+
+What it should be: include a top-level `data_found: bool` or `available_count`
+field, OR distinguish None (rate-limited/error) from empty rows (no data) in
+sources.py.
+
+------------------------------------------------------------
+DE-6 — LOW — main.py:1532 — Top-level `fetched_at` is misleading
+------------------------------------------------------------
+What's wrong:
+`"fetched_at": datetime.now(timezone.utc).isoformat()` is set AFTER the gather
+completes (potentially 30+ seconds after the actual Dune fetches started, due
+to the polling loop in sources.py:903-922). The timestamp reflects when the
+response was assembled, not when the data was actually fetched. Each individual
+Dune result already has its own `fetched_at` field (sources.py:957, 992, 1027)
+set at the actual fetch time.
+
+What it should be: either omit the top-level `fetched_at` (each result has its
+own) or rename it to `response_assembled_at` to be honest about what it
+represents.
+
+------------------------------------------------------------
+RD-1 — HIGH — report-detail.tsx:357-358 + scanner-types.ts:60 — `economic_engine.revenue_growth_pct` field doesn't exist in backend
+------------------------------------------------------------
+What's wrong:
+- Frontend type (scanner-types.ts:60): `revenue_growth_pct: number | null`
+- Backend schema (schemas.py:111-124 EconomicEngine): NO `revenue_growth_pct` field.
+  The backend has `fee_growth_pct: Optional[float] = None` (schemas.py:118) instead.
+- Framework analysis.py builds `economic_engine` from `InvestmentAnalysis.fee_growth_pct`
+  (no `revenue_growth_pct` is ever set).
+
+Consequence in report-detail.tsx:
+```jsx
+<Metric
+  label={t("metrics.growthWoW")}
+  value={fmtPct(report.economic_engine.revenue_growth_pct)}
+  tone={report.economic_engine.revenue_growth_pct != null && report.economic_engine.revenue_growth_pct < 0 ? "neg" : "pos"}
+/>
+```
+- `report.economic_engine.revenue_growth_pct` is always `undefined` (the backend
+  never sends this field).
+- `fmtPct(undefined)` returns `"—"` (format-utils.ts:22 — `if (v == null || isNaN(v)) return "—"`).
+- The tone check `undefined != null && ...` evaluates to `false && ...` = `false`,
+  so tone always defaults to `"pos"` (emerald/green) — even when the actual fee
+  growth is negative!
+- The user NEVER sees the actual revenue/fee growth percentage, even though the
+  backend DOES compute it (as `fee_growth_pct`).
+
+This is a real type mismatch / data loss bug. The frontend type lies about a
+field that doesn't exist in the backend response. Per bug category #8 (type
+mismatches between frontend types and backend responses).
+
+What it should be:
+Option (a) — rename the frontend type field to match backend:
+```typescript
+economic_engine: {
+  ...
+  fee_growth_pct: number | null;  // was: revenue_growth_pct
+  ...
+}
+```
+And update report-detail.tsx:357-358 to use `report.economic_engine.fee_growth_pct`.
+Update the label from `t("metrics.growthWoW")` ("Growth WoW") to something
+matching what the data actually is (e.g., `t("metrics.feeGrowthPct")`).
+
+Option (b) — add `revenue_growth_pct` to the backend EconomicEngine schema and
+have analysis.py compute and populate it. More invasive; only worth doing if
+"revenue growth" is a distinct concept from "fee growth" (which it IS — see
+schemas.py:113 `fees` vs `revenue`).
+
+------------------------------------------------------------
+RD-2 — HIGH — report-detail.tsx:419-437 + 638-656 — Duplicate "Fee Stability" section (one i18n'd, one hardcoded)
+------------------------------------------------------------
+What's wrong:
+The same `report.fee_stability` data is rendered TWICE in the report:
+
+Block 1 (lines 419-437, inside Economic Engine section):
+```jsx
+{report.fee_stability && (
+  <div className="mt-2 flex items-center gap-2">
+    <Badge variant="outline" className={cn("text-[10px] gap-1",
+      report.fee_stability === "stable" && "bg-emerald-500/10 ...",
+      report.fee_stability === "volatile" && "bg-rose-500/10 ...",
+      report.fee_stability === "unknown" && "bg-muted/20 ...",
+    )}>
+      {report.fee_stability === "stable" && <BadgeCheck className="h-3 w-3" />}
+      {report.fee_stability === "volatile" && <AlertTriangle className="h-3 w-3" />}
+      {t("detail.feeStability")}: {report.fee_stability ? t(`feeStability.${report.fee_stability}`) : "—"}
+    </Badge>
+    {report.valuation_multiples?.fee_volatility_pct != null && (
+      <span className="text-[10px] text-muted-foreground">
+        {t("detail.volatility")}: {report.valuation_multiples.fee_volatility_pct.toFixed(1)}%
+      </span>
+    )}
+  </div>
+)}
+```
+Uses i18n keys: `t("detail.feeStability")`, `t("detail.volatility")`,
+`t(\`feeStability.${report.fee_stability}\`)`. All three keys exist in en.json/fa.json.
+
+Block 2 (lines 638-656, as its own top-level section):
+```jsx
+{report.fee_stability && report.fee_stability !== "unknown" && (
+  <section>
+    <SectionTitle icon={Gauge} title="Fee Stability" />
+    <div className="p-3 rounded-lg border border-border/40 bg-card/20">
+      <Badge variant="outline" className={cn("text-[10px]",
+        report.fee_stability === "stable" && "bg-emerald-500/10 ...",
+        report.fee_stability === "volatile" && "bg-rose-500/10 ...",
+      )}>
+        {report.fee_stability === "stable" ? "Stable" : "Volatile"}
+      </Badge>
+      <p className="text-[11px] text-muted-foreground mt-1.5">
+        {report.valuation_multiples?.fee_volatility_pct != null
+          ? `Fee volatility: ${report.valuation_multiples.fee_volatility_pct.toFixed(1)}% (7d avg vs 30d avg)`
+          : "Based on 24h vs 7d fee comparison"}
+      </p>
+    </div>
+  </section>
+)}
+```
+Uses HARDCODED English strings: `"Fee Stability"`, `"Stable"`, `"Volatile"`,
+`"Fee volatility:"`, `"Based on 24h vs 7d fee comparison"`, `"(7d avg vs 30d avg)"`.
+NONE i18n'd. Bug category #9 (hardcoded strings that should be i18n'd).
+
+The user sees the same fee stability badge TWICE in the rendered report:
+1. Once in the Economic Engine section (with i18n'd label and volatility %).
+2. Again as its own top-level section (with hardcoded English strings and a
+   longer description).
+
+The Block 2 section also adds a hardcoded `(7d avg vs 30d avg)` clarification
+that Block 1 doesn't have. Inconsistency in what info is shown.
+
+What it should be: DELETE Block 2 entirely (lines 638-656). Block 1 already
+renders the same data with proper i18n. If the longer description text is
+valuable, add it as a `t("detail.feeStabilityDescription")` key and render
+inside Block 1.
+
+------------------------------------------------------------
+RD-3 — MEDIUM — report-detail.tsx:599-621 — cross_verifications only renders source_a/value_a; source_b/value_b silently dropped
+------------------------------------------------------------
+What's wrong:
+```jsx
+{report.cross_verifications.map((cv, i) => (
+  <div key={i} className="flex items-center gap-2 ...">
+    <span className="font-semibold min-w-[80px]">{cv.metric}</span>
+    <div className="flex-1 flex items-center gap-2">
+      <span className="text-muted-foreground">{cv.source_a}:</span>
+      <span className="font-mono">{cv.value_a != null ? fmtUsd(cv.value_a) : "N/A"}</span>
+    </div>
+    <Badge variant="outline" className={cn("text-[9px]", ...)}>{cv.status}</Badge>
+  </div>
+))}
+```
+Only `cv.source_a` and `cv.value_a` are rendered. The type includes:
+```typescript
+cross_verifications?: {
+  metric: string;
+  source_a: string;
+  value_a: number | null;
+  source_b: string;     // <-- NEVER RENDERED
+  value_b: number | null;  // <-- NEVER RENDERED
+  discrepancy_pct: number | null;  // <-- NEVER RENDERED
+  status: string;
+}[];
+```
+For a "Cross-Verification" feature (analysis.py:692-799), the entire point is
+to compare TWO sources. The UI only displays one source's value. For a
+`status="discrepancy"` case (where the two sources disagree by >15-25%),
+the user sees only `source_a`'s value and has no idea what `source_b` said
+or how big the discrepancy is. The data is fetched from the backend but
+the UI throws it away.
+
+Bug category #6 ("Never guess missing data" violation in reverse — the data
+IS available, but the UI doesn't display it).
+
+What it should be: render both sources side by side:
+```jsx
+<div className="flex-1 flex flex-col gap-1">
+  <div className="flex items-center gap-2">
+    <span className="text-muted-foreground">{cv.source_a}:</span>
+    <span className="font-mono">{cv.value_a != null ? fmtUsd(cv.value_a) : "N/A"}</span>
+  </div>
+  {cv.value_b != null && (
+    <div className="flex items-center gap-2">
+      <span className="text-muted-foreground">{cv.source_b}:</span>
+      <span className="font-mono">{fmtUsd(cv.value_b)}</span>
+      {cv.discrepancy_pct != null && (
+        <span className="text-[9px] text-amber-400">Δ {cv.discrepancy_pct.toFixed(1)}%</span>
+      )}
+    </div>
+  )}
+</div>
+```
+
+------------------------------------------------------------
+RD-4 — MEDIUM — report-detail.tsx:613 — Strict-equality check misses "single-source (Dune not configured)" status
+------------------------------------------------------------
+What's wrong:
+```jsx
+<Badge variant="outline" className={cn(
+  "text-[9px]",
+  cv.status === "verified" && "bg-emerald-500/10 text-emerald-400 border-emerald-500/30",
+  cv.status === "discrepancy" && "bg-rose-500/10 text-rose-400 border-rose-500/30",
+  cv.status === "single-source" && "bg-amber-500/10 text-amber-400 border-amber-500/30",
+)}>
+  {cv.status}
+</Badge>
+```
+The backend emits these status values (analysis.py:718, 726, 743, 786, 795):
+- `"verified"`
+- `"discrepancy"`
+- `"single-source"`
+- `"single-source (Dune not configured)"`  <-- NOTE the parenthetical suffix!
+
+The check `cv.status === "single-source"` (strict equality) FAILS when status
+is `"single-source (Dune not configured)"`. So:
+1. The Badge gets no special amber color (falls through to default outline).
+2. The displayed text is the verbose `"single-source (Dune not configured)"`.
+
+Note: the CrossVerification schema docstring (schemas.py:239) says
+`status: str = "unverified"  # verified / discrepancy / unverified` — but the
+ACTUAL implementation never emits "unverified". The docstring is misleading
+and should say `# verified / discrepancy / single-source / single-source (Dune not configured)`.
+
+What it should be:
+Option (a) — use startsWith for the prefix-match:
+```jsx
+cv.status.startsWith("single-source") && "bg-amber-500/10 ...",
+```
+Option (b) — normalize the status in the backend to a closed set:
+`"verified" | "discrepancy" | "single-source"`, and emit the "Dune not
+configured" detail in a separate `note` field.
+
+------------------------------------------------------------
+RD-5 — MEDIUM — report-detail.tsx:660 — `as Record<string, any>` cast bypasses type safety on market_overview
+------------------------------------------------------------
+What's wrong:
+```typescript
+// scanner-types.ts:134
+market_overview?: Record<string, unknown> | null;
+
+// report-detail.tsx:659-660
+{report.market_overview && (() => {
+  const mo = report.market_overview as Record<string, any>;
+```
+The frontend type is `Record<string, unknown> | null` — `unknown` values
+require narrowing before access. The `as Record<string, any>` cast bypasses
+this entirely, so the subsequent accesses `mo.cmc_rank`, `mo.holder_count`,
+`mo.audit_infos`, `mo.audited`, `mo.market_cap_dominance`, `mo.percent_change_30d`,
+`mo.platform_count`, `mo.price_high_52w`, `mo.price_low_52w`, `mo.ath`, `mo.atl`,
+`mo.top_10_holder_ratio`, `mo.top_100_holder_ratio` are all unchecked.
+
+The backend (analysis.py:270-302) DOES populate these fields, so the runtime
+behavior is correct today. But the type assertion is a hole — if the backend
+ever renames a field (e.g., `holder_count` → `holders`), TypeScript won't
+catch it. Per bug category #8 (type mismatches).
+
+Also: `mo.audit_infos` is accessed as an array (`Array.isArray(mo.audit_infos)`
+check at line 741, then `.slice(0, 3).map((a: any, ...) => ...)` at line 743),
+but the frontend has no type for the audit_info elements. Each `a.auditor` and
+`a.time` access is `any`-typed.
+
+What it should be: define a proper interface for market_overview that matches
+the backend response shape:
+```typescript
+export interface MarketOverviewData {
+  price: number | null;
+  market_cap: number | null;
+  fdv: number | null;
+  cmc_rank: number | null;
+  market_cap_dominance: number | null;
+  volume_24h: number | null;
+  circulating_supply: number | null;
+  total_supply: number | null;
+  max_supply: number | null;
+  tvl: number | null;
+  holder_count: number | null;
+  top_10_holder_ratio: number | null;
+  top_100_holder_ratio: number | null;
+  ath: number | null;
+  atl: number | null;
+  audited: boolean | null;
+  audit_infos: { auditor: string; time: string | null }[] | null;
+  platform_count: number | null;
+  description: string | null;
+  percent_change_24h: number | null;
+  percent_change_7d: number | null;
+  percent_change_30d: number | null;
+  price_low_24h: number | null;
+  price_high_24h: number | null;
+  price_low_30d: number | null;
+  price_high_30d: number | null;
+  price_low_52w: number | null;
+  price_high_52w: number | null;
+  social_links: { website: string | null; twitter: string | null; ... } | null;
+}
+
+// in FullReport:
+market_overview?: MarketOverviewData | null;
+```
+Then drop the `as Record<string, any>` cast.
+
+------------------------------------------------------------
+RD-6 — MEDIUM — report-detail.tsx:757 — `new Date(report.data_cutoff).toISOString()` throws RangeError on invalid input
+------------------------------------------------------------
+What's wrong:
+```jsx
+<div className="pt-2 border-t border-border/40 text-[10px] text-muted-foreground font-mono">
+  Data cutoff: {new Date(report.data_cutoff).toISOString().slice(0, 16).replace("T", " ")} UTC ·
+  Report ID: {report.id}
+</div>
+```
+If `report.data_cutoff` is malformed (e.g., empty string, null, non-ISO
+format), `new Date(...)` returns `Invalid Date`, and `.toISOString()` throws
+`RangeError: Invalid time value`. The exception propagates up through the
+JSX render and crashes the entire ReportDetail component — the Sheet would
+unmount, showing a blank sheet (or worse, the closest ErrorBoundary catches
+it and shows a generic error UI).
+
+The backend types `data_cutoff: datetime` (schemas.py:288 — required, Pydantic
+will serialize as ISO 8601 string), so it should always be valid. But there's
+no defensive check. If the data is loaded from a stale scan record or a
+malformed cached response, this could crash.
+
+What it should be:
+```jsx
+const cutoff = (() => {
+  try {
+    const d = new Date(report.data_cutoff);
+    return isNaN(d.getTime()) ? "—" : d.toISOString().slice(0, 16).replace("T", " ") + " UTC";
+  } catch {
+    return "—";
+  }
+})();
+```
+Or simpler: use a `formatDateTime` helper that handles invalid input.
+
+------------------------------------------------------------
+RD-7 — LOW — report-detail.tsx throughout — Hardcoded English strings that should be i18n'd
+------------------------------------------------------------
+What's wrong (bug category #9):
+- Line 138: `Explorer` (blockchain explorer link label)
+- Line 369: `Valuation Multiples (Framework 3.0)` (section title)
+- Lines 373, 380, 387: `P/R`, `P/F`, `P/T` (abbreviations — acceptable)
+- Lines 377, 384, 391: `MC/Revenue`, `FDV/Fees`, `MC/TVL` (abbreviations — acceptable)
+- Line 458: `Buyback` (badge label — should be `t("tokenomics.buyback")`)
+- Line 459: `Burn` (badge label — should be `t("tokenomics.burn")`)
+- Line 462: `Unlock:` (badge label prefix — should be `t("tokenomics.unlockRisk")`)
+- Line 640: `"Fee Stability"` (duplicate of `t("detail.feeStability")` at line 421 — see RD-2)
+- Line 647: `"Stable"` / `"Volatile"` (duplicate of `t(\`feeStability.${...}\`)` at line 429)
+- Line 651: `Fee volatility:` (label — should be `t("detail.feeVolatility")`)
+- Line 652: `"Based on 24h vs 7d fee comparison"` (description — should be `t("detail.feeStabilityFallback")`)
+- Line 663: `"Market Overview"` (section title — should be `t("detail.marketOverview")`)
+- Lines 667, 672, 679, 684, 691, 696, 703, 708, 715, 721, 727, 733: hardcoded
+  metric labels (CMC Rank, Holders, Top 10 Holders, Top 100 Holders, ATH, ATL,
+  52W High, 52W Low, Platforms, MC Dominance, Audited, 30d Change)
+- Line 728: `"✓ Yes"` / `"✗ No"` (audited display — should be `t("common.yes")` / `t("common.no")`)
+- Line 757: `Data cutoff:` and `Report ID:` (footer labels)
+
+Many of these are in the duplicate Block 2 of Fee Stability (RD-2) or the
+Market Overview section (RD-5) — both of which should be refactored anyway.
+
+What it should be: extract each to a `t()` key with English fallback. The
+existing pattern in the codebase is `t("key")` with the key added to both
+en.json and fa.json. The i18n infrastructure (LanguageProvider.tsx) returns
+the key string itself if translation is missing, so adding `t("...")` calls
+is safe even before translations are populated.
+
+------------------------------------------------------------
+RD-8 — LOW — report-detail.tsx throughout — Truthiness checks that may treat 0/"" as falsy
+------------------------------------------------------------
+What's wrong (bug category #4):
+- Line 360: `value={report.economic_engine.recurrence || "—"}` — type is
+  `string | null`. If backend returns `""` (empty string), falls through to
+  "—". Empty string is a valid value (means "no recurrence info"). Should
+  use `?? "—"` (nullish coalescing) instead of `||`.
+- Line 361: `value={report.economic_engine.customer_concentration || "—"}` —
+  same pattern.
+- Line 429: `report.fee_stability ? t(\`feeStability.${report.fee_stability}\`) : "—"`
+  — type is `string | null`. If `fee_stability` is `""`, falsy → "—". Backend
+  uses "stable"/"volatile"/"unknown"/None, so `""` is unlikely. Latent.
+- Line 456: `value_capture ? t(\`valueCapture.${report.tokenomics.value_capture}\`) : "—"`
+  — same pattern. Backend uses enum-like strings or None. Latent.
+- Line 458: `{report.tokenomics.buyback && <Badge>...}` — type is `boolean | null`.
+  `false` is correctly falsy. OK.
+- Line 459: `{report.tokenomics.burn && <Badge>...}` — same. OK.
+- Line 460: `{report.tokenomics.unlock_risk && (...)}` — type is `string | null`.
+  If `unlock_risk` is `""`, falsy → no badge. Should use `!= null`.
+- Line 496: `Rank {report.peer_benchmark.category_rank || "—"}` — type is
+  `string | null`. If `category_rank` is `"0"` (string zero), truthy. OK. If
+  `""`, falsy → "—". Latent.
+- Line 496: `Percentile {report.peer_benchmark.peer_percentile?.toFixed(0) || "—"}%`
+  — if `peer_percentile` is `0`, `(0).toFixed(0)` = `"0"` (truthy string). OK.
+- Line 659: `{report.market_overview && (() => {...})()}` — if `market_overview`
+  is `{}` (empty object), truthy → renders section. Empty section would show
+  no metric cards (each `mo.X != null` check filters them out). Acceptable.
+- Line 598: `{report.cross_verifications && report.cross_verifications.length > 0 && (...)}`
+  — guards against undefined/null. OK.
+
+Most of these are latent (backend doesn't actually emit `""` for these fields).
+But the inconsistent style (some `|| "—"`, some `?? "—"`, some `!= null`) signals
+copy-paste oversight. The safest fix is to standardize on `?? "—"` (nullish
+coalescing) throughout, which only treats `null`/`undefined` as falsy — not
+`0`/`""`/`false`.
+
+------------------------------------------------------------
+RD-9 — LOW — report-detail.tsx:91, 112, 118, 124, 130, 136 — No URL scheme validation on social links / image
+------------------------------------------------------------
+What's wrong:
+```jsx
+{report.candidate.image ? (
+  <img src={report.candidate.image} alt={...} className="..." />
+) : ...}
+...
+{report.candidate.website && (
+  <a href={report.candidate.website} target="_blank" rel="noopener noreferrer">...</a>
+)}
+{report.candidate.twitter && (
+  <a href={`https://x.com/${report.candidate.twitter}`} ...>...</a>
+)}
+{report.candidate.github && (<a href={report.candidate.github} ...>...</a>)}
+{report.candidate.discord && (<a href={report.candidate.discord} ...>...</a>)}
+{report.candidate.blockchain_explorer && (<a href={report.candidate.blockchain_explorer} ...>...</a>)}
+```
+No URL scheme validation. If any of these strings contains a `javascript:` URI
+(e.g., `website="javascript:alert(document.cookie)"`), clicking the link
+executes JS in the page origin. The data comes from CoinGecko's `links` field
+(candidate comes from discovery.py — CoinGecko coins/{id}). CoinGecko is
+partially trusted, but defense-in-depth is missing.
+
+This is the SAME pattern flagged as NF-2 (phase 3 audit, news-feed-view.tsx —
+"XSS via javascript: URIs in article/message links"). The recommended fix
+(a `safeUrl()` helper that validates `http:`/`https:` scheme) was deferred
+to a future commit. The same fix should be applied here.
+
+The `twitter` link is constructed server-side with `https://x.com/` prefix
+(line 118), so the scheme is always https — that one is safe. The other four
+(`website`, `github`, `discord`, `blockchain_explorer`) come straight from
+CoinGecko with no scheme enforcement.
+
+The `<img src={report.candidate.image}>` (line 91) is less severe (browsers
+block `javascript:` in `<img src>`), but `data:image/svg+xml;base64,...`
+URIs can contain JS that executes in some contexts. Defense-in-depth still
+warranted.
+
+What it should be:
+```typescript
+function safeUrl(u: string | null | undefined): string | null {
+  if (!u) return null;
+  try {
+    const parsed = new URL(u);
+    if (parsed.protocol === "http:" || parsed.protocol === "https:") return u;
+  } catch { /* fall through */ }
+  return null;
+}
+```
+Apply to `report.candidate.{website, github, discord, blockchain_explorer, image}`.
+If `safeUrl()` returns null, render the badge as plain text (no link) or omit.
+
+------------------------------------------------------------
+RD-10 — LOW — report-detail.tsx:90-94 — `<img src>` onError not handled
+------------------------------------------------------------
+What's wrong:
+```jsx
+{report.candidate.image ? (
+  <img src={report.candidate.image} alt={report.candidate.symbol} className="h-full w-full object-cover" />
+) : (
+  <span className="text-sm font-bold">{report.candidate.symbol.slice(0, 3)}</span>
+)}
+```
+No `onError` handler. If the image URL is broken (404, network error,
+CORS-blocked), the browser shows a broken-image icon. The fallback (first
+3 chars of symbol) is only shown when `image` is null/empty initially —
+not when the image fails to load.
+
+Compare with news-feed-view.tsx ArticleImage (line 247, per phase 3 audit):
+`React.useEffect(() => setErrored(false), [src]);` resets error state on src
+change, with `onError={() => setErrored(true)}` to swap to a fallback. The
+ReportDetail `<img>` has no equivalent.
+
+What it should be: add `onError` handler that hides the img and shows the
+symbol-fallback, OR use a wrapper component (like news-feed-view's ArticleImage)
+that handles errors. Minor UX issue.
+
+------------------------------------------------------------
+ST-1 — HIGH — scanner-types.ts:60 — `EconomicEngine.revenue_growth_pct` field mismatch with backend (see RD-1)
+------------------------------------------------------------
+Already documented as RD-1. This is the type-definition side of the same bug.
+The frontend type declares a field that doesn't exist in the backend schema.
+
+------------------------------------------------------------
+ST-2 — MEDIUM — scanner-types.ts:55-67 — EconomicEngine frontend type missing backend fields
+------------------------------------------------------------
+What's wrong:
+Frontend type:
+```typescript
+economic_engine: {
+  gross_volume: number | null;
+  fees: number | null;
+  revenue: number | null;
+  net_revenue: number | null;
+  revenue_growth_pct: number | null;  // <-- DOESN'T EXIST IN BACKEND
+  aum: number | null;
+  tvl: number | null;
+  customer_count: number | null;
+  retention_pct: number | null;
+  customer_concentration: string | null;
+  recurrence: string | null;
+};
+```
+Backend EconomicEngine (schemas.py:111-124):
+```python
+class EconomicEngine(BaseModel):
+    gross_volume: Optional[float] = None
+    fees: Optional[float] = None
+    fees_7d: Optional[float] = None       # <-- MISSING FROM FRONTEND TYPE
+    fees_30d: Optional[float] = None      # <-- MISSING FROM FRONTEND TYPE
+    revenue: Optional[float] = None
+    net_revenue: Optional[float] = None
+    fee_growth_pct: Optional[float] = None  # <-- MISSING (frontend has revenue_growth_pct instead)
+    aum: Optional[float] = None
+    tvl: Optional[float] = None
+    customer_count: Optional[int] = None
+    retention_pct: Optional[float] = None
+    customer_concentration: Optional[str] = None
+    recurrence: Optional[str] = None
+```
+
+Missing: `fees_7d`, `fees_30d`, `fee_growth_pct` (the actual name of what
+frontend calls `revenue_growth_pct`). The actual API response payload
+includes these fields, but the frontend type doesn't model them. The
+`revenue_growth_pct` field in the frontend type is a phantom — it never
+receives a value.
+
+What it should be: rename `revenue_growth_pct` → `fee_growth_pct`, add
+`fees_7d` and `fees_30d`. Update report-detail.tsx to use the correct name.
+
+------------------------------------------------------------
+ST-3 — MEDIUM — scanner-types.ts:36-135 — FullReport frontend type missing backend fields
+------------------------------------------------------------
+What's wrong:
+Frontend type (FullReport, lines 36-135) is missing these backend ProjectReport
+fields (schemas.py:285-320):
+- `scan_id: str` (backend schemas.py:319, required)
+- `created_at: datetime` (backend schemas.py:320, required)
+- `gecko_id: Optional[str] = None` (backend schemas.py:275, in CandidateInfo)
+- `llama_id: Optional[str] = None` (backend schemas.py:276, in CandidateInfo)
+
+The first two are present in every API response but the frontend type doesn't
+expose them. If any component needs to reference `report.scan_id` (e.g., for
+linking to a scan history entry) or `report.created_at` (e.g., for "Report
+generated X minutes ago"), it would have to cast. The CandidateInfo
+frontend type (lines 20-34) is missing `gecko_id` and `llama_id` — also
+present in API responses.
+
+The frontend types are incomplete — they describe a SUBSET of the backend
+response, not the full shape. This is a documentation gap, not a runtime
+bug, but it makes the type-system misleading.
+
+What it should be: add the missing fields to FullReport and CandidateInfo
+interfaces. Mark them as optional if they may be absent.
+
+------------------------------------------------------------
+ST-4 — LOW — scanner-types.ts:130 — CrossVerification.status should be a closed-set union
+------------------------------------------------------------
+What's wrong:
+```typescript
+cross_verifications?: {
+  ...
+  status: string;
+}[];
+```
+Backend emits exactly four status values (analysis.py):
+- `"verified"`
+- `"discrepancy"`
+- `"single-source"`
+- `"single-source (Dune not configured)"`
+
+But the type uses bare `string`. A closed-set string literal union would
+catch the frontend's strict-equality oversight (RD-4) at compile time:
+```typescript
+type CrossVerificationStatus =
+  | "verified"
+  | "discrepancy"
+  | "single-source"
+  | "single-source (Dune not configured)";
+status: CrossVerificationStatus;
+```
+Then `cv.status === "single-source"` would NOT trigger a type error (because
+"single-source" is a valid member), but if the frontend tried to match
+against `"unknown"` or some other invalid value, TypeScript would catch it.
+
+Better: normalize the backend to a closed set (just `"single-source"`) and
+emit the "Dune not configured" detail in a separate `note` field.
+
+What it should be: see RD-4.
+
+------------------------------------------------------------
+ST-5 — LOW — scanner-types.ts:140-148 — CoinSearchResult over-strict required fields
+------------------------------------------------------------
+What's wrong:
+```typescript
+export interface CoinSearchResult {
+  id: string;             // required
+  name: string;           // required
+  symbol: string;         // required
+  market_cap_rank: number | null;
+  thumb: string | null;
+  large: string | null;
+  api_symbol: string;     // required
+}
+```
+Backend `search_coins` (sources.py:1294-1301):
+```python
+out.append({
+    "id": item.get("id"),                         # may be None
+    "name": item.get("name"),                     # may be None
+    "symbol": (item.get("symbol") or "").upper(), # always string (OK)
+    "market_cap_rank": item.get("market_cap_rank"),
+    "thumb": item.get("thumb"),
+    "large": item.get("large"),
+    "api_symbol": item.get("api_symbol") or item.get("id"),  # may be None if both missing
+})
+```
+If CoinGecko returns a malformed search result (no `id` field, no `name`,
+no `api_symbol`), the backend emits `null` for these. The frontend type
+says they're required `string`. Any code doing `result.id.toUpperCase()` or
+`result.name.length` would crash on null.
+
+In practice CoinGecko always returns these fields, but the type lies about
+the contract. Per bug category #8.
+
+What it should be:
+```typescript
+export interface CoinSearchResult {
+  id: string | null;
+  name: string | null;
+  symbol: string;  // backend guarantees string (uppercased)
+  market_cap_rank: number | null;
+  thumb: string | null;
+  large: string | null;
+  api_symbol: string | null;
+}
+```
+Or: filter out malformed items in sources.py before appending.
+
+------------------------------------------------------------
+ST-6 — LOW — scanner-types.ts:53 — sub_factors value typed as `number`, but no runtime check
+------------------------------------------------------------
+What's wrong:
+```typescript
+axes: {
+  name: string;
+  score: number;
+  confidence: number;
+  key_reason: string;
+  sub_factors: Record<string, number>;  // value is `number`
+}[];
+```
+Backend AxisScore (schemas.py:78-83):
+```python
+class AxisScore(BaseModel):
+    name: AxisName
+    score: float = Field(ge=0.0, le=10.0)
+    confidence: float = Field(ge=0.0, le=100.0)
+    key_reason: str
+    sub_factors: dict[str, float] = Field(default_factory=dict)
+```
+The type matches (`dict[str, float]` ↔ `Record<string, number>`). But the
+frontend rendering (report-detail.tsx:330-334) uses `v.toFixed(1)`,
+`scoreBg(v, 10)`, `(v / 10) * 100`. If the backend ever emits a non-number
+value for a sub_factor (e.g., a string due to a future bug, or `null` if
+the schema validation is bypassed via raw dict construction), the rendering
+crashes with `v.toFixed is not a function`.
+
+Pydantic schema validation should catch this on the backend side, so it's
+low-severity. But there's no defensive check on the frontend.
+
+What it should be: either trust the schema (current behavior) or add a
+defensive `typeof v === "number" ? v.toFixed(1) : "—"` check in the
+rendering. Low priority.
+
+============================================================
+VERIFIED WORKING (no action needed)
+============================================================
+
+1. /search endpoint basic flow — PASS (with caveat, see SE-1)
+   File: main.py:501-505 + sources.py:1274-1304
+   Empty query returns `[]` (sources.py:1279-1280 `if not query or
+   len(query.strip()) < 1: return []`). Cached for 120s (sources.py:1282).
+   `_get_json` (sources.py:83-117) catches httpx.HTTPError + ValueError,
+   retries on 429/5xx, returns None on persistent failure. `search_coins`
+   then returns `[]` for `not isinstance(data, dict)`. Frontend gets a valid
+   `{"query": ..., "count": 0, "results": []}` on failure. No crash. The
+   only gap is no try/except in the endpoint itself for non-(httpx|ValueError)
+   exceptions — SE-1.
+
+2. /dune/insights/{symbol} parallel fetch pattern — PASS (with caveats, see DE-1, DE-3, DE-5)
+   File: main.py:1507-1533 + sources.py:929-1031
+   Uses `asyncio.gather(..., return_exceptions=True)` for parallel fetch.
+   Each result filtered via `isinstance(results[X], dict)`. Caches per-symbol
+   for 300s (sources.py:940, 976, 1010). `is_dune_available()` short-circuits
+   with a `dune_pro_required: True` response when no API key — clean UX.
+   Each individual `fetch_dune_*` function has proper guards (None checks,
+   cache hits). The truthiness bugs (DE-4) are in row-level field
+   extraction, not in the gather pattern.
+
+3. fetch_dune_query_results CancelledError guard — PASS
+   File: sources.py:850-874
+   `except asyncio.CancelledError: raise` + `except Exception` pattern is
+   correct. Compare with fetch_dune_execute (sources.py:885-926) which only
+   catches (httpx.HTTPError, ValueError) — CancelledError propagates
+   naturally there (good, but other unexpected exceptions also propagate,
+   which is acceptable since fetch_dune_execute is wrapped by the gather
+   caller in /dune/insights).
+
+4. Frontend i18n infrastructure — PASS
+   File: src/lib/i18n/LanguageProvider.tsx
+   `t(key)` returns the key string itself if translation missing (line 19
+   `return path`). `t(\`feeStability.${report.fee_stability}\`)` calls are
+   safe even if the dynamic key doesn't exist. en.json and fa.json both
+   contain `feeStability.{stable,volatile,unknown}` (verified). The
+   duplicate-rendering bug (RD-2) is NOT a missing-key issue — Block 2
+   uses hardcoded strings instead of the existing keys.
+
+5. Frontend fmtPct / fmtUsd null handling — PASS
+   File: src/lib/format-utils.ts:11-24
+   Both functions handle `null | undefined | NaN` by returning `"—"` (line
+   12, 22). RD-1 (revenue_growth_pct always undefined) therefore manifests
+   as a permanent "—" display, not a crash. The tone logic still has the
+   bug (always "pos") but at least no exception is thrown.
+
+6. ReportDetail component structure — PASS
+   File: report-detail.tsx:72-82
+   Component is purely presentational — takes a `report: FullReport` prop
+   and renders. No async, no fetch, no internal state (except what's
+   derived from props). No loading/error states needed (parent's
+   responsibility). No race conditions possible. No useEffect. The bugs
+   found (RD-1 through RD-10) are all in the rendering logic itself, not
+   in lifecycle or state management.
+
+7. CandidateInfo type match — PASS
+   File: scanner-types.ts:20-34 vs schemas.py:267-282
+   All required string fields match. Optional nullable fields match. The
+   only missing fields are `gecko_id` and `llama_id` (ST-3) — present in
+   backend but not modeled in frontend. No actual type mismatches.
+
+8. ProjectReport core fields match — PASS
+   File: scanner-types.ts:36-135 vs schemas.py:285-320
+   All required fields (`id`, `candidate`, `data_cutoff`, `veto`,
+   `severe_risks`, `executive_verdict`, `project_quality_score`,
+   `token_quality_score`, `valuation_label`, `confidence`, `axes`,
+   `economic_engine`, `tokenomics`, `market_structure`,
+   `institutional_adoption`, `competitive_moat`, `cycle_phase`,
+   `peer_benchmark`, `catalysts`, `thesis_kill_conditions`, `decision`,
+   `evidence_grade`, `data_needing_verification`, `final_thesis`,
+   `five_final_answers`) match between frontend and backend. Optional
+   Framework-3.0 fields (`valuation_multiples`, `cross_verifications`,
+   `fee_stability`, `bias_checks`, `market_overview`) all marked optional
+   in frontend type and `Optional[...]` in backend. Missing fields are
+   `scan_id` and `created_at` (ST-3) — both backend-required, present in
+   API response, but not modeled in frontend type.
+
+9. valuation_multiples dict shape — PASS
+   File: scanner-types.ts:114-122 vs analysis.py:854-864
+   Frontend type fields (`p_r`, `p_f`, `p_t`, `annualized_revenue`,
+   `annualized_fees`, `fee_volatility_pct`, `note`) all match the backend's
+   `_build_valuation_multiples` dict keys exactly. Backend types this as
+   `Optional[dict] = None` (loose), but the actual dict construction is
+   well-formed. No mismatch.
+
+10. market_overview field names — PASS (with caveat, see RD-5)
+    File: scanner-types.ts:134 vs analysis.py:270-302
+    Frontend type is loose (`Record<string, unknown> | null`), but the
+    actual field names accessed in report-detail.tsx (cmc_rank, holder_count,
+    top_10_holder_ratio, top_100_holder_ratio, ath, atl, price_high_52w,
+    price_low_52w, market_cap_dominance, audited, percent_change_30d,
+    audit_infos, platform_count) all match what analysis.py emits. The
+    `as Record<string, any>` cast (RD-5) bypasses type checking, but the
+    runtime behavior is correct today.
+
+============================================================
+NEXT ACTIONS (recommended priority order)
+============================================================
+
+1. CRITICAL — RD-1 / ST-1 / ST-2 (revenue_growth_pct phantom field):
+   The frontend `economic_engine.revenue_growth_pct` field never receives
+   a value from the backend (backend has `fee_growth_pct` instead). The
+   Growth WoW metric ALWAYS shows "—" with green "pos" tone — silently
+   broken. Fix: rename frontend type field to `fee_growth_pct` and update
+   report-detail.tsx:357-358. Or: add `revenue_growth_pct` to the backend
+   EconomicEngine schema if "revenue growth" is a distinct concept.
+
+2. HIGH — RD-2 (duplicate Fee Stability section): DELETE lines 638-656
+   in report-detail.tsx. Block 1 (lines 419-437) already renders the same
+   data with proper i18n. The duplicate Block 2 uses hardcoded English
+   strings, defeating the i18n system and confusing users who see the
+   same badge twice.
+
+3. MEDIUM — RD-3 (cross_verifications drops source_b/value_b): Render
+   both sources' values in the cross-verification UI. For discrepancy
+   status, show the delta percentage. The whole point of cross-verification
+   is the comparison — currently only one side is shown.
+
+4. MEDIUM — RD-4 (strict-equality misses "single-source (Dune not
+   configured)"): Use `cv.status.startsWith("single-source")` instead of
+   `===`. Or normalize the backend to a closed set + emit the detail in a
+   separate `note` field.
+
+5. MEDIUM — DE-1 (`import asyncio as _aio` in /dune/insights): Remove the
+   local import, use module-level `asyncio.gather(...)`. Same anti-pattern
+   as MI-4 (phase 2 audit).
+
+6. MEDIUM — DE-2 (no symbol validation in /dune/insights): Add regex
+   validation `^[A-Za-z0-9._-]{1,32}$` for the symbol path parameter.
+   Compare with `_validate_gecko_id` (main.py:1539).
+
+7. MEDIUM — DE-3 (gather swallows CancelledError): Detect cancelled
+   children explicitly and re-raise. Or wrap each fetch_dune_* call
+   individually with try/except + CancelledError raise guard.
+
+8. MEDIUM — DE-4 (truthiness bugs in Dune row parsing): Use `is not None`
+   checks or a `_first_present(row, *keys)` helper in
+   fetch_dune_token_concentration, fetch_dune_real_revenue,
+   fetch_dune_active_users.
+
+9. MEDIUM — RD-5 (market_overview `as Record<string, any>` cast): Define
+   a proper `MarketOverviewData` interface in scanner-types.ts that
+   matches analysis.py:270-302. Drop the cast.
+
+10. MEDIUM — RD-6 (new Date(data_cutoff).toISOString() throws on invalid
+    input): Wrap in try/catch or use a defensive formatDateTime helper.
+
+11. LOW — SE-1, SE-2, SE-3, DE-5, DE-6, RD-7, RD-8, RD-9, RD-10, ST-3,
+    ST-4, ST-5, ST-6: Address opportunistically. None are urgent; mostly
+    defensive coding, i18n completeness, and type-system tightening.
+
+============================================================
+SUMMARY
+============================================================
+
+Total findings: 19 (1 critical, 2 high, 9 medium, 7 low)
+- Backend /search: 3 findings (SE-1, SE-2, SE-3)
+- Backend /dune/insights: 6 findings (DE-1 through DE-6)
+- Frontend report-detail.tsx: 10 findings (RD-1 through RD-10)
+- Frontend scanner-types.ts: 6 findings (ST-1 through ST-6, with ST-1
+  being the same root cause as RD-1)
+
+Critical findings: RD-1/ST-1/ST-2 — frontend references a backend field
+that doesn't exist, silently always showing "—" for the Growth WoW metric.
+
+High findings: RD-2 — duplicate Fee Stability section with hardcoded
+strings (one of the two should be deleted).
+
+No code was modified during this review. All findings are read-only
+observations appended to worklog.md.

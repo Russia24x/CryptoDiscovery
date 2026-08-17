@@ -57,7 +57,7 @@ export interface FullReport {
     fees: number | null;
     revenue: number | null;
     net_revenue: number | null;
-    revenue_growth_pct: number | null;
+    fee_growth_pct: number | null;
     aum: number | null;
     tvl: number | null;
     customer_count: number | null;

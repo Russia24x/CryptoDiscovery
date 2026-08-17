@@ -353,9 +353,9 @@ export function ReportDetail({
             <Metric label={t("metrics.tvl")} value={fmtUsd(report.economic_engine.tvl)} />
             <Metric label={t("metrics.aum")} value={fmtUsd(report.economic_engine.aum)} />
             <Metric
-              label={t("metrics.growthWoW")}
-              value={fmtPct(report.economic_engine.revenue_growth_pct)}
-              tone={report.economic_engine.revenue_growth_pct != null && report.economic_engine.revenue_growth_pct < 0 ? "neg" : "pos"}
+              label={t("metrics.feeGrowth")}
+              value={fmtPct(report.economic_engine.fee_growth_pct)}
+              tone={report.economic_engine.fee_growth_pct != null && report.economic_engine.fee_growth_pct < 0 ? "neg" : "pos"}
             />
             <Metric label={t("metrics.recurrence")} value={report.economic_engine.recurrence || "—"} />
             <Metric label={t("metrics.custConcentration")} value={report.economic_engine.customer_concentration || "—"} />
@@ -634,23 +634,43 @@ export function ReportDetail({
           </section>
         )}
 
-        {/* Fee Stability */}
-        {report.fee_stability && report.fee_stability !== "unknown" && (
+        {/* RD-3 fix: Cross-Verification — was only rendering source_a, dropping source_b/value_b/discrepancy_pct */}
+        {report.cross_verifications && report.cross_verifications.length > 0 && (
           <section>
-            <SectionTitle icon={Gauge} title="Fee Stability" />
-            <div className="p-3 rounded-lg border border-border/40 bg-card/20">
-              <Badge variant="outline" className={cn(
-                "text-[10px]",
-                report.fee_stability === "stable" && "bg-emerald-500/10 text-emerald-400 border-emerald-500/30",
-                report.fee_stability === "volatile" && "bg-rose-500/10 text-rose-400 border-rose-500/30",
-              )}>
-                {report.fee_stability === "stable" ? "Stable" : "Volatile"}
-              </Badge>
-              <p className="text-[11px] text-muted-foreground mt-1.5">
-                {report.valuation_multiples?.fee_volatility_pct != null
-                  ? `Fee volatility: ${report.valuation_multiples.fee_volatility_pct.toFixed(1)}% (7d avg vs 30d avg)`
-                  : "Based on 24h vs 7d fee comparison"}
-              </p>
+            <SectionTitle icon={ShieldCheck} title={t("detail.crossVerification", "Cross-Verification")} />
+            <div className="space-y-2">
+              {report.cross_verifications.map((cv, i) => (
+                <div key={i} className="p-2 rounded-lg border border-border/40 bg-card/20 text-[11px]">
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="font-medium">{cv.metric}</span>
+                    <Badge variant="outline" className={cn(
+                      "text-[10px]",
+                      cv.status === "verified" && "bg-emerald-500/10 text-emerald-400 border-emerald-500/30",
+                      cv.status === "discrepancy" && "bg-amber-500/10 text-amber-400 border-amber-500/30",
+                      cv.status === "single-source" && "bg-slate-500/10 text-slate-400 border-slate-500/30",
+                    )}>
+                      {cv.status === "verified" ? t("detail.verified", "Verified")
+                       : cv.status === "discrepancy" ? t("detail.discrepancy", "Discrepancy")
+                       : t("detail.singleSource", "Single Source")}
+                    </Badge>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2 text-muted-foreground">
+                    <div>
+                      <span className="text-[10px] uppercase">{cv.source_a}</span>
+                      <div className="font-mono">{cv.value_a != null ? fmtUsd(cv.value_a) : "—"}</div>
+                    </div>
+                    <div>
+                      <span className="text-[10px] uppercase">{cv.source_b || "—"}</span>
+                      <div className="font-mono">{cv.value_b != null ? fmtUsd(cv.value_b) : "—"}</div>
+                    </div>
+                  </div>
+                  {cv.discrepancy_pct != null && (
+                    <div className="mt-1 text-[10px] text-muted-foreground">
+                      {t("detail.discrepancyPct", "Δ")}: {cv.discrepancy_pct.toFixed(1)}%
+                    </div>
+                  )}
+                </div>
+              ))}
             </div>
           </section>
         )}
