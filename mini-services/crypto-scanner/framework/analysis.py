@@ -319,6 +319,14 @@ def build_report(
     if ev.category and ev.category != candidate.category:
         candidate.category = ev.category
 
+    # Also update candidate.sector from the real CoinGecko category.
+    # The old code set sector once in discovery.py via _sector_for(heuristic),
+    # but the category is now updated above from CoinGecko's real categories.
+    # Without this, a coin discovered as "other" (→ sector "Other") that
+    # turns out to be "Meme" via CoinGecko would keep sector="Other".
+    from framework.discovery import _sector_for
+    candidate.sector = _sector_for(candidate.category)
+
     return ProjectReport(
         id=rid,
         candidate=candidate,

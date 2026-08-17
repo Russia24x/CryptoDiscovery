@@ -290,7 +290,8 @@ const PERSONAS: { value: Persona; label: string; desc: string }[] = [
 ];
 
 const SECTOR_OPTIONS = [
-  "DeFi", "Infrastructure", "RWA", "DePIN", "L1 / L2", "Payments / Stablecoins", "Other",
+  "DeFi", "Infrastructure", "RWA", "DePIN", "L1 / L2", "Payments / Stablecoins",
+  "MEME", "AI", "GameFi", "SocialFi", "Other",
 ];
 
 // --------------------------------------------------------------------------- //

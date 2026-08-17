@@ -42,6 +42,7 @@ def lens_hidden_infrastructure(category: str, name: str) -> float:
         "oracle", "rpc", "bridge", "infrastructure", "payments", "liquid staking",
         "staking", "indexing", "data", "identity", "account abstraction",
         "wallet", "sequencer", "data availability", "zkp", "aggregator",
+        "ai", "big data", "machine learning", "ai agents", "compute",
     }
     n = (name or "").lower()
     c = (category or "").lower()
@@ -86,7 +87,12 @@ def lens_institutional(llama_entry: dict[str, Any] | None, category: str) -> flo
 
 def lens_emerging(category: str) -> float:
     """Lens E — emerging rails."""
-    emerging_cats = {"ai agents", "ai", "intent", "modular", "data availability", "account abstraction", "rwa", "depin"}
+    emerging_cats = {
+        "ai agents", "ai", "intent", "modular", "data availability",
+        "account abstraction", "rwa", "depin", "meme", "gaming", "gamefi",
+        "social", "socialfi", "creator", "metaverse", "big data",
+        "machine learning", "compute", "storage", "iot",
+    }
     c = (category or "").lower()
     if any(x in c for x in emerging_cats):
         return 14.0
@@ -346,18 +352,26 @@ def _guess_category(market: dict[str, Any], symbol: str) -> str:
 
 def _sector_for(category: str) -> str:
     c = (category or "").lower()
-    if any(x in c for x in ["stablecoin", "currency"]):
+    if any(x in c for x in ["stablecoin", "currency", "payments"]):
         return "Payments / Stablecoins"
-    if any(x in c for x in ["dex", "lending", "liquid staking"]):
+    if any(x in c for x in ["dex", "lending", "liquid staking", "yield", "derivatives", "synthetics"]):
         return "DeFi"
-    if any(x in c for x in ["oracle", "rpc", "bridge", "infrastructure", "data"]):
+    if any(x in c for x in ["oracle", "rpc", "bridge", "infrastructure", "data", "indexing", "sequencer"]):
         return "Infrastructure"
-    if any(x in c for x in ["rwa"]):
+    if any(x in c for x in ["rwa", "real world"]):
         return "RWA"
-    if any(x in c for x in ["depin"]):
+    if any(x in c for x in ["depin", "iot", "compute", "storage"]):
         return "DePIN"
-    if any(x in c for x in ["smart contract", "layer", "rollup"]):
+    if any(x in c for x in ["smart contract", "layer", "rollup", "scaling", "modular"]):
         return "L1 / L2"
+    if any(x in c for x in ["meme", "dog", "cat", "pepe", "shib"]):
+        return "MEME"
+    if any(x in c for x in ["ai", "big data", "machine learning", "ai agents", "compute"]):
+        return "AI"
+    if any(x in c for x in ["gaming", "game", "metaverse", "play", "nft marketplace"]):
+        return "GameFi"
+    if any(x in c for x in ["social", "dao", "creator", "community", "fan token"]):
+        return "SocialFi"
     return "Other"
 
 

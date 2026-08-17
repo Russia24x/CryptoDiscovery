@@ -489,11 +489,37 @@ def _apply_gecko_detail(b: EvidenceBundle, d: dict[str, Any]) -> None:
     # Cardano, Polkadot, Avalanche, Cosmos, NEAR, Sui, etc.
     categories = d.get("categories") or []
     if categories and isinstance(categories, list):
-        # Pick the first meaningful category (skip empty strings)
+        # Pick the first meaningful category — skip generic ecosystem/index
+        # tags that don't tell us the project's actual sector.
+        _SKIP_KW = {"ecosystem", "index", "portfolio", "made in",
+                    "themed", "4chan", "proof of", "coinbase 50",
+                    "gmci", "the boy", "alameda", "elon musk"}
+        # Priority categories — pick the most specific sector first.
+        # This prevents Dogecoin from getting "Smart Contract Platform"
+        # when it should get "Meme".
+        _PRIORITY_KW = ["meme", "ai", "artificial intelligence", "big data",
+                        "gaming", "game", "metaverse", "social", "creator",
+                        "depin", "rwa", "real world", "oracle", "bridge",
+                        "dex", "lending", "liquid staking", "stablecoin",
+                        "payments", "infrastructure", "dao"]
+        _priority_cat = None
+        _fallback_cat = None
         for cat in categories:
-            if cat and isinstance(cat, str) and cat.strip():
-                b.category = cat.strip()
-                break
+            if not cat or not isinstance(cat, str) or not cat.strip():
+                continue
+            cat_lower = cat.strip().lower()
+            if any(skip in cat_lower for skip in _SKIP_KW):
+                continue
+            # Check if this is a priority category
+            if not _priority_cat:
+                for pkw in _PRIORITY_KW:
+                    if pkw in cat_lower:
+                        _priority_cat = cat.strip()
+                        break
+            # Keep first non-skipped as fallback
+            if not _fallback_cat:
+                _fallback_cat = cat.strip()
+        b.category = _priority_cat or _fallback_cat or b.category
 
     # inflation: if max supply exists, derive annualized growth from circulating vs total
     cs = b.tokenomics.circulating_supply or 0.0
@@ -773,6 +799,30 @@ def _apply_category_inferences(b: EvidenceBundle, category: str) -> None:
         b.upgrade_admin_decentralized = True
         b.has_legal_entity = True
         b.regulatory_uncertainty = False
+
+    # MEME → speculative, high risk, no utility
+    if "meme" in c:
+        b.tokenomics.value_capture = "weak"
+        b.unclear_token_value_capture = True
+        b.high_customer_concentration = True
+        b.near_unlock_cliff = True  # meme tokens often have unlock cliffs
+
+    # AI → infrastructure-layer, switching cost, compute dependency
+    if "ai" in c or "big data" in c or "machine learning" in c:
+        b.switching_cost_signal = True
+        b.is_infrastructure = True
+        b.team_transparent = True  # AI projects usually have public teams
+
+    # GameFi → user-facing app, community signal important
+    if "gaming" in c or "game" in c or "metaverse" in c:
+        b.is_user_facing_app = True
+        b.community_signal = True
+
+    # SocialFi → user-facing, community-dependent
+    if "social" in c or "creator" in c or "community" in c:
+        b.is_user_facing_app = True
+        b.community_signal = True
+        b.high_customer_concentration = True  # dependent on creator base
 
 # Patch EvidenceBundle to store additional CMC keyless fields
 # (these are set during collect() but weren't declared as class attributes)
