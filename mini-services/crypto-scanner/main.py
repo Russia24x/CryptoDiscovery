@@ -1007,19 +1007,38 @@ async def market_overview():
     fees_with_data.sort(key=lambda x: x.get("fees_24h") or 0, reverse=True)
     top_fees = fees_with_data[:30]
 
-    # Sector breakdown (aggregate market cap by inferred sector)
+    # Sector breakdown — use CoinGecko's REAL categories endpoint
+    # (was using _guess_category heuristic which returned "other" for
+    # most coins, making the sector chart useless).
     sector_map: dict[str, dict] = {}
-    for m in markets:
-        if not m.get("market_cap"):
-            continue
-        sym = (m.get("symbol") or "").upper()
-        cat = discovery._guess_category(m, sym)  # type: ignore[attr-defined]
-        sector = discovery._sector_for(cat)  # type: ignore[attr-defined]
-        if sector not in sector_map:
-            sector_map[sector] = {"sector": sector, "count": 0, "total_market_cap": 0.0, "total_volume": 0.0}
-        sector_map[sector]["count"] += 1
-        sector_map[sector]["total_market_cap"] += m.get("market_cap") or 0
-        sector_map[sector]["total_volume"] += m.get("total_volume") or 0
+    gecko_cats = await sources.fetch_coingecko_categories()
+    if gecko_cats:
+        # Map CoinGecko categories to our sector taxonomy
+        for cat in gecko_cats[:50]:
+            cat_name = cat.get("name") or ""
+            sector = discovery._sector_for(cat_name)  # type: ignore[attr-defined]
+            mc = cat.get("market_cap") or 0
+            vol = cat.get("volume_24h") or 0
+            if mc <= 0:
+                continue
+            if sector not in sector_map:
+                sector_map[sector] = {"sector": sector, "count": 0, "total_market_cap": 0.0, "total_volume": 0.0}
+            sector_map[sector]["count"] += 1
+            sector_map[sector]["total_market_cap"] += mc
+            sector_map[sector]["total_volume"] += vol
+    else:
+        # Fallback: old heuristic (only if CoinGecko categories endpoint fails)
+        for m in markets:
+            if not m.get("market_cap"):
+                continue
+            sym = (m.get("symbol") or "").upper()
+            cat = discovery._guess_category(m, sym)  # type: ignore[attr-defined]
+            sector = discovery._sector_for(cat)  # type: ignore[attr-defined]
+            if sector not in sector_map:
+                sector_map[sector] = {"sector": sector, "count": 0, "total_market_cap": 0.0, "total_volume": 0.0}
+            sector_map[sector]["count"] += 1
+            sector_map[sector]["total_market_cap"] += m.get("market_cap") or 0
+            sector_map[sector]["total_volume"] += m.get("total_volume") or 0
     sectors = sorted(sector_map.values(), key=lambda x: x["total_market_cap"], reverse=True)
 
     # Aggregate DeFi TVL
