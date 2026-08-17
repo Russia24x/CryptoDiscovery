@@ -1257,7 +1257,7 @@ def _get_user_news_sources() -> list[tuple[str, str]]:
                 if name and url:
                     result.append((name, url))
         return result
-    except Exception:
+    except Exception:  # sync function, no CancelledError needed
         return []
 
 
