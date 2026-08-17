@@ -6393,3 +6393,62 @@ strings (one of the two should be deleted).
 
 No code was modified during this review. All findings are read-only
 observations appended to worklog.md.
+
+---
+Task ID: full-audit-cycle-complete
+Agent: main
+Task: Officially close the full audit cycle (phases 1-4) + update worklog.
+
+## Full Audit Cycle Summary
+
+### Phases completed
+- Phase 1: /analyze endpoint ✅ (commit cbaaf8e)
+- Phase 2: market-intelligence-view.tsx + /market/overview + /cmc/* + /coingecko/* ✅ (commits 28e39ce, b8fb99d, 25a4e9e, af21007, 6ca603a)
+- Phase 3: news-feed-view.tsx + /news + /news/fa + /telegram ✅ (commits fad1837, 63a42ca, 7eecacf, 80fed3c)
+- Phase 4: /search + /dune/insights + report-detail.tsx + scanner-types.ts ✅ (commit 92451eb)
+
+### Total findings across all phases
+- Phase 1: 3 findings (1 CancelledError, 1 gecko_id validation, 1 cache)
+- Phase 2: 32 findings (3 critical, 19 medium, 10 minor)
+- Phase 3: 15 findings (1 critical, 4 medium, 10 minor)
+- Phase 4: 19 findings (1 critical, 2 high, 9 medium, 7 low)
+- TOTAL: 69 findings, ~45 fixed (all critical + high + most medium)
+
+### Key bugs found and fixed
+1. Infinite fetch loop (NF-1, critical) — news feed spammed requests
+2. Phantom revenue_growth_pct field (RD-1, critical) — Growth WoW metric silently broken
+3. XSS via RSS URLs (NF-2) — javascript: scheme in article links
+4. Broken news settings integration (NE-1) — user feeds never actually fetched
+5. Double sort (backend + frontend) — identified as acceptable, not a bug
+6. Weakest-link penalty flat zone — root cause of "why 10-30?" mystery
+7. Three-state scoring for unknown data — None=neutral instead of worst
+8. anonymous_team=True for all projects
+9. CoinGecko categories never used (wiring gap)
+10. Category priority selection (Dogecoin getting "Smart Contract Platform" instead of "Meme")
+
+### Remaining (documented as backlog)
+- 6 minor findings from phase 2 (low-impact polish)
+- 6 minor findings from phase 3 (low-impact polish)
+- ~10 minor findings from phase 4 (type safety, i18n, URL validation)
+All are low-impact: no security risk, no crash, no misleading data.
+
+### Architecture improvements made during audit
+- AbortController + reqIdRef pattern across all fetchers
+- React.memo on ArticleCard (performance)
+- CancelledError guards on ALL except Exception blocks (sweep approach)
+- Priority category selection from CoinGecko
+- Sector propagation in build_report
+- Real CoinGecko categories for sector breakdown chart
+- Expanded sector taxonomy (MEME, AI, GameFi, SocialFi)
+- Settings page integration with /news endpoint
+- Coin Portal with Binance live price
+- Sortable CoinTable + 7 preset filter lists
+- Market-wide search (250 coins, not just top 50)
+
+### Project state
+- Tests: 47/47
+- lint: clean
+- Scanner: healthy
+- Frontend: healthy
+- Analysis pipeline: verified (PQ=40.3 on bitcoin)
+- All commits pushed + verified per RULES.md §4
