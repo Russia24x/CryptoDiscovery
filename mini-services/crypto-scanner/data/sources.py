@@ -1396,10 +1396,12 @@ async def fetch_coingecko_categories() -> list[dict[str, Any]] | None:
             "id": cat.get("id"),
             "name": cat.get("name"),
             "market_cap": cat.get("market_cap"),
-            "market_cap_change_24h": cat.get("market_cap_change_24h_percentage"),
+            "market_cap_change_24h": cat.get("market_cap_change_24h"),
             "volume_24h": cat.get("volume_24h"),
             "content": cat.get("content"),
             "top_3_coins": cat.get("top_3_coins") or [],
+            "top_3_coins_id": cat.get("top_3_coins_id") or [],
+            "updated_at": cat.get("updated_at"),
         })
     cache_set(cache_key, out)
     log.info("CoinGecko: %d categories fetched", len(out))
