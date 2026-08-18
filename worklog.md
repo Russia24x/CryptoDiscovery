@@ -6452,3 +6452,25 @@ All are low-impact: no security risk, no crash, no misleading data.
 - Frontend: healthy
 - Analysis pipeline: verified (PQ=40.3 on bitcoin)
 - All commits pushed + verified per RULES.md §4
+
+---
+Task ID: sector-rotation-complete
+Agent: main
+Task: Implement Sector Rotation feature — backend endpoint + UI + regression test.
+
+Work Log:
+- CoinGecko categories field name fix: `market_cap_change_24h_percentage` → `market_cap_change_24h` (was returning None for all 100 categories)
+- New endpoint /market/sector-rotation: groups 100 CoinGecko categories into 11 sector taxonomy, computes weighted average 24h change per sector
+- Pattern #1 bug (4th occurrence): `ch24 or 0` treated None as 0% in weighted average — fixed with separate weighted_mc denominator
+- Regression test: test_sector_rotation_excludes_none_change_from_weighted_average (47→48 tests)
+- UI: SectorRotationView component — horizontal bar chart (green/red) + detail table with top gainer/loser per sector
+- AbortController + loading skeleton + error state
+- Advisor verified all `?? 0` usages are mathematically correct (bar width = 0 for None, no visual artifact)
+
+Commits: e7691e3 (field fix), f452eba (endpoint), 27ca0e3 (pattern #1 fix), 829b234 (regression test), 96e0e6c (UI)
+
+Stage Summary:
+- Sector Rotation feature complete (backend + test + UI)
+- 48/48 tests, lint clean, page renders 200
+- Uses CoinGecko free API (no key needed — survives .env loss)
+- All 11 sectors (including MEME, AI, GameFi, SocialFi) show real rotation data
