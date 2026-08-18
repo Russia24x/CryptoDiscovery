@@ -1514,7 +1514,7 @@ function SectorRotationView() {
   const { data, isPending, error } = useQuery({
     queryKey: ["market", "sector-rotation"],
     queryFn: async ({ signal }): Promise<{ sectors: SectorRotationEntry[] }> => {
-      const res = await fetch("/api/scanner/market/rotation", {
+      const res = await fetch("/api/scanner/market/sector-rotation", {
         signal,
         cache: "no-store",
       });
