@@ -5,6 +5,7 @@ import { Toaster } from "@/components/ui/toaster";
 import { ThemeProvider } from "@/components/theme-provider";
 import { LanguageProvider } from "@/lib/i18n/LanguageProvider";
 import { ErrorBoundary } from "@/components/error-boundary";
+import { ReactQueryProvider } from "@/components/react-query-provider";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -55,10 +56,12 @@ export default function RootLayout({
           disableTransitionOnChange
         >
           <LanguageProvider>
-          <ErrorBoundary>
-            {children}
-          </ErrorBoundary>
+          <ReactQueryProvider>
+            <ErrorBoundary>
+              {children}
+            </ErrorBoundary>
             <Toaster />
+          </ReactQueryProvider>
         </LanguageProvider>
         </ThemeProvider>
       </body>
