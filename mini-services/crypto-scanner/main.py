@@ -16,9 +16,9 @@ import logging
 import uuid
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
-from typing import Any
+from typing import Annotated, Any
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
@@ -303,18 +303,12 @@ async def get_project(report_id: str):
 
 
 @app.get("/projects")
-async def all_projects(limit: int = 50):
+async def all_projects(limit: Annotated[int, Query(ge=1, le=500)] = 50):
     """List all analyzed projects (summary fields).
 
     Reads from SQLite (persistent) so reports survive restarts. Falls back
     to in-memory REPORTS if DB is empty (e.g. first run).
     """
-    # Validate limit (same pattern as /score-history)
-    if limit < 1:
-        limit = 1
-    elif limit > 500:
-        limit = 500
-
     # Try DB first (persistent across restarts)
     db_rows = db.list_all_reports(limit=limit)
     if db_rows:
@@ -361,7 +355,7 @@ async def list_scans():
 
 
 @app.get("/score-history/{symbol}")
-async def get_score_history(symbol: str, limit: int = 20):
+async def get_score_history(symbol: str, limit: Annotated[int, Query(ge=1, le=500)] = 20):
     """Get historical scores for a symbol — for trend analysis.
 
     Returns a list of {symbol, scan_id, project_quality, token_quality,
@@ -371,12 +365,6 @@ async def get_score_history(symbol: str, limit: int = 20):
     `limit` must be between 1 and 500. Negative limits in SQLite return
     ALL rows (DoS vector); 0 returns empty; clamped here to prevent abuse.
     """
-    # Validate limit — SQLite LIMIT -1 returns ALL rows (DoS), and
-    # Python slicing rows[:0] returns empty (surprising). Clamp to 1-500.
-    if limit < 1:
-        limit = 1
-    elif limit > 500:
-        limit = 500
     history = db.get_score_history(symbol, limit=limit)
     if not history:
         return {"symbol": symbol.upper(), "history": [], "count": 0}
@@ -509,7 +497,7 @@ async def search_coins(q: str = ""):
 
 
 @app.get("/alerts")
-async def get_alerts(threshold: float = 10.0):
+async def get_alerts(threshold: Annotated[float, Query(gt=0, le=1000)] = 10.0):
     """Check for significant score changes in score_history.
 
     Returns alerts for symbols whose project_quality changed by `threshold`
@@ -521,12 +509,6 @@ async def get_alerts(threshold: float = 10.0):
     with 422 because `abs(delta) >= negative` is always True, which would
     spam false alerts for every symbol with >=2 history entries.
     """
-    if threshold <= 0:
-        from fastapi import HTTPException
-        raise HTTPException(
-            status_code=422,
-            detail=f"threshold must be positive (got {threshold})",
-        )
     conn = db._get_conn()
     # Find symbols with multiple score entries
     rows = conn.execute("""
@@ -1082,7 +1064,7 @@ async def market_overview():
 @app.get("/market/top-coins")
 async def market_top_coins(
     sort_by: str = "market_cap",
-    limit: int = 50,
+    limit: Annotated[int, Query(ge=1, le=250)] = 50,
 ):
     """Fetch top coins sorted by a specific metric — searches the FULL market,
     not just the top 50 by market cap.
@@ -1097,11 +1079,6 @@ async def market_top_coins(
                 circulating_supply, fdv
       limit   — max coins to return (1-250, default 50)
     """
-    if limit < 1:
-        limit = 1
-    elif limit > 250:
-        limit = 250
-
     # Fetch the full 250-coin snapshot (cached 90s)
     markets = await sources.fetch_top_markets_extended(per_page=250)
     if not markets:
@@ -1146,7 +1123,7 @@ async def market_top_coins(
 @app.get("/market/top-defi")
 async def market_top_defi(
     sort_by: str = "tvl",
-    limit: int = 50,
+    limit: Annotated[int, Query(ge=1, le=250)] = 50,
 ):
     """Fetch top DeFi protocols sorted by a specific metric from DeFiLlama.
 
@@ -1158,11 +1135,6 @@ async def market_top_defi(
       sort_by — one of: tvl, fees_24h, fees_7d, fees_30d
       limit   — max protocols to return (1-250, default 50)
     """
-    if limit < 1:
-        limit = 1
-    elif limit > 250:
-        limit = 250
-
     # Fetch DeFiLlama protocols + fees in parallel (both cached 90s)
     import asyncio as _aio
     results = await _aio.gather(
@@ -1262,7 +1234,7 @@ def _get_user_news_sources() -> list[tuple[str, str]]:
 
 
 @app.get("/news")
-async def get_news(limit: int = 40, source: str = ""):
+async def get_news(limit: Annotated[int, Query(ge=1, le=200)] = 40, source: str = ""):
     """Aggregate crypto news from multiple RSS feeds + optional API-key sources.
 
     Reads user-configured RSS feeds from settings.json (Settings page) and
@@ -1273,11 +1245,6 @@ async def get_news(limit: int = 40, source: str = ""):
       source — filter by source name (case-insensitive, e.g. "CoinDesk")
     """
     # Validate limit
-    if limit < 1:
-        limit = 1
-    elif limit > 200:
-        limit = 200
-
     # Merge user-configured RSS feeds with defaults
     user_feeds = _get_user_news_sources()
 
@@ -1305,18 +1272,13 @@ async def get_news(limit: int = 40, source: str = ""):
 
 
 @app.get("/news/fa")
-async def get_news_fa(limit: int = 40, category: str = ""):
+async def get_news_fa(limit: Annotated[int, Query(ge=1, le=200)] = 40, category: str = ""):
     """Aggregate Persian (Farsi) crypto news from ArzDigital + MihanBlockchain.
 
     Query params:
       limit    — max articles (default 40)
       category — "breaking", "blog", "news", "analysis" (empty = all)
     """
-    # Validate limit
-    if limit < 1:
-        limit = 1
-    elif limit > 200:
-        limit = 200
     # FE-1 fix: validate category against allowed set
     allowed_categories = {"", "breaking", "blog", "news", "analysis"}
     if category not in allowed_categories:
@@ -1343,7 +1305,7 @@ async def get_news_fa(limit: int = 40, category: str = ""):
 #  Telegram Channel Feed — public web preview (no bot token needed)
 # --------------------------------------------------------------------------- #
 @app.get("/telegram")
-async def get_telegram(channel: str = "Mastersharkcrypto", limit: int = 20):
+async def get_telegram(channel: str = "Mastersharkcrypto", limit: Annotated[int, Query(ge=1, le=100)] = 20):
     """Fetch recent messages from a public Telegram channel via t.me/s/.
 
     Default channel: Mastersharkcrypto (the user's requested channel).
@@ -1362,11 +1324,6 @@ async def get_telegram(channel: str = "Mastersharkcrypto", limit: int = 20):
             detail=f"Invalid channel format: {channel!r}. Must be 5-32 chars, "
                    f"start with a letter, alphanumeric + underscore only.",
         )
-    # TE-2 fix: validate limit — negative causes Python slice footgun
-    if limit < 1:
-        limit = 1
-    elif limit > 100:
-        limit = 100
     data = await sources.fetch_telegram_channel(ch, limit=limit)
     return data
 
@@ -1379,7 +1336,7 @@ async def get_telegram(channel: str = "Mastersharkcrypto", limit: int = 20):
 # frontend can show an upgrade prompt instead of empty data.
 
 @app.get("/cmc/airdrops")
-async def get_cmc_airdrops(limit: int = 50, status: str = "ONGOING"):
+async def get_cmc_airdrops(limit: Annotated[int, Query(ge=1, le=100)] = 50, status: str = "ONGOING"):
     """Fetch cryptocurrency airdrops (CMC Pro exclusive).
 
     Status: ONGOING | UPCOMING | ENDED
@@ -1418,7 +1375,7 @@ async def get_cmc_categories():
 
 
 @app.get("/cmc/exchanges")
-async def get_cmc_exchanges(limit: int = 50):
+async def get_cmc_exchanges(limit: Annotated[int, Query(ge=1, le=100)] = 50):
     """Fetch top exchanges ranked by volume (CMC Pro exclusive).
 
     Returns cmc_pro_required=True when no API key is set.
@@ -1463,7 +1420,7 @@ async def get_cmc_global_metrics():
 # source in the pipeline. Requires DUNE_API_KEY (free at dune.com/api-keys).
 
 @app.get("/dune/query/{query_id}")
-async def get_dune_query(query_id: str, limit: int = 100):
+async def get_dune_query(query_id: str, limit: Annotated[int, Query(ge=1, le=1000)] = 100):
     """Fetch cached results from any Dune query by ID.
 
     Browse https://dune.com/browse to find query IDs.
@@ -1476,11 +1433,6 @@ async def get_dune_query(query_id: str, limit: int = 100):
     if not sources.is_dune_available():
         return {"dune_pro_required": True, "rows": [], "row_count": 0,
                 "message": "Set DUNE_API_KEY env var (free at dune.com/api-keys) to unlock on-chain data"}
-    # Validate limit — rows[:limit] with negative limit returns unexpected slices
-    if limit < 1:
-        limit = 1
-    elif limit > 1000:
-        limit = 1000
     data = await sources.fetch_dune_query_results(query_id, limit=limit)
     if data is None:
         return {"rows": [], "row_count": 0, "message": "Query returned no data or failed"}
@@ -1551,7 +1503,7 @@ def _validate_gecko_id(gecko_id: str) -> str:
 
 
 @app.get("/coingecko/chart/{gecko_id}")
-async def get_price_chart(gecko_id: str, days: int = 7):
+async def get_price_chart(gecko_id: str, days: Annotated[int, Query(ge=1, le=365)] = 7):
     """Fetch historical price chart (sparkline) for a coin.
 
     `days` must be 1-365. CoinGecko accepts max=365 for free tier.
@@ -1581,7 +1533,7 @@ async def get_price_chart(gecko_id: str, days: int = 7):
 
 
 @app.get("/coingecko/ohlc/{gecko_id}")
-async def get_ohlc(gecko_id: str, days: int = 7):
+async def get_ohlc(gecko_id: str, days: Annotated[int, Query(ge=1, le=365)] = 7):
     """Fetch OHLC candlestick data for a coin.
 
     CoinGecko OHLC endpoint accepts ONLY these values for `days`:
