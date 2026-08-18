@@ -28,6 +28,7 @@
  * ------------------------------------------------------------------------- */
 
 import * as React from "react";
+import { useQuery } from "@tanstack/react-query";
 import {
   Activity,
   AlertCircle,
@@ -1506,41 +1507,25 @@ interface SectorRotationEntry {
 
 function SectorRotationView() {
   const tt = useTt();
-  const [data, setData] = React.useState<{ sectors: SectorRotationEntry[] } | null>(null);
-  const [loading, setLoading] = React.useState(true);
-  const [error, setError] = React.useState<string | null>(null);
-  const abortRef = React.useRef<AbortController | null>(null);
 
-  React.useEffect(() => {
-    abortRef.current?.abort();
-    const ctrl = new AbortController();
-    abortRef.current = ctrl;
-    setLoading(true);
-    setError(null);
+  // React Query pilot: replaces manual useState + useEffect + AbortController.
+  // React Query manages: loading (isPending), error, AbortSignal, caching,
+  // dedup, and stale/refetch — all for free.
+  const { data, isPending, error } = useQuery({
+    queryKey: ["market", "sector-rotation"],
+    queryFn: async ({ signal }): Promise<{ sectors: SectorRotationEntry[] }> => {
+      const res = await fetch("/api/scanner/market/rotation", {
+        signal,
+        cache: "no-store",
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const json = await res.json();
+      if (!Array.isArray(json.sectors)) throw new Error("Invalid response");
+      return { sectors: json.sectors };
+    },
+  });
 
-    (async () => {
-      try {
-        const res = await fetch("/api/scanner/market/sector-rotation", {
-          signal: ctrl.signal,
-          cache: "no-store",
-        });
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const json = await res.json();
-        if (!ctrl.signal.aborted && Array.isArray(json.sectors)) {
-          setData({ sectors: json.sectors });
-        }
-      } catch (e) {
-        if (e instanceof DOMException && e.name === "AbortError") return;
-        setError(e instanceof Error ? e.message : "Failed to load");
-      } finally {
-        if (!ctrl.signal.aborted) setLoading(false);
-      }
-    })();
-
-    return () => abortRef.current?.abort();
-  }, []);
-
-  if (loading) {
+  if (isPending) {
     return (
       <div className="space-y-2">
         {Array.from({ length: 6 }).map((_, i) => (
@@ -1553,7 +1538,7 @@ function SectorRotationView() {
   if (error) {
     return (
       <div className="flex h-32 items-center justify-center text-sm text-muted-foreground">
-        {error}
+        {error instanceof Error ? error.message : "Failed to load"}
       </div>
     );
   }
