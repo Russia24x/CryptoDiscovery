@@ -72,3 +72,7 @@ db/*.sqlite3
 .zscripts/dev.pid
 .zscripts/dev.log
 /upload/
+
+# Prisma (sandbox infrastructure, not CryptoSieve project code)
+prisma/schema.prisma
+src/lib/db.ts
