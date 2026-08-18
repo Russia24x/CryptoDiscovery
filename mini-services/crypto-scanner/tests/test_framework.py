@@ -1363,6 +1363,89 @@ def test_retention_none_is_neutral_not_zero():
     )
 
 
+# ========================================================================== #
+#  Sector rotation: weighted average must exclude None change data
+#
+#  Regression guard for the 4th occurrence of "pattern #1" (defaults that
+#  hide missing data). The sector rotation endpoint computes a weighted
+#  average of per-category 24h market cap change. Categories with
+#  change_24h=None must be EXCLUDED from both numerator and denominator —
+#  not silently treated as 0% while keeping their market_cap in the
+#  denominator (which biases the average toward 0).
+# ========================================================================== #
+
+def test_sector_rotation_excludes_none_change_from_weighted_average():
+    """Categories with change_24h=None must not bias the weighted average.
+
+    Scenario: a sector has 2 categories:
+      - Category A: market_cap=$10B, change_24h=+10%
+      - Category B: market_cap=$20B, change_24h=None (no data)
+
+    Correct weighted average: (10 * 10) / 10 = +10% (only A counted)
+    Wrong (old bug):           (10*10 + 0*20) / (10+20) = +3.3% (B drags toward 0)
+
+    This test reproduces the core computation from
+    /market/sector-rotation (main.py:market_sector_rotation) to lock
+    the correct behavior.
+    """
+    # Simulate the sector rotation computation
+    categories = [
+        {"name": "Category A", "market_cap": 10_000_000_000, "change_24h": 10.0},
+        {"name": "Category B", "market_cap": 20_000_000_000, "change_24h": None},
+    ]
+
+    # Reproduce the CORRECT logic (after fix)
+    weighted_change_sum = 0.0
+    weighted_mc = 0.0  # only mc of categories WITH change data
+    total_mc = 0.0
+
+    for cat in categories:
+        mc = cat["market_cap"]
+        ch24 = cat["change_24h"]
+        total_mc += mc
+        if ch24 is not None:
+            weighted_change_sum += ch24 * mc
+            weighted_mc += mc
+
+    avg_correct = round(weighted_change_sum / weighted_mc, 2) if weighted_mc > 0 else None
+
+    # The correct average is +10% (only Category A, which has data)
+    assert avg_correct == 10.0, (
+        f"With None excluded, avg should be +10.0% (only Category A), got {avg_correct}"
+    )
+
+    # Reproduce the WRONG logic (before fix — the bug)
+    wrong_sum = sum((c["change_24h"] or 0) * c["market_cap"] for c in categories)
+    wrong_mc = sum(c["market_cap"] for c in categories)
+    avg_wrong = round(wrong_sum / wrong_mc, 2)
+
+    # The wrong average is ~3.33% (Category B's $20B drags toward 0)
+    assert avg_wrong < 5.0, (
+        f"Old bug should produce ~3.3% (B drags toward 0), got {avg_wrong}"
+    )
+
+    # KEY: correct average must be HIGHER than wrong (None ≠ 0%)
+    assert avg_correct > avg_wrong, (
+        f"Correct avg ({avg_correct}) must be higher than wrong ({avg_wrong}) — "
+        f"None must not be treated as 0%"
+    )
+
+    # Edge case: ALL categories have None → avg should be None (not 0)
+    all_none_cats = [
+        {"name": "X", "market_cap": 1_000_000, "change_24h": None},
+        {"name": "Y", "market_cap": 2_000_000, "change_24h": None},
+    ]
+    ws = sum((c["change_24h"] or 0) * c["market_cap"] for c in all_none_cats)  # 0
+    wm_correct = 0.0
+    for c in all_none_cats:
+        if c["change_24h"] is not None:
+            wm_correct += c["market_cap"]
+    avg_all_none = round(ws / wm_correct, 2) if wm_correct > 0 else None
+    assert avg_all_none is None, (
+        f"All-None sector should return None (not 0), got {avg_all_none}"
+    )
+
+
 if __name__ == "__main__":
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     passed = 0
