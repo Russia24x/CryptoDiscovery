@@ -1490,6 +1490,170 @@ function CategoriesTable({ categories }: { categories: CmcCategory[] }) {
 }
 
 /* -------------------------------------------------------------------------- */
+/*  Sub-component — Sector Rotation                                           */
+/* -------------------------------------------------------------------------- */
+
+interface SectorRotationEntry {
+  sector: string;
+  total_market_cap: number;
+  total_volume_24h: number;
+  avg_change_24h: number | null;
+  category_count: number;
+  top_categories: string[];
+  top_gainer: { name: string; change_24h: number | null } | null;
+  top_loser: { name: string; change_24h: number | null } | null;
+}
+
+function SectorRotationView() {
+  const tt = useTt();
+  const [data, setData] = React.useState<{ sectors: SectorRotationEntry[] } | null>(null);
+  const [loading, setLoading] = React.useState(true);
+  const [error, setError] = React.useState<string | null>(null);
+  const abortRef = React.useRef<AbortController | null>(null);
+
+  React.useEffect(() => {
+    abortRef.current?.abort();
+    const ctrl = new AbortController();
+    abortRef.current = ctrl;
+    setLoading(true);
+    setError(null);
+
+    (async () => {
+      try {
+        const res = await fetch("/api/scanner/market/sector-rotation", {
+          signal: ctrl.signal,
+          cache: "no-store",
+        });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const json = await res.json();
+        if (!ctrl.signal.aborted && Array.isArray(json.sectors)) {
+          setData({ sectors: json.sectors });
+        }
+      } catch (e) {
+        if (e instanceof DOMException && e.name === "AbortError") return;
+        setError(e instanceof Error ? e.message : "Failed to load");
+      } finally {
+        if (!ctrl.signal.aborted) setLoading(false);
+      }
+    })();
+
+    return () => abortRef.current?.abort();
+  }, []);
+
+  if (loading) {
+    return (
+      <div className="space-y-2">
+        {Array.from({ length: 6 }).map((_, i) => (
+          <Skeleton key={i} className="h-8 w-full" />
+        ))}
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="flex h-32 items-center justify-center text-sm text-muted-foreground">
+        {error}
+      </div>
+    );
+  }
+
+  if (!data || data.sectors.length === 0) {
+    return (
+      <div className="flex h-32 items-center justify-center text-sm text-muted-foreground">
+        {tt("market.noRotationData", "No rotation data available")}
+      </div>
+    );
+  }
+
+  // Sort by avg_change_24h descending (best performers first)
+  const sorted = [...data.sectors].sort(
+    (a, b) => (b.avg_change_24h ?? -999) - (a.avg_change_24h ?? -999),
+  );
+
+  const maxAbs = Math.max(
+    ...sorted.map((s) => Math.abs(s.avg_change_24h ?? 0)),
+    1,
+  );
+
+  return (
+    <div className="space-y-3">
+      {/* Bar chart — horizontal bars showing 24h change per sector */}
+      <div className="space-y-1.5">
+        {sorted.map((s) => {
+          const ch = s.avg_change_24h;
+          const isPositive = (ch ?? 0) >= 0;
+          const barWidth = Math.abs(ch ?? 0) / maxAbs * 50; // max 50% width
+          return (
+            <div key={s.sector} className="flex items-center gap-2 text-xs">
+              <span className="w-28 shrink-0 truncate font-medium" dir="auto">
+                {s.sector}
+              </span>
+              <div className="relative flex h-6 flex-1 items-center">
+                {/* Center line */}
+                <div className="absolute left-1/2 h-full w-px bg-border/50" />
+                {/* Bar */}
+                <div
+                  className={`absolute h-4 rounded-sm transition-all ${
+                    isPositive
+                      ? "left-1/2 bg-emerald-500/60"
+                      : "right-1/2 bg-rose-500/60"
+                  }`}
+                  style={{ width: `${barWidth}%` }}
+                />
+              </div>
+              <span
+                className={`w-16 shrink-0 text-right tabular-nums font-mono font-medium ${
+                  isPositive ? "text-emerald-500" : "text-rose-500"
+                }`}
+              >
+                {ch != null ? `${ch > 0 ? "+" : ""}${ch.toFixed(2)}%` : "—"}
+              </span>
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Detail table */}
+      <div className="mt-4 max-h-[400px] overflow-auto rounded-md border border-border/40">
+        <Table>
+          <TableHeader className="sticky top-0 z-10 bg-muted/90 backdrop-blur-sm">
+            <TableRow className="border-border/40 hover:bg-transparent">
+              <TableHead className="text-[11px] uppercase tracking-wider text-muted-foreground" dir="auto">{tt("market.sector", "Sector")}</TableHead>
+              <TableHead className="text-right text-[11px] uppercase tracking-wider text-muted-foreground" dir="auto">{tt("market.mktCap", "Mkt Cap")}</TableHead>
+              <TableHead className="text-right text-[11px] uppercase tracking-wider text-muted-foreground" dir="auto">{tt("market.col24h", "24h")}</TableHead>
+              <TableHead className="text-right text-[11px] uppercase tracking-wider text-muted-foreground" dir="auto">{tt("market.cats", "Cats")}</TableHead>
+              <TableHead className="text-[11px] uppercase tracking-wider text-muted-foreground" dir="auto">{tt("market.topGainer", "Top Gainer")}</TableHead>
+              <TableHead className="text-[11px] uppercase tracking-wider text-muted-foreground" dir="auto">{tt("market.topLoser", "Top Loser")}</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {sorted.map((s) => (
+              <TableRow key={s.sector} className="text-xs">
+                <TableCell className="font-medium" dir="auto">{s.sector}</TableCell>
+                <TableCell className="text-right tabular-nums">{fmtUsd(s.total_market_cap)}</TableCell>
+                <TableCell className={`text-right tabular-nums font-medium ${
+                  (s.avg_change_24h ?? 0) >= 0 ? "text-emerald-500" : "text-rose-500"
+                }`}>
+                  {s.avg_change_24h != null ? `${s.avg_change_24h > 0 ? "+" : ""}${s.avg_change_24h.toFixed(2)}%` : "—"}
+                </TableCell>
+                <TableCell className="text-right tabular-nums text-muted-foreground">{s.category_count}</TableCell>
+                <TableCell className="text-[10px] text-muted-foreground" dir="auto">
+                  {s.top_gainer ? `${s.top_gainer.name} (${s.top_gainer.change_24h != null ? `${s.top_gainer.change_24h > 0 ? "+" : ""}${s.top_gainer.change_24h.toFixed(1)}%` : "—"})` : "—"}
+                </TableCell>
+                <TableCell className="text-[10px] text-muted-foreground" dir="auto">
+                  {s.top_loser ? `${s.top_loser.name} (${s.top_loser.change_24h != null ? `${s.top_loser.change_24h > 0 ? "+" : ""}${s.top_loser.change_24h.toFixed(1)}%` : "—"})` : "—"}
+                </TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      </div>
+    </div>
+  );
+}
+
+/* -------------------------------------------------------------------------- */
 /*  Top Coins preset filters                                                  */
 /* ------------------------------------------------------------------------- *
  *  A fixed catalog of preset views for the Top Coins table. Each preset
@@ -1959,6 +2123,10 @@ export function MarketIntelligenceView({ onAnalyzeCoin }: MarketIntelligenceView
                   <span dir="auto">{tt("market.sectors", "Sectors")}</span>
                   <Badge variant="secondary" className="ml-1 h-4 px-1 text-[10px]">{counts.sectors}</Badge>
                 </TabsTrigger>
+                <TabsTrigger value="rotation" className="gap-1.5 text-xs">
+                  <TrendingUp className="size-3.5 text-teal-500" />
+                  <span dir="auto">{tt("market.rotation", "Rotation")}</span>
+                </TabsTrigger>
                 {/* CMC Pro exclusive tabs — marked with key icon */}
                 <TabsTrigger value="airdrops" className="gap-1.5 text-xs">
                   <Gift className="size-3.5 text-amber-500" />
@@ -2143,6 +2311,24 @@ export function MarketIntelligenceView({ onAnalyzeCoin }: MarketIntelligenceView
                   </CardHeader>
                   <CardContent className="px-4 pb-4">
                     <SectorsChart sectors={data.sectors} />
+                  </CardContent>
+                </Card>
+              </TabsContent>
+
+              {/* Sector Rotation — which sectors are gaining/losing */}
+              <TabsContent value="rotation">
+                <Card className="border-border/60 bg-card/40 backdrop-blur-sm p-0">
+                  <CardHeader className="px-4 py-3">
+                    <CardTitle className="text-sm flex items-center gap-2">
+                      <TrendingUp className="size-4 text-teal-500" />
+                      <span dir="auto">{tt("market.rotationTitle", "Sector Rotation (24h)")}</span>
+                    </CardTitle>
+                    <CardDescription className="text-xs" dir="auto">
+                      {tt("market.rotationDesc", "Which sectors are gaining/losing market cap — powered by CoinGecko (free).")}
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent className="px-4 pb-4">
+                    <SectorRotationView />
                   </CardContent>
                 </Card>
               </TabsContent>
