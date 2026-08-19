@@ -35,6 +35,7 @@
  * ------------------------------------------------------------------------- */
 
 import * as React from "react";
+import { useQuery } from "@tanstack/react-query";
 import {
   AlertCircle,
   BookOpen,
@@ -1113,14 +1114,24 @@ export function NewsFeedView({ initialTab = "news" }: NewsFeedViewProps) {
   const [tgError, setTgError] = React.useState<string | null>(null);
   const [autoRefresh, setAutoRefresh] = React.useState(false);
 
-  // ----- Sources state -----
-  const [sources, setSources] = React.useState<DataSourceInfo[]>([]);
+  // ----- Sources state (migrated to React Query) -----
+  // fetchSources + sourcesAbortRef + useState replaced with useQuery.
+  // React Query manages: fetch, abort, caching (90s staleTime), dedup.
+  const { data: sourcesData } = useQuery({
+    queryKey: ["scanner", "sources"],
+    queryFn: async ({ signal }): Promise<DataSourceInfo[]> => {
+      const res = await fetch("/api/scanner/sources", { signal, cache: "no-store" });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = (await res.json()) as SourcesStatus;
+      return data?.sources ?? [];
+    },
+  });
+  const sources = sourcesData ?? [];
 
   // ----- AbortController refs (NF-4 fix: prevent stale-response races) -----
   const newsAbortRef = React.useRef<AbortController | null>(null);
   const newsFaAbortRef = React.useRef<AbortController | null>(null);
   const tgAbortRef = React.useRef<AbortController | null>(null);
-  const sourcesAbortRef = React.useRef<AbortController | null>(null);
 
   // ----- Cache age display tick (re-render every 1s for smooth "Xs ago") -----
   // NF-5 fix: expose tick value (not just discard) so a small TimeAgo
@@ -1214,30 +1225,7 @@ export function NewsFeedView({ initialTab = "news" }: NewsFeedViewProps) {
     }
   }, []);
 
-  // NF-3 fix: was empty catch {} — now logs errors (non-critical, doesn't crash)
-  const fetchSources = React.useCallback(async () => {
-    sourcesAbortRef.current?.abort();
-    const ctrl = new AbortController();
-    sourcesAbortRef.current = ctrl;
-    try {
-      const res = await fetch("/api/scanner/sources", { signal: ctrl.signal });
-      if (!res.ok) {
-        console.warn("[NewsFeed] sources HTTP", res.status);
-        return;
-      }
-      const data = (await res.json()) as SourcesStatus;
-      if (data?.sources) setSources(data.sources);
-    } catch (e) {
-      if (e instanceof DOMException && e.name === "AbortError") return;
-      console.warn("[NewsFeed] sources fetch failed:", e);
-    }
-  }, []);
-
-  // ----- Initial load (sources + active tab) -----
-  React.useEffect(() => {
-    fetchSources();
-  }, [fetchSources]);
-
+  // ----- Initial load (active tab only — sources now via React Query) -----
   // Track which tabs have been fetched to prevent infinite re-fetch loops.
   // The old code used `!news && !newsLoading` as the fetch condition, but
   // newsLoading flips false in the finally block — which is a dep of this
