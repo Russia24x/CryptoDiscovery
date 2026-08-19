@@ -1767,15 +1767,10 @@ export function MarketIntelligenceView({ onAnalyzeCoin }: MarketIntelligenceView
     setPortalCoin(null);
   }, []);
 
-  /* ----- CMC Pro exclusive data (airdrops + categories) — lazy-loaded on tab click ----- */
-  const [airdropsData, setAirdropsData] = React.useState<CmcAirdropsResponse | null>(null);
-  const [airdropsLoading, setAirdropsLoading] = React.useState(false);
-  const [airdropsFetched, setAirdropsFetched] = React.useState(false);
-  const [airdropsError, setAirdropsError] = React.useState<string | null>(null);
-  const [categoriesData, setCategoriesData] = React.useState<CmcCategoriesResponse | null>(null);
-  const [categoriesLoading, setCategoriesLoading] = React.useState(false);
-  const [categoriesFetched, setCategoriesFetched] = React.useState(false);
-  const [categoriesError, setCategoriesError] = React.useState<string | null>(null);
+  /* ----- CMC Pro exclusive data (airdrops + categories) — now via React Query -----
+   * Lazy-loaded: only fetches when the user clicks the Airdrops or Categories tab.
+   * React Query manages: AbortSignal, caching, dedup, stale/refetch.
+   * The `enabled` flag makes these lazy — they don't fire until the tab is active. */
   const [activeTab, setActiveTab] = React.useState("top");
 
   // Active preset for the Top Coins tab. Drives the `defaultSort` prop
@@ -1783,76 +1778,29 @@ export function MarketIntelligenceView({ onAnalyzeCoin }: MarketIntelligenceView
   // pass a fixed defaultSort matching their API ordering.
   const [coinPreset, setCoinPreset] = React.useState<string>(DEFAULT_COIN_PRESET_ID);
 
-  // AbortController refs for lazy fetches (MI-FE-4 fix: abort on rapid tab switch)
-  const airdropsAbortRef = React.useRef<AbortController | null>(null);
-  const categoriesAbortRef = React.useRef<AbortController | null>(null);
-
-  const fetchAirdrops = React.useCallback(async () => {
-    // Abort any in-flight airdrops fetch (rapid tab switch — MI-FE-4 fix)
-    airdropsAbortRef.current?.abort();
-    const ctrl = new AbortController();
-    airdropsAbortRef.current = ctrl;
-    setAirdropsLoading(true);
-    setAirdropsError(null);
-    try {
+  const { data: airdropsData, isPending: airdropsLoading, error: airdropsErr } = useQuery({
+    queryKey: ["cmc", "airdrops"],
+    queryFn: async ({ signal }): Promise<CmcAirdropsResponse> => {
       const res = await fetch("/api/scanner/cmc/airdrops?limit=50&status=ONGOING", {
-        signal: ctrl.signal,
+        signal,
       });
-      if (!res.ok) {
-        // MI-FE-5 fix: surface non-OK HTTP responses as error state
-        setAirdropsError(`HTTP ${res.status}`);
-      } else {
-        setAirdropsData(await res.json());
-      }
-    } catch (err) {
-      // MI-FE-3 fix: was empty catch {} — now sets error state
-      if (err instanceof DOMException && err.name === "AbortError") {
-        // Aborted by a newer request — don't set error, don't mark as fetched
-        return;
-      }
-      setAirdropsError(err instanceof Error ? err.message : String(err));
-    } finally {
-      if (!ctrl.signal.aborted) {
-        setAirdropsLoading(false);
-        setAirdropsFetched(true);
-      }
-    }
-  }, []);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      return await res.json();
+    },
+    enabled: activeTab === "airdrops",
+  });
+  const airdropsError = airdropsErr instanceof Error ? airdropsErr.message : airdropsErr ? String(airdropsErr) : null;
 
-  const fetchCategories = React.useCallback(async () => {
-    // Abort any in-flight categories fetch (rapid tab switch — MI-FE-4 fix)
-    categoriesAbortRef.current?.abort();
-    const ctrl = new AbortController();
-    categoriesAbortRef.current = ctrl;
-    setCategoriesLoading(true);
-    setCategoriesError(null);
-    try {
-      const res = await fetch("/api/scanner/cmc/categories", {
-        signal: ctrl.signal,
-      });
-      if (!res.ok) {
-        setCategoriesError(`HTTP ${res.status}`);
-      } else {
-        setCategoriesData(await res.json());
-      }
-    } catch (err) {
-      if (err instanceof DOMException && err.name === "AbortError") {
-        return;
-      }
-      setCategoriesError(err instanceof Error ? err.message : String(err));
-    } finally {
-      if (!ctrl.signal.aborted) {
-        setCategoriesLoading(false);
-        setCategoriesFetched(true);
-      }
-    }
-  }, []);
-
-  // Lazy-load CMC Pro data when the user first clicks the Airdrops or Categories tab
-  React.useEffect(() => {
-    if (activeTab === "airdrops" && !airdropsFetched) fetchAirdrops();
-    if (activeTab === "categories" && !categoriesFetched) fetchCategories();
-  }, [activeTab, airdropsFetched, categoriesFetched, fetchAirdrops, fetchCategories]);
+  const { data: categoriesData, isPending: categoriesLoading, error: categoriesErr } = useQuery({
+    queryKey: ["cmc", "categories"],
+    queryFn: async ({ signal }): Promise<CmcCategoriesResponse> => {
+      const res = await fetch("/api/scanner/cmc/categories", { signal });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      return await res.json();
+    },
+    enabled: activeTab === "categories",
+  });
+  const categoriesError = categoriesErr instanceof Error ? categoriesErr.message : categoriesErr ? String(categoriesErr) : null;
 
   /* Translation helper with English fallback — `t()` returns the key itself
      when the translation is missing, so we fall back to the provided English
